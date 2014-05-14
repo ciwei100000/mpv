@@ -1,8 +1,15 @@
-mpv (0.4.0~git20140514-1) UNRELEASED; urgency=medium
+mpv (0.4.0~git20140514-1) experimental; urgency=medium
 
   * New upstream git snapshot
+  * Refresh 01_desktop-path.patch
+  * Refresh 02_fix-config-path.patch
+  * Enable shared libmpv client library
+    - Add libmpv0, libmpv-dev and libmpv-dbg packages
+  * Make mpv Multi-Arch: foreign
+  * Add mpv-dbg package as well
+  * Disable libpostproc support (ffmpeg's libpostproc is needed)
 
- -- Alessandro Ghedini <ghedo@debian.org>  Wed, 14 May 2014 20:24:28 +0200
+ -- Alessandro Ghedini <ghedo@debian.org>  Wed, 14 May 2014 20:55:48 +0200
 
 mpv (0.3.9-2) unstable; urgency=low
 
