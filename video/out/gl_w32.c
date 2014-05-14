@@ -168,10 +168,9 @@ out:
     return false;
 }
 
-static bool config_window_w32(struct MPGLContext *ctx, uint32_t d_width,
-                              uint32_t d_height, uint32_t flags)
+static bool config_window_w32(struct MPGLContext *ctx, int flags)
 {
-    if (!vo_w32_config(ctx->vo, d_width, d_height, flags))
+    if (!vo_w32_config(ctx->vo, flags))
         return false;
 
     bool success = false;

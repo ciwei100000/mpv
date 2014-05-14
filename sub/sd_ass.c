@@ -68,13 +68,9 @@ static int init(struct sd *sd)
 
     ctx->is_converted = sd->converted_from != NULL;
 
-    if (sd->ass_track) {
-        ctx->ass_track = sd->ass_track;
-    } else {
-        ctx->ass_track = ass_new_track(sd->ass_library);
-        if (!ctx->is_converted)
-            ctx->ass_track->track_type = TRACK_TYPE_ASS;
-    }
+    ctx->ass_track = ass_new_track(sd->ass_library);
+    if (!ctx->is_converted)
+        ctx->ass_track->track_type = TRACK_TYPE_ASS;
 
     if (sd->extradata) {
         ass_process_codec_private(ctx->ass_track, sd->extradata,
@@ -128,6 +124,16 @@ static void decode(struct sd *sd, struct demux_packet *packet)
     event->Text = strdup(text);
 }
 
+static ASS_Style *find_style(ASS_Track *track, const char *name)
+{
+    for (int n = track->n_styles - 1; n >= 0; n--) {
+        const char *style_name = track->styles[n].Name;
+        if (style_name && strcasecmp(style_name, name) == 0)
+            return &track->styles[n];
+    }
+    return NULL;
+}
+
 static void get_bitmaps(struct sd *sd, struct mp_osd_res dim, double pts,
                         struct sub_bitmaps *res)
 {
@@ -136,6 +142,18 @@ static void get_bitmaps(struct sd *sd, struct mp_osd_res dim, double pts,
 
     if (pts == MP_NOPTS_VALUE || !sd->ass_renderer)
         return;
+
+    ASS_Style prev_default_style;
+    ASS_Style *default_style = NULL;
+    if (opts->ass_style_override == 2) {
+        default_style = find_style(ctx->ass_track, "Default");
+        if (default_style) {
+            prev_default_style = *default_style;
+            default_style->FontName = NULL; // don't free this
+            mp_ass_set_style(default_style, ctx->ass_track->PlayResY,
+                             opts->sub_text_style);
+        }
+    }
 
     ASS_Renderer *renderer = sd->ass_renderer;
     double scale = dim.display_par;
@@ -166,6 +184,11 @@ static void get_bitmaps(struct sd *sd, struct mp_osd_res dim, double pts,
 
     if (!ctx->is_converted)
         mangle_colors(sd, res);
+
+    if (default_style) {
+        free(default_style->FontName);
+        *default_style = prev_default_style;
+    }
 }
 
 struct buf {
@@ -283,8 +306,7 @@ static void uninit(struct sd *sd)
 {
     struct sd_ass_priv *ctx = sd->priv;
 
-    if (sd->ass_track != ctx->ass_track)
-        ass_free_track(ctx->ass_track);
+    ass_free_track(ctx->ass_track);
     talloc_free(ctx);
 }
 
@@ -424,10 +446,10 @@ static void mangle_colors(struct sd *sd, struct sub_bitmaps *parts)
         int r = (color >> 24u) & 0xff;
         int g = (color >> 16u) & 0xff;
         int b = (color >>  8u) & 0xff;
-        int a = color & 0xff;
+        int a = 0xff - (color & 0xff);
         int c[3] = {r, g, b};
         mp_map_int_color(vs_rgb2yuv, 8, c);
         mp_map_int_color(vs2rgb, 8, c);
-        sb->libass.color = (c[0] << 24u) | (c[1] << 16) | (c[2] << 8) | a;
+        sb->libass.color = MP_ASS_RGBA(c[0], c[1], c[2], a);
     }
 }

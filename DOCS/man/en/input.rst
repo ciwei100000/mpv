@@ -21,10 +21,10 @@ In general, keys can be combined with ``Shift``, ``Ctrl`` and ``Alt``::
 **mpv** can be started in input test mode, which displays key bindings and the
 commands they're bound to on the OSD, instead of executing the commands::
 
-    mpv --input-test --demuxer=rawvideo --demuxer-rawvideo=w=1280:h=720 /dev/zero
+    mpv --input-test --force-window --idle
 
-(Commands which normally close the player will not work in this mode, and you
-must kill **mpv** externally to make it exit.)
+(Only closing the window will make **mpv** exit, pressing normal keys will
+merely display the binding, even if mapped to quit.)
 
 General Input Command Syntax
 ----------------------------
@@ -33,7 +33,7 @@ General Input Command Syntax
 
 Note that by default, the right Alt key can be used to create special
 characters, and thus does not register as a modifier. The option
-``--no-right-alt-gr`` changes this behavior.
+``--no-input-right-alt-gr`` changes this behavior.
 
 Newlines always start a new binding. ``#`` starts a comment (outside of quoted
 string arguments). To bind commands to the ``#`` key, ``SHARP`` can be used.
@@ -51,6 +51,17 @@ C-style escaping can be used.
 You can bind multiple commands to one key. For example:
 
 | a show_text "command 1" ; show_text "command 2"
+
+It's also possible to bind a command to a sequence of keys:
+
+| a-b-c show_text "command run after a, b, c have been pressed"
+
+(This is not shown in the general command syntax.)
+
+If ``a`` or ``a-b`` or ``b`` are already bound, this will run the first command
+that matches, and the multi-key command will never be called. Intermediate keys
+can be remapped to ``ignore`` in order to avoid this issue. The maximum number
+of (non-modifier) keys for combinations is currently 4.
 
 List of Input Commands
 ----------------------
@@ -99,7 +110,8 @@ List of Input Commands
     see the ``--hr-seek-demuxer-offset`` option). Video filters or other video
     postprocessing that modifies timing of frames (e.g. deinterlacing) should
     usually work, but might make backstepping silently behave incorrectly in
-    corner cases.
+    corner cases. Using ``--hr-seek-framedrop=no`` should help, although it
+    might make precise seeking slower.
 
     This does not work with audio-only playback.
 
@@ -172,7 +184,7 @@ List of Input Commands
     force
         Terminate playback if the first file is being played.
 
-``loadfile "<file>" [replace|append]``
+``loadfile "<file>" [replace|append [options]]``
     Load the given file and play it.
 
     Second argument:
@@ -181,6 +193,11 @@ List of Input Commands
         Stop playback of the current file, and play the new file immediately.
     <append>
         Append the file to the playlist.
+
+    The third argument is a list of options and values which should be set
+    while the file is playing. It is of the form ``opt1=value1,opt2=value2,..``.
+    Not all options can be changed this way. Some options require a restart
+    of the player.
 
 ``loadlist "<playlist>" [replace|append]``
     Load the given playlist file (like ``--playlist``).
@@ -207,7 +224,7 @@ List of Input Commands
     mpv (0.2.x and older), this doesn't call the shell. Instead, the command
     is run directly, with each argument passed separately. Each argument is
     expanded like in `Property Expansion`_. Note that there is a static limit
-    of (as of this writing) 10 arguments (this limit could be raised on demand).
+    of (as of this writing) 9 arguments (this limit could be raised on demand).
 
     The program is run in a detached way. mpv doesn't wait until the command
     is completed, but continues playback right after spawning it.
@@ -327,6 +344,12 @@ Input Commands that are Possibly Subject to Change
     ``show_text ${vf}``. Note that auto-inserted filters for format conversion
     are not shown on the list, only what was requested by the user.
 
+    Normally, the commands will check whether the video chain is recreated
+    successfully, and will undo the operation on failure. If the command is run
+    before video is configured (can happen if the command is run immediately
+    after opening a file and before a video frame is decoded), this check can't
+    be run. Then it can happen that creating the video chain fails.
+
     .. admonition:: Example for input.conf
 
         - ``a vf set flip`` turn video upside-down on the ``a`` key
@@ -438,6 +461,21 @@ Input Commands that are Possibly Subject to Change
     Remove an overlay added with ``overlay_add`` and the same ID. Does nothing
     if no overlay with this ID exists.
 
+``script_message "<arg1>" "<arg2>" ...``
+    Send a message to all clients, and pass it the following list of arguments.
+    What this message means, how many arguments it takes, and what the arguments
+    mean is fully up to the receiver and the sender. Every client receives the
+    message, so be careful about name clashes (or use ``script_message_to``).
+
+``script_message_to "<target>" "<arg1>" "<arg2>" ...``
+    Same as ``script_message``, but send it only to the client named
+    ``<target>``. Each client (scripts etc.) has a unique name. For example,
+    Lua scripts can get their name via ``mp.get_script_name()``.
+
+    (Scripts use this internally to dispatch key bindings, and this can also
+    be used in input.conf to reassign such bindings.)
+
+
 Undocumented commands: ``tv_start_scan``, ``tv_step_channel``, ``tv_step_norm``,
 ``tv_step_chanlist``, ``tv_set_channel``, ``tv_last_channel``, ``tv_set_freq``,
 ``tv_step_freq``, ``tv_set_norm``, ``dvb_set_channel`` (all of these
@@ -472,9 +510,6 @@ prefixes can be specified. They are separated by whitespace.
 All of the osd prefixes are still overridden by the global ``--osd-level``
 settings.
 
-Undocumented prefixes: ``pausing``, ``pausing_keep``, ``pausing_toggle``,
-``pausing_keep_force``. (Should these be made official?)
-
 Input Sections
 --------------
 
@@ -501,120 +536,693 @@ information. They can be manipulated with the ``set``/``add``/``cycle``
 commands, and retrieved with ``show_text``, or anything else that uses property
 expansion. (See `Property Expansion`_.)
 
-The ``W`` column indicates whether the property is generally writable. If an
-option is referenced, the property should take/return exactly the same values
-as the option.
+The property name is annotated with RW to indicate whether the property is
+generally writable.
 
-=============================== = ==================================================
-Name                            W Comment
-=============================== = ==================================================
-``osd-level``                   x see ``--osd-level``
-``osd-scale``                   x osd font size multiplicator, see ``--osd-scale``
-``loop``                        x see ``--loop``
-``speed``                       x see ``--speed``
-``filename``                      currently played file (path stripped)
-``path``                          currently played file (full path)
-``media-title``                   filename, title tag, or libquvi ``QUVIPROP_PAGETITLE``
+If an option is referenced, the property will normally take/return exactly the
+same values as the option. In these cases, properties are merely a way to change
+an option at runtime.
+
+Property list
+-------------
+
+``osd-level`` (RW)
+    See ``--osd-level``.
+
+``osd-scale`` (RW)
+    OSD font size multiplicator, see ``--osd-scale``.
+
+``loop`` (RW)
+    See ``--loop``.
+
+``loop-file`` (RW)
+    See ``--loop-file`` (uses ``yes``/``no``).
+
+``speed`` (RW)
+    See ``--speed``.
+
+``filename``
+    Currently played file, with path stripped. If this is an URL, try to undo
+    percent encoding as well. (The result is not necessarily correct, but
+    looks better for display purposes. Use the ``path`` property to get an
+    unmodified filename.)
+
+``file-size``
+    Length in bytes of the source file/stream. (This is the same as
+    ``${stream-end} - ${stream-start}``. For ordered chapters and such, the
+    size of the currently played segment is returned.)
+
+``path``
+    Full path of the currently played file.
+
+``media-title``
+    If libquvi is used and libquvi returns a page title for the currently
+    played URL, return the page title.
+
+    Otherwise, if the currently played file has a ``title`` tag, use that.
+
+    Otherwise, if the media type is DVD, return the volume ID of DVD.
+
+    Otherwise, return the ``filename`` property.
+
 ``demuxer``
-``stream-path``                   filename (full path) of stream layer filename
-``stream-pos``                  x byte position in source stream
-``stream-start``                  start byte offset in source stream
-``stream-end``                    end position in bytes in source stream
-``stream-length``                 length in bytes (``${stream-end} - ${stream-start}``)
-``stream-time-pos``             x time position in source stream (also see ``time-pos``)
-``length``                        length of the current file in seconds
-``avsync``                        last A/V synchronization difference
-``percent-pos``                 x position in current file (0-100)
-``ratio-pos``                   x position in current file (0.0-1.0)
-``time-pos``                    x position in current file in seconds
-``time-remaining``                estimated remaining length of the file in seconds
-``playtime-remaining``            ``time-remaining`` scaled by the the current ``speed``
-``chapter``                     x current chapter number
-``edition``                     x current MKV edition number
-``titles``                        number of DVD titles
-``chapters``                      number of chapters
-``editions``                      number of MKV editions
-``angle``                       x current DVD angle
-``metadata``                      metadata key/value pairs
-``metadata/<key>``                value of metadata entry ``<key>``
-``chapter-metadata``              metadata of current chapter (works similar)
-``pause``                       x pause status (bool)
-``cache``                         network cache fill state (0-100)
-``pts-association-mode``        x see ``--pts-association-mode``
-``hr-seek``                     x see ``--hr-seek``
-``volume``                      x current volume (0-100)
-``mute``                        x current mute status (bool)
-``audio-delay``                 x see ``--audio-delay``
-``audio-format``                  audio format (string)
-``audio-codec``                   audio codec selected for decoding
-``audio-bitrate``                 audio bitrate
-``samplerate``                    audio samplerate
-``channels``                      number of audio channels
-``aid``                         x current audio track (similar to ``--aid``)
-``audio``                       x alias for ``aid``
-``balance``                     x audio channel balance
-``fullscreen``                  x see ``--fullscreen``
-``deinterlace``                 x similar to ``--deinterlace``
-``colormatrix``                 x see ``--colormatrix``
-``colormatrix-input-range``     x see ``--colormatrix-input-range``
-``colormatrix-output-range``    x see ``--colormatrix-output-range``
-``ontop``                       x see ``--ontop``
-``border``                      x see ``--border``
-``framedrop``                   x see ``--framedrop``
-``gamma``                       x see ``--gamma``
-``brightness``                  x see ``--brightness``
-``contrast``                    x see ``--contrast``
-``saturation``                  x see ``--saturation``
-``hue``                         x see ``--hue``
-``panscan``                     x see ``--panscan``
-``video-format``                  video format (string)
-``video-codec``                   video codec selected for decoding
-``video-bitrate``                 video bitrate
-``width``                         video width (container or decoded size)
-``height``                        video height
-``fps``                           container FPS (may contain bogus values)
-``dwidth``                        video width (after filters and aspect scaling)
-``dheight``                       video height
-``window-scale``                x window size multiplier (1 means video size)
-``aspect``                      x video aspect
-``osd-width``                     last known OSD width (can be 0)
-``osd-height``                    last known OSD height (can be 0)
-``osd-par``                       last known OSD display pixel aspect (can be 0)
-``vid``                         x current video track (similar to ``--vid``)
-``video``                       x alias for ``vid``
-``video-align-x``               x see ``--video-align-x``
-``video-align-y``               x see ``--video-align-y``
-``video-pan-x``                 x see ``--video-pan-x``
-``video-pan-y``                 x see ``--video-pan-y``
-``video-zoom``                  x see ``--video-zoom``
-``video-unscaled``              x see ``--video-unscaled``
-``program``                     x switch TS program (write-only)
-``sid``                         x current subtitle track (similar to ``--sid``)
-``secondary-sid``               x secondary subtitle track (``--secondary-sid``)
-``sub``                         x alias for ``sid``
-``sub-delay``                   x see ``--sub-delay``
-``sub-pos``                     x see ``--sub-pos``
-``sub-visibility``              x see ``--sub-visibility``
-``sub-forced-only``             x see ``--sub-forced-only``
-``sub-scale``                   x subtitle font size multiplicator
-``ass-use-margins``             x see ``--ass-use-margins``
-``ass-vsfilter-aspect-compat``  x see ``--ass-vsfilter-aspect-compat``
-``ass-style-override``          x see ``--ass-style-override``
-``stream-capture``              x a filename, see ``--capture``
-``tv-brightness``               x
-``tv-contrast``                 x
-``tv-saturation``               x
-``tv-hue``                      x
-``playlist-pos``                  current position on playlist
-``playlist-count``                number of total playlist entries
-``playlist``                      playlist, current entry marked
-``track-list``                    list of audio/video/sub tracks, current entry marked
-``chapter-list``                  list of chapters, current entry marked
-``quvi-format``                 x see ``--quvi-format``
-``af``                          x see ``--af``
-``vf``                          x see ``--vf``
-``options/name``                  read-only access to value of option ``--name``
-=============================== = ==================================================
+    Name of the current demuxer. (This is useless.)
+
+``stream-path``
+    Filename (full path) of the stream layer filename. (This is probably
+    useless. It looks like this can be different from ``path`` only when
+    using e.g. ordered chapters.)
+
+``stream-pos`` (RW)
+    Raw byte position in source stream.
+
+``stream-start``
+    Raw start byte offset in source stream (rarely different from 0).
+
+``stream-end``
+    Raw end position in bytes in source stream.
+
+``stream-time-pos`` (RW)
+    Time position in source stream. This only works for DVD and Bluray. This
+    is probably never different from ``time-pos``, because ``time-pos`` is
+    forced to this value anyway.
+
+``length``
+    Length of the current file in seconds. If the length is unknown, the
+    property is unavailable. Note that the file duration is not always exactly
+    known, so this is an estimate.
+
+``avsync``
+    Last A/V synchronization difference. Unavailable if audio or video is
+    disabled.
+
+``total-avsync-change``
+    Total A-V sync correction done. Unavailable if audio or video is
+    disabled.
+
+``drop-frame-count``
+    Frames dropped because they arrived to late. Unavailable if video
+    is disabled
+
+``percent-pos`` (RW)
+    Position in current file (0-100). The advantage over using this instead of
+    calculating it out of other properties is that it properly falls back to
+    estimating the playback position from the byte position, if the file
+    duration is not known.
+
+``ratio-pos`` (RW)
+    Position in current file (0.0-1.0). higher precision that ``percent-pos``.
+
+``time-pos`` (RW)
+    Position in current file in seconds.
+
+``time-start``
+    Return the start time of the file. (Usually 0, but some kind of files,
+    especially transport streams, can have a different start time.)
+
+``time-remaining``
+    Remaining length of the file in seconds. Note that the file duration is not
+    always exactly known, so this is an estimate.
+
+``playtime-remaining``
+    ``time-remaining`` scaled by the the current ``speed``.
+
+``chapter`` (RW)
+    Current chapter number. The number of the first chapter is 0.
+
+``edition`` (RW)
+    Current MKV edition number. Setting this property to a different value will
+    restart playback. The number of the first edition is 0.
+
+``disc-titles``
+    Number of BD/DVD titles.
+
+``disc-title`` (RW)
+    Current BD/DVD title number. Writing works only for ``dvdnav://`` and
+    ``bd://`` (and aliases for these).
+
+``chapters``
+    Number of chapters.
+
+``editions``
+    Number of MKV editions.
+
+``edition-list``
+    List of editions, current entry marked. Currently, the raw property value
+    is useless.
+
+    This has a number of sub-properties. Replace ``N`` with the 0-based edition
+    index.
+
+    ``edition-list/count``
+        Number of editions. If there are no editions, this can be 0 or 1 (1
+        if there's a useless dummy edition).
+
+    ``edition-list/N/id``
+        Edition ID as integer. Use this to set the ``edition`` property.
+        Currently, this is the same as the edition index.
+
+    ``edition-list/N/default``
+        ``yes`` if this is the default edition, ``no`` otherwise.
+
+    ``edition-list/N/title``
+        Edition title as stored in the file. Not always available.
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_ARRAY
+            MPV_FORMAT_NODE_MAP (for each edition)
+                "id"                MPV_FORMAT_INT64
+                "title"             MPV_FORMAT_STRING
+                "default"           MPV_FORMAT_FLAG
+
+``angle`` (RW)
+    Current DVD angle.
+
+``metadata``
+    Metadata key/value pairs.
+
+    If the property is accessed with Lua's ``mp.get_property_native``, this
+    returns a table with metadata keys mapping to metadata values. If it is
+    accessed with the client API, this returns a ``MPV_FORMAT_NODE_MAP``,
+    with tag keys mapping to tag values.
+
+    For OSD, it returns a formatted list. Trying to retrieve this property as
+    a raw string doesn't work.
+
+    This has a number of sub-properties:
+
+    ``metadata/by-key/<key>``
+        Value of metadata entry ``<key>``.
+
+    ``metadata/list/count``
+        Number of metadata entries.
+
+    ``metadata/list/N/key``
+        Key name of the Nth metadata entry. (The first entry is ``0``).
+
+    ``metadata/list/N/value``
+        Value of the Nth metadata entry.
+
+    ``metadata/<key>``
+        Old version of ``metadata/by-key/<key>``. Use is discouraged, because
+        the metadata key string could conflict with other sub-properties.
+
+    The layout of this property might be subject to change. Suggestions are
+    welcome how exactly this property should work.
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_MAP
+            (key and string value for each metdata entry)
+
+``chapter-metadata``
+    Metadata of current chapter. Works similar to ``metadata`` property. It
+    also allows the same access methods (using sub-properties).
+
+    Per-chapter metadata is very rare. Usually, only the chapter name
+    (``title``) is set.
+
+    For accessing other information, like chapter start, see the
+    ``chapter-list`` property.
+
+``vf-metadata/<filter-label>``
+    Metadata added by video filters. Accessed by the filter label,
+    which if not explicitly specified using the ``@filter-label:`` syntax,
+    will be ``<filter-name>NN``.
+
+    Works similar to ``metadata`` property. It allows the same access
+    methods (using sub-properties).
+
+    An example of these kind of metadata are the cropping parameters
+    added by ``--vf=lavfi=cropdetect``.
+
+``pause`` (RW)
+    Pause status. This is usually ``yes`` or ``no``. See ``--pause``.
+
+``core-idle``
+    Return ``yes`` if the playback core is paused, otherwise ``no``. This can
+    be different ``pause`` in special situations, such as when the player
+    pauses itself due to low network cache.
+
+``cache``
+    Network cache fill state (0-100).
+
+``cache-size`` (RW)
+    Total network cache size in KB. This is similar to ``--cache``. This allows
+    to set the cache size at runtime. Currently, it's not possible to enable
+    or disable the cache at runtime using this property, just to resize an
+    existing cache.
+
+    Note that this tries to keep the cache contents as far as possible. To make
+    this easier, the cache resizing code will allocate the new cache while the
+    old cache is still allocated.
+
+    Don't use this when playing DVD or Bluray.
+
+``paused-for-cache``
+    Returns ``yes`` when playback is paused because of waiting for the cache.
+
+``eof-reached``
+    Returns ``yes`` if end of playback was reached, ``no`` otherwise. Note
+    that this is usually interesting only if ``--keep-open`` is enabled,
+    since otherwise the player will immediately play the next file (or exit
+    or enter idle mode), and in these cases the ``eof-reached`` property will
+    logically be cleared immediately after it's set.
+
+``pts-association-mode`` (RW)
+    See ``--pts-association-mode``.
+
+``hr-seek`` (RW)
+    See ``--hr-seek``.
+
+``volume`` (RW)
+    Current volume (0-100).
+
+``mute`` (RW)
+    Current mute status (``yes``/``no``).
+
+``audio-delay`` (RW)
+    See ``--audio-delay``.
+
+``audio-format``
+    Audio format as string.
+
+``audio-codec``
+    Audio codec selected for decoding.
+
+``audio-bitrate``
+    Audio bitrate. This is probably a very bad guess in most cases.
+
+``audio-samplerate``
+    Audio samplerate.
+
+``audio-channels``
+    Number of audio channels. The OSD value of this property is actually the
+    channel layout, while the raw value returns the number of channels only.
+
+``aid`` (RW)
+    Current audio track (similar to ``--aid``).
+
+``audio`` (RW)
+    Alias for ``aid``.
+
+``balance`` (RW)
+    Audio channel balance. (The implementation of this feature is rather odd.
+    It doesn't change the volumes of each channel, but instead sets up a pan
+    matrix to mix the the left and right channels.)
+
+``fullscreen`` (RW)
+    See ``--fullscreen``.
+
+``deinterlace`` (RW)
+    See ``--deinterlace``.
+
+``colormatrix`` (RW)
+    See ``--colormatrix``.
+
+``colormatrix-input-range`` (RW)
+    See ``--colormatrix-input-range``.
+
+``colormatrix-output-range`` (RW)
+    See ``--colormatrix-output-range``.
+
+``ontop`` (RW)
+    See ``--ontop``.
+
+``border`` (RW)
+    See ``--border``.
+
+``framedrop`` (RW)
+    See ``--framedrop``.
+
+``gamma`` (RW)
+    See ``--gamma``.
+
+``brightness`` (RW)
+    See ``--brightness``.
+
+``contrast`` (RW)
+    See ``--contrast``.
+
+``saturation`` (RW)
+    See ``--saturation``.
+
+``hue`` (RW)
+    See ``--hue``.
+
+``hwdec`` (RW)
+    Return the current hardware decoder that is used. This uses the same values
+    as the ``--hwdec`` option. If software decoding is active, this returns
+    ``no``. You can write this property. Then the ``--hwdec`` option is set to
+    the new value, and video decoding will be reinitialized (internally, the
+    player will perform a seek to refresh the video properly).
+
+    Note that you don't know the success of the operation immediately after
+    writing this property. It happens with a delay as video is reinitialized.
+
+``panscan`` (RW)
+    See ``--panscan``.
+
+``video-format``
+    Video format as string.
+
+``video-codec``
+    Video codec selected for decoding.
+
+``video-bitrate``
+    Video bitrate (a bad guess).
+
+``width``, ``height``
+    Video size. This uses the size of the video as decoded, or if no video
+    frame has been decoded yet, the (possibly incorrect) container indicated
+    size.
+
+``video-params``
+    Video parameters, as output by the decoder (with overrides like aspect
+    etc. applied). This has a number of sub-properties:
+
+    ``video-params/pixelformat``
+        The pixel format as string. This uses the same names as used in other
+        places of mpv.
+
+    ``video-params/w``, ``video-params/h``
+        Video size as integers, with no aspect correction applied.
+
+    ``video-params/dw``, ``video-params/dh``
+        Video size as integers, scaled for correct aspect ratio.
+
+    ``video-params/aspect``
+        Display aspect ratio as float.
+
+    ``video-params/par``
+        Pixel aspect ratio.
+
+    ``video-params/colormatrix``
+        The colormatrix in use as string. (Exact values subject to change.)
+
+    ``video-params/colorlevels``
+        The colorlevels as string. (Exact values subject to change.)
+
+    ``video-params/chroma-location``
+        Chroma location as string. (Exact values subject to change.)
+
+    ``video-params/rotate``
+        Intended display rotation in degrees (clockwise).
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_ARRAY
+            MPV_FORMAT_NODE_MAP (for each track)
+                "pixelformat"       MPV_FORMAT_STRING
+                "w"                 MPV_FORMAT_INT64
+                "h"                 MPV_FORMAT_INT64
+                "dw"                MPV_FORMAT_INT64
+                "dh"                MPV_FORMAT_INT64
+                "aspect"            MPV_FORMAT_DOUBLE
+                "par"               MPV_FORMAT_DOUBLE
+                "colormatrix"       MPV_FORMAT_STRING
+                "colorlevels"       MPV_FORMAT_STRING
+                "chroma-location"   MPV_FORMAT_STRING
+                "rotate"            MPV_FORMAT_INT64
+
+``dwidth``, ``dheight``
+    Video display size. This is the video size after filters and aspect scaling
+    have been applied. The actual video window size can still be different
+    from this.
+
+``video-out-params``
+    Same as ``video-params``, but after video filters have been applied. If
+    there are no video filters in use, this will contain the same values as
+    ``video-params``. Note that this is still not necessarily what the video
+    window uses, since all real VOs do their own scaling.
+
+    Has the same sub-properties as ``video-params``.
+
+``fps``
+    Container FPS. This can easily contain bogus values. For videos that use
+    modern container formats or video codecs, this will often be incorrect.
+
+``estimated-vf-fps``
+    Estimated/measured FPS of the video filter chain output. (If no filters
+    are used, this corresponds to decoder output.) This uses the average of
+    the 10 past frame durations to calculate the FPS. It will be inaccurate
+    if framedropping is involved (such as when framedrop is explicitly
+    enabled, or after precise seeking). Files with imprecise timestamps (such
+    as Matroska) might lead to unstable results.
+
+``window-scale`` (RW)
+    Window size multiplier. Setting this will resize the video window to the
+    values contained in ``dwidth`` and ``dheight`` multiplied with the value
+    set with this property. Setting ``1`` will resize to original video size
+    (or to be exactly, the size the video filters output). ``2`` will set the
+    double size, ``0.5`` halves the size.
+
+``video-aspect`` (RW)
+    Video aspect, see ``--video-aspect``.
+
+``osd-width``, ``osd-height``
+    Last known OSD width (can be 0). This is needed if you want to use the
+    ``overlay_add`` command. It gives you the actual OSD size, which can be
+    different from the window size in some cases.
+
+``osd-par``
+    Last known OSD display pixel aspect (can be 0).
+
+``vid`` (RW)
+    Current video track (similar to ``--vid``).
+
+``video`` (RW)
+    Alias for ``vid``.
+
+``video-align-x``, ``video-align-y`` (RW)
+    See ``--video-align-x`` and ``--video-align-y``.
+
+``video-pan-x``, ``video-pan-y`` (RW)
+    See ``--video-pan-x`` and ``--video-pan-y``.
+
+``video-zoom`` (RW)
+    See ``--video-zoom``.
+
+``video-unscaled`` (W)
+    See ``--video-unscaled``.
+
+``program`` (W)
+    Switch TS program (write-only).
+
+``sid`` (RW)
+    Current subtitle track (similar to ``--sid``).
+
+``secondary-sid`` (RW)
+    Secondary subtitle track (see ``--secondary-sid``).
+
+``sub`` (RW)
+    Alias for ``sid``.
+
+``sub-delay`` (RW)
+    See ``--sub-delay``.
+
+``sub-pos`` (RW)
+    See ``--sub-pos``.
+
+``sub-visibility`` (RW)
+    See ``--sub-visibility``.
+
+``sub-forced-only`` (RW)
+    See ``--sub-forced-only``.
+
+``sub-scale`` (RW)
+    Subtitle font size multiplicator.
+
+``ass-use-margins`` (RW)
+    See ``--ass-use-margins``.
+
+``ass-vsfilter-aspect-compat`` (RW)
+    See ``--ass-vsfilter-aspect-compat``.
+
+``ass-style-override`` (RW)
+    See ``--ass-style-override``.
+
+``stream-capture`` (RW)
+    A filename, see ``--capture``. Setting this will start capture using the
+    given filename. Setting it to an empty string will stop it.
+
+``tv-brightness``, ``tv-contrast``, ``tv-saturation``, ``tv-hue`` (RW)
+    TV stuff.
+
+``playlist-pos`` (RW)
+    Current position on playlist. The first entry is on position 0. Writing
+    to the property will restart playback at the written entry.
+
+``playlist-count``
+    Number of total playlist entries.
+
+``playlist``
+    Playlist, current entry marked. Currently, the raw property value is
+    useless.
+
+    This has a number of sub-properties. Replace ``N`` with the 0-based playlist
+    entry index.
+
+    ``playlist/count``
+        Number of playlist entries (same as ``playlist-count``).
+
+    ``playlist/N/filename``
+        Filename of the Nth entry.
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_ARRAY
+            MPV_FORMAT_NODE_MAP (for each playlist entry)
+                "filename"  MPV_FORMAT_STRING
+
+``track-list``
+    List of audio/video/sub tracks, current entry marked. Currently, the raw
+    property value is useless.
+
+    This has a number of sub-properties. Replace ``N`` with the 0-based track
+    index.
+
+    ``track-list/count``
+        Total number of tracks.
+
+    ``track-list/N/id``
+        The ID as it's used for ``-sid``/``--aid``/``--vid``. This is unique
+        within tracks of the same type (sub/audio/video), but otherwise not.
+
+    ``track-list/N/type``
+        String describing the media type. One of ``audio``, ``video``, ``sub``.
+
+    ``track-list/N/src-id``
+        Track ID as used in the source file. Not always available.
+
+    ``track-list/N/title``
+        Track title as it is stored in the file. Not always available.
+
+    ``track-list/N/lang``
+        Track language as identified by the file. Not always available.
+
+    ``track-list/N/albumart``
+        ``yes`` if this is a video track that consists of a single picture,
+        ``no`` or unavailable otherwise. This is used for video tracks that are
+        really attached pictures in audio files.
+
+    ``track-list/N/default``
+        ``yes`` if the track has the default flag set in the file, ``no``
+        otherwise.
+
+    ``track-list/N/codec``
+        The codec name used by this track, for example ``h264``. Unavailable
+        in some rare cases.
+
+    ``track-list/N/external``
+        ``yes`` if the track is an external file, ``no`` otherwise. This is
+        set for separate subtitle files.
+
+    ``track-list/N/external-filename``
+        The filename if the track is from an external file, unavailable
+        otherwise.
+
+    ``track-list/N/selected``
+        ``yes`` if the track is currently decoded, ``no`` otherwise.
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_ARRAY
+            MPV_FORMAT_NODE_MAP (for each track)
+                "id"                MPV_FORMAT_INT64
+                "type"              MPV_FORMAT_STRING
+                "src-id"            MPV_FORMAT_INT64
+                "title"             MPV_FORMAT_STRING
+                "lang"              MPV_FORMAT_STRING
+                "albumart"          MPV_FORMAT_FLAG
+                "default"           MPV_FORMAT_FLAG
+                "external"          MPV_FORMAT_FLAG
+                "external-filename" MPV_FORMAT_STRING
+                "codec"             MPV_FORMAT_STRING
+
+``chapter-list``
+    List of chapters, current entry marked. Currently, the raw property value
+    is useless.
+
+    This has a number of sub-properties. Replace ``N`` with the 0-based chapter
+    index.
+
+    ``chapter-list/count``
+        Number of chapters.
+
+    ``chapter-list/N/title``
+        Chapter title as stored in the file. Not always available.
+
+    ``chapter-list/N/time``
+        Chapter start time in seconds as float.
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_ARRAY
+            MPV_FORMAT_NODE_MAP (for each chapter)
+                "title" MPV_FORMAT_STRING
+                "time"  MPV_FORMAT_DOUBLE
+
+``quvi-format`` (RW)
+    See ``--quvi-format``. Cycling this property (``cycle``) will attempt to
+    cycle through known format, although currently this feature doesn't work
+    well at all.
+
+``af`` (RW)
+    See ``--af`` and the ``af`` command.
+
+``vf`` (RW)
+    See ``--vf`` and the ``vf`` command.
+
+    When querying the property with the client API using ``MPV_FORMAT_NODE``,
+    or with Lua ``mp.get_property_native``, this will return a mpv_node with
+    the following contents:
+
+    ::
+
+        MPV_FORMAT_NODE_ARRAY
+            MPV_FORMAT_NODE_MAP (for each filter entry)
+                "name"      MPV_FORMAT_STRING
+                "label"     MPV_FORMAT_STRING [optional]
+                "params"    MPV_FORMAT_NODE_MAP [optional]
+                    "key"   MPV_FORMAT_STRING
+                    "value" MPV_FORMAT_STRING
+
+    It's also possible to write the property using this format.
+
+``seekable``
+    Return whether it's generally possible to seek in the current file.
+
+``options/<name>`` (RW)
+    Read-only access to value of option ``--<name>``. Most options can be
+    changed at runtime by writing to this property. Note that many options
+    require reloading the file for changes to take effect. If there is an
+    equivalent property, prefer setting the property instead.
 
 Property Expansion
 ------------------

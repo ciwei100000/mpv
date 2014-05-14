@@ -28,6 +28,8 @@
 #include <assert.h>
 #include <stdbool.h>
 
+#include "libmpv/client.h"
+
 #include "talloc.h"
 
 #include "m_config.h"
@@ -35,6 +37,8 @@
 #include "common/msg.h"
 
 static const union m_option_value default_value;
+
+static const char *replaced_opts;
 
 // Profiles allow to predefine some sets of options that can then
 // be applied later on with the internal -profile option.
@@ -478,8 +482,18 @@ static int m_config_parse_option(struct m_config *config, struct bstr name,
     bool set = !(flags & M_SETOPT_CHECK_ONLY);
 
     struct m_config_option *co = m_config_get_co(config, name);
-    if (!co)
+    if (!co) {
+        char s[80];
+        snprintf(s, sizeof(s), "|%.*s#", BSTR_P(name));
+        char *msg = strstr(replaced_opts, s);
+        if (msg) {
+            msg += strlen(s);
+            char *end = strchr(msg, '|');
+            MP_FATAL(config, "The --%.*s option was renamed or replaced: %.*s\n",
+                     BSTR_P(name), (int)(end - msg), msg);
+        }
         return M_OPT_UNKNOWN;
+    }
 
     // This is the only mandatory function
     assert(co->opt->type->parse);
@@ -606,6 +620,38 @@ int m_config_set_option(struct m_config *config, struct bstr name,
     return m_config_set_option_ext(config, name, param, 0);
 }
 
+int m_config_set_option_node(struct m_config *config, bstr name,
+                             struct mpv_node *data)
+{
+    struct m_config_option *co = m_config_get_co(config, name);
+    if (!co)
+        return M_OPT_UNKNOWN;
+
+    // This affects some special options like "include", "profile". Maybe these
+    // should work, or maybe not. For now they would require special code.
+    if (!co->data)
+        return M_OPT_UNKNOWN;
+
+    int r;
+
+    // Do this on an "empty" type to make setting the option strictly overwrite
+    // the old value, as opposed to e.g. appending to lists.
+    union m_option_value val = {0};
+
+    if (data->format == MPV_FORMAT_STRING) {
+        bstr param = bstr0(data->u.string);
+        r = m_option_parse(mp_null_log, co->opt, name, param, &val);
+    } else {
+        r = m_option_set_node(co->opt, &val, data);
+    }
+
+    if (r >= 0)
+        m_option_copy(co->opt, co->data, &val);
+
+    m_option_free(co->opt, &val);
+    return r;
+}
+
 const struct m_option *m_config_get_option(const struct m_config *config,
                                            struct bstr name)
 {
@@ -626,15 +672,27 @@ int m_config_option_requires_param(struct m_config *config, bstr name)
     return M_OPT_UNKNOWN;
 }
 
+static int sort_opt_compare(const void *pa, const void *pb)
+{
+    const struct m_config_option *a = pa;
+    const struct m_config_option *b = pb;
+    return strcasecmp(a->name, b->name);
+}
+
 void m_config_print_option_list(const struct m_config *config)
 {
     char min[50], max[50];
     int count = 0;
     const char *prefix = config->is_toplevel ? "--" : "";
 
+    struct m_config_option *sorted =
+        talloc_memdup(NULL, config->opts, config->num_opts * sizeof(sorted[0]));
+    if (config->is_toplevel)
+        qsort(sorted, config->num_opts, sizeof(sorted[0]), sort_opt_compare);
+
     MP_INFO(config, "Options:\n\n");
     for (int i = 0; i < config->num_opts; i++) {
-        struct m_config_option *co = &config->opts[i];
+        struct m_config_option *co = &sorted[i];
         const struct m_option *opt = co->opt;
         if (opt->type->flags & M_OPT_TYPE_HAS_CHILD)
             continue;
@@ -667,14 +725,35 @@ void m_config_print_option_list(const struct m_config *config)
             MP_INFO(config, " (default: %s)", def);
             talloc_free(def);
         }
-        if (opt->flags & CONF_GLOBAL)
+        if (opt->flags & M_OPT_GLOBAL)
             MP_INFO(config, " [global]");
-        if (opt->flags & CONF_NOCFG)
+        if (opt->flags & M_OPT_NOCFG)
             MP_INFO(config, " [nocfg]");
         MP_INFO(config, "\n");
         count++;
     }
     MP_INFO(config, "\nTotal: %d options\n", count);
+    talloc_free(sorted);
+}
+
+char **m_config_list_options(void *ta_parent, const struct m_config *config)
+{
+    char **list = talloc_new(ta_parent);
+    int count = 0;
+    for (int i = 0; i < config->num_opts; i++) {
+        struct m_config_option *co = &config->opts[i];
+        const struct m_option *opt = co->opt;
+        if (opt->type->flags & M_OPT_TYPE_HAS_CHILD)
+            continue;
+        if (co->is_generated)
+            continue;
+        // For use with CONF_TYPE_STRING_LIST, it's important not to set list
+        // as allocation parent.
+        char *s = talloc_strdup(ta_parent, co->name);
+        MP_TARRAY_APPEND(ta_parent, list, count, s);
+    }
+    MP_TARRAY_APPEND(ta_parent, list, count, NULL);
+    return list;
 }
 
 struct m_profile *m_config_get_profile(const struct m_config *config, bstr name)
@@ -694,6 +773,8 @@ struct m_profile *m_config_get_profile0(const struct m_config *config,
 
 struct m_profile *m_config_add_profile(struct m_config *config, char *name)
 {
+    if (!name || !name[0] || strcmp(name, "default") == 0)
+        return NULL; // never a real profile
     struct m_profile *p = m_config_get_profile0(config, name);
     if (p)
         return p;
@@ -751,3 +832,77 @@ void *m_config_alloc_struct(void *talloc_ctx,
         memcpy(substruct, subopts->defaults, subopts->size);
     return substruct;
 }
+
+// This is used for printing error messages on unknown options.
+static const char *replaced_opts =
+    "|a52drc#--ad-lavc-ac3drc=level"
+    "|afm#--ad"
+    "|aspect#--video-aspect"
+    "|ass-bottom-margin#--vf=sub=bottom:top"
+    "|ass#--sub-ass"
+    "|audiofile-cache#--audio-file-cache"
+    "|audiofile#--audio-file"
+    "|benchmark#--untimed (no stats)"
+    "|capture#--stream-capture=<filename>"
+    "|channels#--audio-channels (changed semantics)"
+    "|cursor-autohide-delay#--cursor-autohide"
+    "|delay#--audio-delay"
+    "|dumpstream#--stream-dump=<filename>"
+    "|dvdangle#--dvd-angle"
+    "|endpos#--length"
+    "|font#--osd-font"
+    "|forcedsubsonly#--sub-forced-only"
+    "|format#--audio-format"
+    "|fstype#--x11-fstype"
+    "|hardframedrop#--framedrop=hard"
+    "|identify#removed; use TOOLS/mpv_identify.sh"
+    "|lavdopts#--vd-lavc-..."
+    "|lavfdopts#--demuxer-lavf-..."
+    "|lircconf#--input-lirc-conf"
+    "|mixer-channel#AO suboptions (alsa, oss)"
+    "|mixer#AO suboptions (alsa, oss)"
+    "|mouse-movements#--input-cursor"
+    "|msgcolor#--msg-color"
+    "|msglevel#--msg-level (changed semantics)"
+    "|msgmodule#--msg-module"
+    "|name#--x11-name"
+    "|noar#--no-input-appleremote"
+    "|noautosub#--no-sub-auto"
+    "|noconsolecontrols#--no-input-terminal"
+    "|nojoystick#--no-input-joystick"
+    "|nosound#--no-audio"
+    "|osdlevel#--osd-level"
+    "|panscanrange#--video-zoom, --video-pan-x/y"
+    "|playing-msg#--term-playing-msg"
+    "|pp#'--vf=pp=[...]'"
+    "|pphelp#--vf=pp:help"
+    "|rawaudio#--demuxer-rawaudio-..."
+    "|rawvideo#--demuxer-rawvideo-..."
+    "|spugauss#--sub-gauss"
+    "|srate#--audio-samplerate"
+    "|ss#--start"
+    "|stop-xscreensaver#--stop-screensaver"
+    "|sub-fuzziness#--sub-auto"
+    "|sub#--sub-file"
+    "|subcp#--sub-codepage"
+    "|subdelay#--sub-delay"
+    "|subfile#--sub"
+    "|subfont-text-scale#--sub-scale"
+    "|subfont#--sub-text-font"
+    "|subfps#--sub-fps"
+    "|subpos#--sub-pos"
+    "|tvscan#--tv-scan"
+    "|use-filename-title#--title='${filename}'"
+    "|vc#--vd=..., --hwdec=..."
+    "|vobsub#--sub (pass the .idx file)"
+    "|xineramascreen#--screen (different values)"
+    "|xy#--autofit"
+    "|zoom#Inverse available as ``--video-unscaled"
+    "|media-keys#--input-media-keys"
+    "|lirc#--input-lirc"
+    "|right-alt-gr#--input-right-alt-gr"
+    "|autosub#--sub-auto"
+    "|native-fs#--fs-missioncontrol"
+    "|status-msg#--term-status-msg"
+    "|"
+;

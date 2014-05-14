@@ -5,15 +5,9 @@ mpv
 a movie player
 ##############
 
-:Author: wm4
 :Copyright: GPLv2+
 :Manual section: 1
 :Manual group: multimedia
-
-.. raw:: latex
-
-    \tableofcontents
-    \pagebreak
 
 SYNOPSIS
 ========
@@ -27,7 +21,6 @@ SYNOPSIS
 | **mpv** dvdnav://[longest|menu|title][/device] [options]
 | **mpv** \vcd://[/device]
 | **mpv** \tv://[channel][/input_id] [options]
-| **mpv** radio://[channel|frequency][/capture] [options]
 | **mpv** \pvr:// [options]
 | **mpv** \dvb://[card\_number@]channel [options]
 | **mpv** \mf://[filemask|\@listfile] [-mf options] [options]
@@ -488,13 +481,10 @@ behavior of mpv.
     Directory where mpv looks for user settings. Overrides ``HOME``, and mpv
     will try to load the config file as ``$MPV_HOME/config``.
 
-``MPV_LOCALEDIR``
-    Directory where mpv looks for gettext translation files (if enabled).
-
-``MPV_VERBOSE`` (see also ``-v`` and ``--msglevel``)
+``MPV_VERBOSE`` (see also ``-v`` and ``--msg-level``)
     Set the initial verbosity level across all message modules (default: 0).
-    The resulting verbosity corresponds to that of ``--msglevel=5`` plus the
-    value of ``MPV_VERBOSE``.
+    This is an integer, and the resulting verbosity corresponds to the number
+    of ``--v`` options passed to the command line.
 
 ``MPV_LEAK_REPORT``
     If set to ``1``, enable internal talloc leak reporting. Note that this can
@@ -608,6 +598,12 @@ FILES
 ``~/.mpv/input.conf``
     input bindings (see ``--input-keylist`` for the full list)
 
+``~/.mpv/lua/``
+    All files in this directly are loaded as if they were passed to the
+    ``--lua`` option. They are loaded in alphabetical order, and sub-directories
+    and files with no ``.lua`` extension are ignored. The ``--load-scripts=no``
+    option disables loading these files.
+
 
 EXAMPLES OF MPV USAGE
 =====================
@@ -626,7 +622,7 @@ Play only titles 5, 6, 7:
     ``mpv dvd://5-7``
 
 Play a multiangle DVD:
-    ``mpv dvd://1 --dvdangle=2``
+    ``mpv dvd://1 --dvd-angle=2``
 
 Play from a different DVD device:
     ``mpv dvd://1 --dvd-device=/dev/dvd2``

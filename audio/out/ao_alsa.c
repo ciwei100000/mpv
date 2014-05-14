@@ -46,8 +46,8 @@
 #include <alsa/asoundlib.h>
 
 #include "ao.h"
+#include "internal.h"
 #include "audio/format.h"
-#include "audio/reorder_ch.h"
 
 struct priv {
     snd_pcm_t *alsa;
@@ -66,7 +66,7 @@ struct priv {
     int cfg_resample;
 };
 
-#define BUFFER_TIME 500000  // 0.5 s
+#define BUFFER_TIME 250000  // 250ms
 #define FRAGCOUNT 16
 
 #define CHECK_ALSA_ERROR(message) \
@@ -78,7 +78,7 @@ struct priv {
     } while (0)
 
 static float get_delay(struct ao *ao);
-static void uninit(struct ao *ao, bool immed);
+static void uninit(struct ao *ao);
 
 /* to set/get/query special features/parameters */
 static int control(struct ao *ao, enum aocontrol cmd, void *arg)
@@ -353,9 +353,6 @@ static int init(struct ao *ao)
 
     struct priv *p = ao->priv;
 
-    p->prepause_frames = 0;
-    p->delay_before_pause = 0;
-
     /* switch for spdif
      * sets opening sequence for SPDIF
      * sets also the playback and other switches 'on the fly'
@@ -378,9 +375,6 @@ static int init(struct ao *ao)
         device = p->cfg_device;
 
     MP_VERBOSE(ao, "using device: %s\n", device);
-
-    p->can_pause = 1;
-
     MP_VERBOSE(ao, "using ALSA version: %s\n", snd_asoundlib_version());
 
     int open_mode = p->cfg_block ? 0 : SND_PCM_NONBLOCK;
@@ -529,21 +523,18 @@ static int init(struct ao *ao)
     return 0;
 
 alsa_error:
-    uninit(ao, true);
+    uninit(ao);
     return -1;
 } // end init
 
 
 /* close audio device */
-static void uninit(struct ao *ao, bool immed)
+static void uninit(struct ao *ao)
 {
     struct priv *p = ao->priv;
 
     if (p->alsa) {
         int err;
-
-        if (!immed)
-            snd_pcm_drain(p->alsa);
 
         err = snd_pcm_close(p->alsa);
         CHECK_ALSA_ERROR("pcm close error");
@@ -553,6 +544,12 @@ static void uninit(struct ao *ao, bool immed)
 
 alsa_error:
     p->alsa = NULL;
+}
+
+static void drain(struct ao *ao)
+{
+    struct priv *p = ao->priv;
+    snd_pcm_drain(p->alsa);
 }
 
 static void audio_pause(struct ao *ao)
@@ -661,7 +658,6 @@ alsa_error:
     return -1;
 }
 
-/* how many byes are free in the buffer */
 static int get_space(struct ao *ao)
 {
     struct priv *p = ao->priv;
@@ -716,6 +712,7 @@ const struct ao_driver audio_out_alsa = {
     .pause     = audio_pause,
     .resume    = audio_resume,
     .reset     = reset,
+    .drain     = drain,
     .priv_size = sizeof(struct priv),
     .priv_defaults = &(const struct priv) {
         .cfg_block = 1,

@@ -129,14 +129,6 @@ EOF
   compile_check $TMPC $@
 }
 
-inline_asm_check() {
-  cat > $TMPC << EOF
-int main(void) { __asm__ volatile ($1); return 0; }
-EOF
-  shift
-  compile_check $TMPC $@
-}
-
 # The following checks are special and should only be used with broken and
 # non-selfsufficient headers that do not include all of their dependencies.
 
@@ -207,46 +199,6 @@ netbsd()    { issystem "NetBSD"; }
 openbsd()   { issystem "OpenBSD"; }
 win32()     { cygwin || mingw32; }
 
-# arch test boolean functions
-x86_32() {
-  case "$host_arch" in
-    i[3-9]86|k5|k6|k6-2|k6-3|pentium*|athlon*|i586-i686) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-x86_64() {
-  case "$host_arch" in
-    x86_64|amd64) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-x86() {
-  x86_32 || x86_64
-}
-
-ppc() {
-  case "$host_arch" in
-    ppc|ppc64|powerpc|powerpc64) return 0;;
-    *) return 1;;
-  esac
-}
-
-alpha() {
-  case "$host_arch" in
-    alpha*) return 0;;
-    *) return 1;;
-  esac
-}
-
-arm() {
-  case "$host_arch" in
-    arm*) return 0;;
-    *) return 1;;
-  esac
-}
-
 # Use this before starting a check
 echocheck() {
   echo "============ Checking for $@ ============" >> "$TMPLOG"
@@ -304,9 +256,6 @@ Optional features:
   --enable-joystick      enable joystick support [disable]
   --disable-vm           disable X video mode extensions [autodetect]
   --disable-xf86keysym   disable support for multimedia keys [autodetect]
-  --enable-radio         enable radio interface [disable]
-  --enable-radio-capture enable radio capture (through PCI/line-in) [disable]
-  --disable-radio-v4l2   disable Video4Linux2 radio interface [autodetect]
   --disable-tv           disable TV interface (TV/DVB grabbers) [enable]
   --disable-tv-v4l2      disable Video4Linux2 TV interface [autodetect]
   --disable-libv4l2      disable libv4l2 [autodetect]
@@ -327,8 +276,7 @@ Optional features:
   --disable-libpostproc  disable postprocess filter (vf_pp) [autodetect]
   --disable-libavdevice  disable libavdevice demuxers [autodetect]
   --disable-libavfilter  disable libavfilter [autodetect]
-  --disable-vf-lavfi     disable vf_lavfi libavfilter bridge [audodetect]
-  --disable-af-lavfi     disable af_lavfi libavfilter bridge [audodetect]
+  --disable-vapoursynth  disable VapourSynth filter bridge [autodetect]
 
 Codecs:
   --enable-jpeg             enable JPEG input/output support [autodetect]
@@ -453,15 +401,13 @@ _bluray=auto
 _dvdread=auto
 _dvdnav=auto
 _lcms2=auto
+_vapoursynth=auto
 _xinerama=auto
 _vm=auto
 _xf86keysym=auto
 _sndio=auto
 _alsa=auto
 _select=yes
-_radio=no
-_radio_capture=no
-_radio_v4l2=auto
 _tv=yes
 _tv_v4l2=auto
 _libv4l2=auto
@@ -488,8 +434,6 @@ _rpath=no
 lua=auto
 libpostproc=auto
 libavfilter=auto
-vf_lavfi=auto
-af_lavfi=auto
 libavdevice=auto
 _stream_cache=yes
 _priority=no
@@ -643,6 +587,8 @@ for ac_option do
   --disable-dvdnav)     _dvdnav=no     ;;
   --enable-lcms2)       _lcms2=yes      ;;
   --disable-lcms2)      _lcms2=no       ;;
+  --enable-vapoursynth) _vapoursynth=yes ;;
+  --dsiable-vapoursynth)_vapoursynth=no ;;
   --enable-xinerama)    _xinerama=yes   ;;
   --disable-xinerama)   _xinerama=no    ;;
   --enable-vm)          _vm=yes         ;;
@@ -657,12 +603,6 @@ for ac_option do
   --disable-tv-v4l2)    _tv_v4l2=no     ;;
   --enable-libv4l2)     _libv4l2=yes   ;;
   --disable-libv4l2)    _libv4l2=no    ;;
-  --enable-radio)       _radio=yes      ;;
-  --enable-radio-capture)       _radio_capture=yes      ;;
-  --disable-radio-capture)      _radio_capture=no       ;;
-  --disable-radio)      _radio=no       ;;
-  --enable-radio-v4l2)  _radio_v4l2=yes ;;
-  --disable-radio-v4l2) _radio_v4l2=no  ;;
   --enable-pvr)         _pvr=yes        ;;
   --disable-pvr)        _pvr=no         ;;
   --enable-smb)         _smb=yes        ;;
@@ -708,10 +648,6 @@ for ac_option do
   --disable-libavdevice) libavdevice=no ;;
   --enable-libavfilter) libavfilter=auto ;;
   --disable-libavfilter) libavfilter=no ;;
-  --enable-vf-lavfi)    vf_lavfi=auto ;;
-  --disable-vf-lavfi)   vf_lavfi=no ;;
-  --enable-af-lavfi)    af_lavfi=auto ;;
-  --disable-af-lavfi)   af_lavfi=no ;;
 
   --enable-enca)        _enca=yes       ;;
   --disable-enca)       _enca=no        ;;
@@ -792,7 +728,7 @@ if test "$_cc" = auto ; then
     fi
 fi
 
-# Determine our OS name and CPU architecture
+# Determine our OS name
 if test -z "$_target" ; then
   # OS name
   system_name=$(uname -s 2>&1)
@@ -816,41 +752,6 @@ if test -z "$_target" ; then
     ;;
   esac
 
-
-  # host's CPU/instruction set
-   host_arch=$(uname -p 2>&1)
-   case "$host_arch" in
-   i386|sparc|ppc|alpha|arm|mips|vax)
-     ;;
-   powerpc) # Darwin returns 'powerpc'
-     host_arch=ppc
-     ;;
-   *) # uname -p on Linux returns 'unknown' for the processor type,
-      # OpenBSD returns 'Intel Pentium/MMX ("Genuine Intel" 586-class)'
-
-      # Maybe uname -m (machine hardware name) returns something we
-      # recognize.
-
-      case "$(uname -m 2>&1)" in
-      x86_64|amd64|i[3-9]86*|k5|k6|k6_2|k6_3|k6-2|k6-3|pentium*|athlon*|i586_i686|i586-i686|BePC) host_arch=i386 ;;
-      ia64) host_arch=ia64 ;;
-      macppc|ppc) host_arch=ppc ;;
-      ppc64) host_arch=ppc64 ;;
-      alpha) host_arch=alpha ;;
-      sparc) host_arch=sparc ;;
-      sparc64) host_arch=sparc64 ;;
-      parisc*|hppa*|9000*) host_arch=hppa ;;
-      arm*|zaurus|cats) host_arch=arm ;;
-      sh3|sh4|sh4a) host_arch=sh ;;
-      s390) host_arch=s390 ;;
-      s390x) host_arch=s390x ;;
-      *mips*) host_arch=mips ;;
-      vax) host_arch=vax ;;
-      xtensa*) host_arch=xtensa ;;
-      *) host_arch=UNKNOWN ;;
-    esac
-    ;;
-  esac
 else # if test -z "$_target"
   for i in 2 3; do
     system_name=$(echo $_target | cut -d '-' -f $i)
@@ -867,11 +768,6 @@ else # if test -z "$_target"
     esac
     break
   done
-  # We need to convert underscores so that values like k6-2 and pentium-mmx can be passed
-  host_arch=$(echo $_target | cut -d '-' -f 1)
-  if test $(echo $host_arch) != "x86_64" ; then
-    host_arch=$(echo $host_arch | tr '_' '-')
-  fi
 fi
 
 extra_cflags="-I. -D_GNU_SOURCE $extra_cflags"
@@ -934,19 +830,19 @@ else
 fi
 echores "$_build_man"
 
-_rst2latex=rst2latex
-if [ -f "$(which rst2latex.py)" ] ; then
-  _rst2latex=rst2latex.py
+_rst2pdf=rst2pdf
+if [ -f "$(which rst2pdf.py)" ] ; then
+  _rst2pdf=rst2pdf.py
 fi
 
-echocheck "whether to build manual PDFs with rst2latex"
-texcheck() {
-    echo test | $_rst2latex --config=DOCS/man/docutils.conf | pdflatex -halt-on-error -draftmode -output-directory="$mplayer_tmpdir"
+echocheck "whether to build manual PDFs with rst2pdf"
+pdfcheck() {
+    echo test | $_rst2pdf -c --repeat-table-rows -o "$mplayer_tmpdir/test.pdf"
 }
 
 if test "$_build_pdf" = auto ; then
     _build_pdf=no
-    command_check texcheck && _build_pdf=yes
+    command_check pdfcheck && _build_pdf=yes
 else
     _build_pdf=no
 fi
@@ -1035,114 +931,11 @@ echocheck "perl"
 command_check perl -Mv5.8 -e';' || die "Perl is not functioning correctly or is ancient. Install the latest perl available."
 echo yes
 
-if test -z "$_target" && x86 ; then
-  cat > $TMPC << EOF
-int main(void) {
-    int test[(int)sizeof(char *)-7];
-    return 0;
-}
-EOF
-  cc_check && host_arch=x86_64 || host_arch=i386
-fi
-
 echo "Detected operating system: $system_name"
-echo "Detected host architecture: $host_arch"
 
 # ---
 
-# now that we know what compiler should be used for compilation, try to find
-# out which assembler is used by the $_cc compiler
-if test "$_as" = auto ; then
-  _as=$($_cc -print-prog-name=as)
-  test -z "$_as" && _as=as
-fi
-
-def_fast_64bit='#define HAVE_FAST_64BIT 0'
-def_arch_x86='#define ARCH_X86 0'
-def_arch_x86_32='#define ARCH_X86_32 0'
-def_arch_x86_64='#define ARCH_X86_64 0'
-
-case "$host_arch" in
-  i[3-9]86|x86|x86pc|k5|k6|k6-2|k6-3|pentium*|athlon*|i586-i686)
-    arch='x86'
-    subarch='x86_32'
-    def_arch_x86='#define ARCH_X86 1'
-    def_arch_x86_32='#define ARCH_X86_32 1'
-    ;;
-
-  ia64)
-    arch='ia64'
-    def_fast_64bit='#define HAVE_FAST_64BIT 1'
-    ;;
-
-  x86_64|amd64)
-    arch='x86'
-    subarch='x86_64'
-    def_arch_x86='#define ARCH_X86 1'
-    def_arch_x86_64='#define ARCH_X86_64 1'
-    def_fast_64bit='#define HAVE_FAST_64BIT 1'
-    ;;
-
-  sparc|sparc64)
-    arch='sparc'
-    ;;
-
-  arm*)
-    arch='arm'
-    ;;
-
-  avr32)
-    arch='avr32'
-    ;;
-
-  sh|sh4)
-    arch='sh4'
-    ;;
-
-  ppc|ppc64|powerpc|powerpc64)
-    arch='ppc'
-    ;;
-
-  alpha*)
-    arch='alpha'
-    ;;
-
-  mips*)
-    arch='mips'
-    ;;
-
-  hppa)
-    arch='pa_risc'
-    ;;
-
-  s390)
-    arch='s390'
-    ;;
-
-  s390x)
-    arch='s390x'
-    ;;
-
-  vax)
-    arch='vax'
-    ;;
-
-  xtensa)
-    arch='xtensa'
-    ;;
-
-  generic)
-    arch='generic'
-    ;;
-
-  *)
-    echo "The architecture of your CPU ($host_arch) is not supported by this configure script"
-    echo "It seems nobody has ported mpv to your OS or CPU type yet."
-    die "unsupported architecture $host_arch"
-    ;;
-esac # case "$host_arch" in
-
-echocheck "assembler support of -pipe option"
+echocheck "compiler support of -pipe option"
 # -I. helps to detect compilers that just misunderstand -pipe like Sun C
 cflag_check -pipe -I. && _pipe="-pipe" && echores "yes" || echores "no"
 
@@ -1153,14 +946,14 @@ if test -z "$CFLAGS" ; then
     WARNFLAGS="-wd167 -wd556 -wd144"
   elif test "$cc_vendor" = "clang"; then
     CFLAGS="$_opt $_debug $_pipe"
-    WARNFLAGS="-Wall -Wno-switch -Wno-logical-op-parentheses -Wpointer-arith -Wundef -Wno-pointer-sign -Wmissing-prototypes -Wshadow"
+    WARNFLAGS="-Wall -Wno-switch -Wno-logical-op-parentheses -Wpointer-arith -Wundef -Wno-pointer-sign -Wmissing-prototypes -Wshadow -Wempty-body"
     ERRORFLAGS="-Werror=implicit-function-declaration -Wno-error=deprecated-declarations -Wno-error=unused-function"
   elif test "$cc_vendor" != "gnu" ; then
     CFLAGS="$_opt $_debug $_pipe"
   else
     CFLAGS="$_opt $_debug $_pipe"
     WARNFLAGS="-Wall -Wno-switch -Wno-parentheses -Wpointer-arith -Wredundant-decls"
-    ERRORFLAGS="-Werror-implicit-function-declaration -Wno-error=deprecated-declarations -Wno-error=unused-function -Wshadow"
+    ERRORFLAGS="-Werror-implicit-function-declaration -Wno-error=deprecated-declarations -Wno-error=unused-function -Wshadow -Wempty-body"
     extra_ldflags="$extra_ldflags"
   fi
 else
@@ -1195,44 +988,6 @@ if test -n "$CPPFLAGS" ; then
   warn_cflags=yes
 fi
 
-
-echocheck "PIC"
-pic=no
-cat > $TMPC << EOF
-int main(void) {
-#if !(defined(__PIC__) || defined(__pic__) || defined(PIC))
-#error PIC not enabled
-#endif
-    return 0;
-}
-EOF
-cc_check && pic=yes && extra_cflags="$extra_cflags -DPIC"
-echores $pic
-
-
-if x86 ; then
-
-echocheck "ebx availability"
-ebx_available=no
-def_ebx_available='#define HAVE_EBX_AVAILABLE 0'
-cat > $TMPC << EOF
-int main(void) {
-    int x;
-    __asm__ volatile(
-        "xor %0, %0"
-        :"=b"(x)
-        // just adding ebx to clobber list seems unreliable with some
-        // compilers, e.g. Haiku's gcc 2.95
-    );
-    // and the above check does not work for OSX 64 bit...
-    __asm__ volatile("":::"%ebx");
-    return 0;
-}
-EOF
-cc_check && ebx_available=yes && def_ebx_available='#define HAVE_EBX_AVAILABLE 1'
-echores $ebx_available
-
-fi #if x86
 
 ######################
 # MAIN TESTS GO HERE #
@@ -1833,9 +1588,11 @@ if test "$_vdpau" = auto && test "$_x11" = yes ; then
 fi
 if test "$_vdpau" = yes ; then
   def_vdpau='#define HAVE_VDPAU 1'
+  def_vdpau_hwaccel='#define HAVE_VDPAU_HWACCEL 1'
   vomodules="vdpau $vomodules"
 else
   def_vdpau='#define HAVE_VDPAU 0'
+  def_vdpau_hwaccel='#define HAVE_VDPAU_HWACCEL 0'
   novomodules="vdpau $novomodules"
 fi
 echores "$_vdpau"
@@ -2206,7 +1963,7 @@ if test "$_sdl2" = yes ; then
 fi
 if test "$_sdl2" = yes ; then
   _sdl=yes # sdl2 implies sdl
-  def_sdl='#define HAVE_SDL 1'
+  def_sdl='#define HAVE_SDL1 1'
   def_sdl2='#define HAVE_SDL2 1'
   vomodules="sdl $vomodules"
   aomodules="sdl $aomodules"
@@ -2219,11 +1976,11 @@ else
     pkg_config_add 'sdl' && _sdl=yes
   fi
   if test "$_sdl" = yes ; then
-    def_sdl='#define HAVE_SDL 1'
+    def_sdl='#define HAVE_SDL1 1'
     novomodules="sdl $novomodules"
     aomodules="sdl $aomodules"
   else
-    def_sdl='#define HAVE_SDL 0'
+    def_sdl='#define HAVE_SDL1 0'
     novomodules="sdl $novomodules"
     noaomodules="sdl $noaomodules"
   fi
@@ -2654,7 +2411,22 @@ fi
 echores "$_lcms2"
 
 
-all_libav_libs="libavutil >= 52.3.0:libavcodec > 54.34.0:libavformat > 54.19.0:libswscale >= 2.0.0"
+echocheck "VapurSynth support"
+if test "$_vapoursynth" = auto ; then
+    _vapoursynth=no
+    if pkg_config_add 'vapoursynth >= 23 vapoursynth-script >= 23' ; then
+        _vapoursynth=yes
+    fi
+fi
+if test "$_vapoursynth" = yes ; then
+    def_vapoursynth="#define HAVE_VAPOURSYNTH 1"
+else
+    def_vapoursynth="#define HAVE_VAPOURSYNTH 0"
+fi
+echores "$_vapoursynth"
+
+
+all_libav_libs="libavutil >= 52.48.101:libavcodec >= 55.34.1:libavformat >= 55.12.0:libswscale >= 2.1.2"
 echocheck "Libav ($all_libav_libs)"
 if test "$ffmpeg" = auto ; then
   IFS=":"   # shell should not be used for programming
@@ -2667,15 +2439,14 @@ echores "yes"
 
 _resampler=no
 _avresample=no
-_avresample_has_set_channel_mapping=no
 
 
 def_libswresample='#define HAVE_LIBSWRESAMPLE 0'
 def_libavresample='#define HAVE_LIBAVRESAMPLE 0'
 
-echocheck "libavresample >= 1.0.0"
+echocheck "libavresample >= 1.1.0"
 if test "$_disable_avresample" = no ; then
-  if pkg_config_add "libavresample >= 1.0.0" ; then
+  if pkg_config_add "libavresample >= 1.1.0" ; then
     _resampler=yes
     _avresample=yes
     def_libavresample='#define HAVE_LIBAVRESAMPLE 1'
@@ -2683,16 +2454,10 @@ if test "$_disable_avresample" = no ; then
 fi
 echores "$_resampler"
 
-if test "$_avresample" = yes ; then
-  echocheck "libavresample avresample_set_channel_mapping() API"
-  statement_check libavresample/avresample.h 'avresample_set_channel_mapping(NULL, NULL)' && _avresample_has_set_channel_mapping=yes
-  echores "$_avresample_has_set_channel_mapping"
-fi
-
 
 if test "$_resampler" = no ; then
-  echocheck "libswresample >= 0.17.102"
-  if pkg_config_add "libswresample >= 0.17.102" ; then
+  echocheck "libswresample >= 0.17.104"
+  if pkg_config_add "libswresample >= 0.17.104" ; then
     _resampler=yes
     def_libswresample='#define HAVE_LIBSWRESAMPLE 1'
   fi
@@ -2702,40 +2467,6 @@ fi
 
 if test "$_resampler" = no ; then
   die "No resampler found. Install libavresample or libswresample (FFmpeg)."
-fi
-
-if test "$_avresample_has_set_channel_mapping" = yes ; then
-  def_avresample_has_set_channel_mapping='#define HAVE_AVRESAMPLE_SET_CHANNEL_MAPPING 1'
-else
-  def_avresample_has_set_channel_mapping='#define HAVE_AVRESAMPLE_SET_CHANNEL_MAPPING 0'
-fi
-
-
-echocheck "libavcodec new vdpau API"
-_avcodec_new_vdpau_api=no
-statement_check libavutil/pixfmt.h 'int x = AV_PIX_FMT_VDPAU' && _avcodec_new_vdpau_api=yes
-if test "$_avcodec_new_vdpau_api" = yes ; then
-  def_avcodec_new_vdpau_api='#define HAVE_AVCODEC_NEW_VDPAU_API 1'
-else
-  def_avcodec_new_vdpau_api='#define HAVE_AVCODEC_NEW_VDPAU_API 0'
-fi
-echores "$_avcodec_new_vdpau_api"
-
-_vdpau_dec=no
-_vdpau_dec_old=no
-if test "$_vdpau" = yes ; then
-  if test "$_avcodec_new_vdpau_api" = yes ; then
-    _vdpau_dec=yes
-    def_vdpau_dec='#define HAVE_VDPAU_HWACCEL 1'
-    def_vdpau_dec_old='#define HAVE_VDPAU_DECODER 0'
-  else
-    _vdpau_dec_old=yes
-    def_vdpau_dec='#define HAVE_VDPAU_HWACCEL 0'
-    def_vdpau_dec_old='#define HAVE_VDPAU_DECODER 1'
-  fi
-else
-  def_vdpau_dec='#define HAVE_VDPAU_HWACCEL 0'
-  def_vdpau_dec_old='#define HAVE_VDPAU_DECODER 0'
 fi
 
 
@@ -2750,6 +2481,39 @@ fi
 echores "$_avcodec_has_chroma_pos_api"
 
 
+echocheck "libavcodec metadata update side data"
+_avcodec_has_metadata_update_side_data=no
+statement_check libavcodec/avcodec.h 'enum AVPacketSideDataType type = AV_PKT_DATA_METADATA_UPDATE' && _avcodec_has_metadata_update_side_data=yes
+if test "$_avcodec_has_metadata_update_side_data" = yes ; then
+  def_avcodec_has_metadata_update_side_data='#define HAVE_AVCODEC_METADATA_UPDATE_SIDE_DATA 1'
+else
+  def_avcodec_has_metadata_update_side_data='#define HAVE_AVCODEC_METADATA_UPDATE_SIDE_DATA 0'
+fi
+echores "$_avcodec_has_metadata_update_side_data"
+
+
+echocheck "libavcodec replaygain side data"
+_avcodec_has_replaygain_side_data=no
+statement_check libavcodec/avcodec.h 'enum AVPacketSideDataType type = AV_PKT_DATA_REPLAYGAIN' && _avcodec_has_replaygain_side_data=yes
+if test "$_avcodec_has_replaygain_side_data" = yes ; then
+  def_avcodec_has_replaygain_side_data='#define HAVE_AVCODEC_REPLAYGAIN_SIDE_DATA 1'
+else
+  def_avcodec_has_replaygain_side_data='#define HAVE_AVCODEC_REPLAYGAIN_SIDE_DATA 0'
+fi
+echores "$_avcodec_has_replaygain_side_data"
+
+
+echocheck "libavutil AVFrame metadata"
+_avutil_has_avframe_metadata=no
+statement_check libavutil/frame.h 'av_frame_get_metadata(NULL)' && _avutil_has_avframe_metadata=yes
+if test "$_avutil_has_avframe_metadata" = yes ; then
+  def_avutil_has_avframe_metadata='#define HAVE_AVFRAME_METADATA 1'
+else
+  def_avutil_has_avframe_metadata='#define HAVE_AVFRAME_METADATA 0'
+fi
+echores "$_avutil_has_avframe_metadata"
+
+
 echocheck "libavutil QP API"
 _avutil_has_qp_api=no
 statement_check libavutil/frame.h 'av_frame_get_qp_table(NULL, NULL, NULL)' && _avutil_has_qp_api=yes
@@ -2761,36 +2525,11 @@ fi
 echores "$_avutil_has_qp_api"
 
 
-echocheck "libavutil ref-counting API"
-_avutil_has_refcounting=no
-statement_check libavutil/frame.h 'av_frame_unref(NULL)' && _avutil_has_refcounting=yes
-if test "$_avutil_has_refcounting" = yes ; then
-  def_avutil_has_refcounting='#define HAVE_AVUTIL_REFCOUNTING 1'
-else
-  def_avutil_has_refcounting='#define HAVE_AVUTIL_REFCOUNTING 0'
-fi
-echores "$_avutil_has_refcounting"
-
-
-# libavfilter as it can be used by vf_lavfi is 3.45.101 in FFmpeg, and
-# 3.5.0 in Libav. Completely useless version numbers.
 echocheck "libavfilter"
 if test "$libavfilter" = auto ; then
     libavfilter=no
-
-    cat > $TMPC <<EOF
-#include <libavfilter/avfilter.h>
-void vf_next_query_format() {}
-int main(void) {
-    avfilter_register_all();
-    vf_next_query_format();
-    return 0;
-}
-EOF
-    if cc_check `$_pkg_config libavfilter --cflags --libs` && pkg_config_add "libavfilter" ; then
+    if pkg_config_add "libavfilter >= 3.90.100" ; then
         libavfilter=yes
-    else
-        res_comment="not found or broken"
     fi
 fi
 if test "$libavfilter" = yes ; then
@@ -2801,55 +2540,10 @@ fi
 echores "$libavfilter"
 
 
-echocheck "using libavfilter through vf_lavfi"
-if test "$vf_lavfi" = auto ; then
-    vf_lavfi=no
-    if test "$libavfilter" = yes ; then
-        if test "$_avutil_has_refcounting" = no ; then
-            res_comment="libavutil too old"
-        else
-            vf_lavfi=yes
-        fi
-    fi
-fi
-if test "$vf_lavfi" = yes ; then
-    def_vf_lavfi='#define HAVE_VF_LAVFI 1'
-else
-    def_vf_lavfi='#define HAVE_VF_LAVFI 0'
-fi
-echores "$vf_lavfi"
-
-
-echocheck "libavutil av_opt_set_int_list() API"
-_avutil_has_opt_set_int_list=no
-statement_check libavutil/opt.h 'av_opt_set_int_list(0,0,(int*)0,0,0)' && _avutil_has_opt_set_int_list=yes
-echores "$_avutil_has_opt_set_int_list"
-
-
-echocheck "using libavfilter through af_lavfi"
-if test "$af_lavfi" = auto ; then
-    af_lavfi=no
-    if test "$libavfilter" = yes ; then
-        if test "$_avutil_has_opt_set_int_list" = no ; then
-            res_comment="libavutil too old"
-        else
-            af_lavfi=yes
-        fi
-    fi
-fi
-if test "$af_lavfi" = yes ; then
-    def_af_lavfi='#define HAVE_AF_LAVFI 1'
-else
-    def_af_lavfi='#define HAVE_AF_LAVFI 0'
-fi
-echores "$af_lavfi"
-
-
 echocheck "libavdevice >= 54.0.0"
 if test "$libavdevice" = auto ; then
     libavdevice=no
-    # Usually, libavdevice depends on libavfilter
-    if test "$libavfilter" = yes && pkg_config_add "libavdevice >= 54.0.0" ; then
+    if pkg_config_add "libavdevice >= 54.0.0" ; then
         libavdevice=yes
     fi
 fi
@@ -2880,13 +2574,9 @@ if darwin ; then
 echocheck "VDA"
 if test "$_vda" = auto ; then
  _vda=no
- if test "$_avutil_has_refcounting" = "yes" ; then
-   header_check VideoDecodeAcceleration/VDADecoder.h &&
-   statement_check libavcodec/vda.h 'ff_vda_create_decoder(NULL, NULL, NULL)' &&
-   _vda=yes
- else
-   res_comment="libavutil too old"
- fi
+ header_check VideoDecodeAcceleration/VDADecoder.h &&
+ statement_check libavcodec/vda.h 'ff_vda_create_decoder(NULL, NULL, NULL)' &&
+ _vda=yes
 fi
 if test "$_vda" = yes ; then
   def_vda='#define HAVE_VDA_HWACCEL 1'
@@ -2972,47 +2662,6 @@ else
 fi
 echores "$_libv4l2"
 
-echocheck "Radio interface"
-if test "$_radio" = yes ; then
-  def_radio='#define HAVE_RADIO 1'
-  inputmodules="radio $inputmodules"
-  if test "$_alsa" != yes -a "$_ossaudio" != yes ; then
-    _radio_capture=no
-  fi
-  if test "$_radio_capture" = yes ; then
-    _audio_input=yes
-    def_radio_capture="#define HAVE_RADIO_CAPTURE 1"
-  else
-    def_radio_capture="#define HAVE_RADIO_CAPTURE 0"
-  fi
-else
-  noinputmodules="radio $noinputmodules"
-  def_radio='#define HAVE_RADIO 0'
-  def_radio_capture="#define HAVE_RADIO_CAPTURE 0"
-  _radio_capture=no
-fi
-echores "$_radio"
-echocheck "Capture for Radio interface"
-echores "$_radio_capture"
-
-echocheck "Video 4 Linux 2 Radio interface"
-if test "$_radio_v4l2" = auto ; then
-  _radio_v4l2=no
-  if test "$_radio" = yes && (linux || freebsd) ; then
-    header_check linux/videodev2.h && _radio_v4l2=yes
-  fi
-fi
-if test "$_radio_v4l2" = yes ; then
-  def_radio_v4l2='#define HAVE_RADIO_V4L2 1'
-else
-  def_radio_v4l2='#define HAVE_RADIO_V4L2 0'
-fi
-echores "$_radio_v4l2"
-
-
-if test "$_radio_v4l2" = no && test "$_radio" = yes ; then
-    die "Radio driver requires V4L2!"
-fi
 
 echocheck "Video 4 Linux 2 MPEG PVR interface"
 if test "$_pvr" = auto ; then
@@ -3183,7 +2832,6 @@ fi
 
 extra_ldflags="$extra_ldflags $_ld_pthread"
 libs_mplayer="$libs_mplayer $_ld_dl"
-(netbsd || openbsd) && x86_32 && libs_mplayer="$libs_mplayer -li386"
 
 
 echocheck "joystick"
@@ -3269,7 +2917,7 @@ GETCH = $_getch
 TIMER = $_timer
 RST2MAN = $_rst2man
 BUILD_MAN = $_build_man
-RST2LATEX = $_rst2latex
+RST2PDF = $_rst2pdf
 BUILD_PDF = $_build_pdf
 
 EXESUF      = $_exesuf
@@ -3302,7 +2950,6 @@ GL_X11 = $_gl_x11
 GL_WAYLAND = $_gl_wayland
 HAVE_POSIX_SELECT = $_posix_select
 HAVE_SYS_MMAN_H = $_mman
-HAVE_AVUTIL_REFCOUNTING = $_avutil_has_refcounting
 JACK = $_jack
 JOYSTICK = $_joystick
 JPEG = $_jpeg
@@ -3313,12 +2960,11 @@ DUMMY_OSD = $_dummy_osd
 LIBBLURAY = $_bluray
 LIBBS2B = $_libbs2b
 LCMS2 = $_lcms2
+VAPOURSYNTH = $_vapoursynth
 LUA = $lua
 LIBPOSTPROC = $libpostproc
 LIBAVDEVICE = $libavdevice
 LIBAVFILTER = $libavfilter
-VF_LAVFI = $vf_lavfi
-AF_LAVFI = $af_lavfi
 LIBSMBCLIENT = $_smb
 LIBQUVI = $_libquvi4
 LIBQUVI9 = $_libquvi9
@@ -3332,8 +2978,6 @@ PRIORITY = $_priority
 PULSE = $_pulse
 PORTAUDIO = $_portaudio
 PVR = $_pvr
-RADIO=$_radio
-RADIO_CAPTURE=$_radio_capture
 RSOUND = $_rsound
 SNDIO = $_sndio
 STREAM_CACHE = $_stream_cache
@@ -3342,8 +2986,6 @@ TV_V4L2 = $_tv_v4l2
 LIBV4L2 = $_libv4l2
 VCD = $_vcd
 VDPAU = $_vdpau
-VDPAU_DEC = $_vdpau_dec
-VDPAU_DEC_OLD = $_vdpau_dec_old
 VDPAU_GL_X11 = $_vdpau_gl_x11
 VDA = $_vda
 VDA_REFCOUNTING = $_vda_refcounting
@@ -3387,6 +3029,10 @@ cat > $TMPH << EOF
 
 #define MPLAYER_CONFDIR "$_confdir"
 
+/* we didn't bother to add actual config checks for this */
+#define HAVE_BSD_FSTATFS 0
+#define HAVE_LINUX_FSTATFS 0
+#define HAVE_VDA_AV_VDA_ALLOC_CONTEXT 0
 
 /* system headers */
 $def_mman_h
@@ -3422,20 +3068,6 @@ $def_priority
 /* configurable options */
 $def_stream_cache
 
-
-/* CPU stuff */
-$def_ebx_available
-
-$def_arch_x86
-$def_arch_x86_32
-$def_arch_x86_64
-
-#define HAVE_MMX ARCH_X86
-#define HAVE_MMX2 ARCH_X86
-#define HAVE_SSE ARCH_X86
-#define HAVE_SSE2 ARCH_X86
-#define HAVE_SSSE3 ARCH_X86
-
 /* Blu-ray/DVD/VCD/CD */
 #define DEFAULT_CDROM_DEVICE "$default_cdrom_device"
 #define DEFAULT_DVD_DEVICE   "$default_dvd_device"
@@ -3450,15 +3082,14 @@ $def_vcd
 $def_mpg123
 $def_zlib
 
-$def_avutil_has_refcounting
 $def_avutil_has_qp_api
-$def_avcodec_new_vdpau_api
 $def_avcodec_has_chroma_pos_api
+$def_avcodec_has_metadata_update_side_data
+$def_avcodec_has_replaygain_side_data
+$def_avutil_has_avframe_metadata
 $def_libpostproc
 $def_libavdevice
 $def_libavfilter
-$def_vf_lavfi
-$def_af_lavfi
 
 $def_dlopen
 
@@ -3484,9 +3115,6 @@ $def_libbs2b
 $def_joystick
 $def_lirc
 $def_pvr
-$def_radio
-$def_radio_capture
-$def_radio_v4l2
 $def_tv
 $def_tv_v4l2
 $def_libv4l2
@@ -3503,6 +3131,7 @@ $def_libquvi9
 $def_libguess
 
 $def_lcms2
+$def_vapoursynth
 $def_lua
 
 
@@ -3525,9 +3154,8 @@ $def_gl_wayland
 $def_jpeg
 $def_v4l2
 $def_vdpau
-$def_vdpau_dec
-$def_vdpau_dec_old
 $def_vdpau_gl_x11
+$def_vdpau_hwaccel
 $def_vda
 $def_vda_gl
 $def_vda_refcounting
@@ -3549,17 +3177,11 @@ $def_xv
 $def_encoding
 $def_libavresample
 $def_libswresample
-$def_avresample_has_set_channel_mapping
 
 $def_fast_64bit
 $def_pthreads
 $def_atomic
 $def_sync
-
-#define HAVE_INLINE_ASM 1
-
-/* Use these registers in x86 inline asm. No proper detection yet. */
-#define HAVE_EBP_AVAILABLE 1
 
 #endif /* MPLAYER_CONFIG_H */
 EOF

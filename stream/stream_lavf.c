@@ -119,13 +119,10 @@ static int control(stream_t *s, int cmd, void *arg)
     return STREAM_UNSUPPORTED;
 }
 
-static bool mp_avio_has_opts(AVIOContext *avio)
+static int interrupt_cb(void *ctx)
 {
-#if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(54, 0, 0)
-    return avio->av_class != NULL;
-#else
-    return false;
-#endif
+    struct stream *stream = ctx;
+    return stream_check_interrupt(stream);
 }
 
 static const char * const prefix[] = { "lavf://", "ffmpeg://" };
@@ -209,7 +206,12 @@ static int open_f(stream_t *stream, int mode)
         av_dict_set(&dict, "headers", cust_headers, 0);
     av_dict_set(&dict, "icy", "1", 0);
 
-    int err = avio_open2(&avio, filename, flags, NULL, &dict);
+    AVIOInterruptCB cb = {
+        .callback = interrupt_cb,
+        .opaque = stream,
+    };
+
+    int err = avio_open2(&avio, filename, flags, &cb, &dict);
     if (err < 0) {
         if (err == AVERROR_PROTOCOL_NOT_FOUND)
             MP_ERR(stream, "[ffmpeg] Protocol not found. Make sure"
@@ -223,7 +225,7 @@ static int open_f(stream_t *stream, int mode)
                t->key, t->value);
     }
 
-    if (mp_avio_has_opts(avio)) {
+    if (avio->av_class) {
         uint8_t *mt = NULL;
         if (av_opt_get(avio, "mime_type", AV_OPT_SEARCH_CHILDREN, &mt) >= 0) {
             stream->mime_type = talloc_strdup(stream, mt);
@@ -259,7 +261,7 @@ out:
 static void append_meta(char ***info, int *num_info, bstr name, bstr val)
 {
     if (name.len && val.len) {
-        char *cname = talloc_asprintf(*info, "%.*s", BSTR_P(name));
+        char *cname = talloc_asprintf(*info, "icy-%.*s", BSTR_P(name));
         char *cval = talloc_asprintf(*info, "%.*s", BSTR_P(val));
         MP_TARRAY_APPEND(NULL, *info, *num_info, cname);
         MP_TARRAY_APPEND(NULL, *info, *num_info, cval);
@@ -270,7 +272,7 @@ static char **read_icy(stream_t *s)
 {
     AVIOContext *avio = s->priv;
 
-    if (!mp_avio_has_opts(avio))
+    if (!avio->av_class)
         return NULL;
 
     uint8_t *icy_header = NULL;

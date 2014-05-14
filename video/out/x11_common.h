@@ -24,8 +24,9 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
+#include "common/common.h"
+
 struct vo;
-struct mp_rect;
 struct mp_log;
 
 struct vo_x11_state {
@@ -37,6 +38,7 @@ struct vo_x11_state {
     int display_is_local;
     int ws_width;
     int ws_height;
+    struct mp_rect screenrc;
 
     int screensaver_off;
     int dpms_disabled;
@@ -102,6 +104,14 @@ struct vo_x11_state {
     /* Increment it before XShmPutImage */
     int ShmCompletionWaitCount;
 
+    /* drag and drop */
+    Atom dnd_property;
+    Atom dnd_requested_format;
+    Window dnd_src_window;
+
+    /* dragging the window */
+    bool win_drag_button1_down;
+
     Atom XA_NET_SUPPORTED;
     Atom XA_NET_WM_STATE;
     Atom XA_NET_WM_STATE_FULLSCREEN;
@@ -112,6 +122,7 @@ struct vo_x11_state {
     Atom XA_NET_WM_NAME;
     Atom XA_NET_WM_ICON_NAME;
     Atom XA_NET_WM_ICON;
+    Atom XA_NET_WM_MOVERESIZE;
     Atom XA_WIN_PROTOCOLS;
     Atom XA_WIN_LAYER;
     Atom XA_WIN_HINTS;
@@ -119,6 +130,18 @@ struct vo_x11_state {
     Atom XAWM_DELETE_WINDOW;
     Atom XAUTF8_STRING;
     Atom XA_NET_WM_CM;
+    Atom XATARGETS;
+    Atom XAXdndAware;
+    Atom XAXdndEnter;
+    Atom XAXdndLeave;
+    Atom XAXdndPosition;
+    Atom XAXdndStatus;
+    Atom XAXdndActionCopy;
+    Atom XAXdndTypeList;
+    Atom XAXdndDrop;
+    Atom XAXdndSelection;
+    Atom XAXdndFinished;
+    Atom XA_uri_list;
 };
 
 int vo_x11_init(struct vo *vo);
@@ -126,9 +149,7 @@ void vo_x11_uninit(struct vo *vo);
 int vo_x11_check_events(struct vo *vo);
 bool vo_x11_screen_is_composited(struct vo *vo);
 void fstype_help(struct mp_log *log);
-void vo_x11_config_vo_window(struct vo *vo, XVisualInfo *vis,
-                             int x, int y, unsigned int width,
-                             unsigned int height, int flags,
+void vo_x11_config_vo_window(struct vo *vo, XVisualInfo *vis, int flags,
                              const char *classname);
 void vo_x11_clear_background(struct vo *vo, const struct mp_rect *rc);
 void vo_x11_clearwindow(struct vo *vo, Window vo_window);

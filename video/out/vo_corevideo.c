@@ -71,15 +71,13 @@ struct cv_functions {
     void (*bind_texture)(struct vo *vo);
     void (*unbind_texture)(struct vo *vo);
     mp_image_t *(*get_screenshot)(struct vo *vo);
-    int (*get_yuv_colorspace)(struct vo *vo, struct mp_csp_details *csp);
-    int (*set_yuv_colorspace)(struct vo *vo, struct mp_csp_details *csp);
+    void (*get_colorspace)(struct vo *vo, struct mp_image_params *p);
 };
 
 struct priv {
     MPGLContext *mpglctx;
     unsigned int image_width;
     unsigned int image_height;
-    struct mp_csp_details colorspace;
     struct mp_rect src_rect;
     struct mp_rect dst_rect;
     struct mp_osd_res osd_res;
@@ -213,7 +211,6 @@ static int preinit(struct vo *vo)
 
     *p = (struct priv) {
         .mpglctx = mpgl_init(vo, "cocoa"),
-        .colorspace = MP_CSP_DETAILS_DEFAULTS,
         .quad = talloc_ptrtype(p, p->quad),
     };
 
@@ -244,9 +241,11 @@ static CFStringRef get_cv_csp_matrix(enum mp_csp format)
 
 static void apply_csp(struct vo *vo, CVPixelBufferRef pbuf)
 {
-    struct priv *p = vo->priv;
-    CFStringRef matrix = get_cv_csp_matrix(p->colorspace.format);
-    assert(matrix);
+    if (!vo->params)
+        return;
+    CFStringRef matrix = get_cv_csp_matrix(vo->params->colorspace);
+    if (!matrix)
+        return;
 
     CVPixelBufferLockBaseAddress(pbuf, 0);
     CVBufferSetAttachment(pbuf, kCVImageBufferYCbCrMatrixKey, matrix,
@@ -254,11 +253,10 @@ static void apply_csp(struct vo *vo, CVPixelBufferRef pbuf)
     CVPixelBufferUnlockBaseAddress(pbuf, 0);
 }
 
-static int get_yuv_colorspace(struct vo *vo, struct mp_csp_details *csp)
+static void get_colorspace(struct vo *vo, struct mp_image_params *p)
 {
-    struct priv *p = vo->priv;
-    *(struct mp_csp_details *)csp = p->colorspace;
-    return VO_TRUE;
+    if (vo->params && get_cv_csp_matrix(vo->params->colorspace))
+        p->colorspace = vo->params->colorspace;
 }
 
 static int get_image_fmt(struct vo *vo, CVPixelBufferRef pbuf)
@@ -279,9 +277,8 @@ static int get_image_fmt(struct vo *vo, CVPixelBufferRef pbuf)
 static mp_image_t *get_screenshot(struct vo *vo, CVPixelBufferRef pbuf)
 {
     int img_fmt = get_image_fmt(vo, pbuf);
-    if (img_fmt < 0) return NULL;
+    if (img_fmt < 0 || !vo->params) return NULL;
 
-    struct priv *p = vo->priv;
     CVPixelBufferLockBaseAddress(pbuf, 0);
     void *base = CVPixelBufferGetBaseAddress(pbuf);
     size_t width  = CVPixelBufferGetWidth(pbuf);
@@ -295,8 +292,7 @@ static mp_image_t *get_screenshot(struct vo *vo, CVPixelBufferRef pbuf)
     img.stride[0] = stride;
 
     struct mp_image *image = mp_image_new_copy(&img);
-    mp_image_set_display_size(image, vo->aspdat.prew, vo->aspdat.preh);
-    mp_image_set_colorspace_details(image, &p->colorspace);
+    mp_image_set_attributes(image, vo->params);
     CVPixelBufferUnlockBaseAddress(pbuf, 0);
 
     return image;
@@ -314,10 +310,9 @@ static int control(struct vo *vo, uint32_t request, void *data)
         case VOCTRL_REDRAW_FRAME:
             do_render(vo);
             return VO_TRUE;
-        case VOCTRL_SET_YUV_COLORSPACE:
-            return p->fns.set_yuv_colorspace(vo, data);
-        case VOCTRL_GET_YUV_COLORSPACE:
-            return p->fns.get_yuv_colorspace(vo, data);
+        case VOCTRL_GET_COLORSPACE:
+            p->fns.get_colorspace(vo, data);
+            return VO_TRUE;
         case VOCTRL_SCREENSHOT: {
             struct voctrl_screenshot_args *args = data;
             if (args->full_window)
@@ -406,16 +401,7 @@ static mp_image_t *cv_get_screenshot(struct vo *vo)
     return get_screenshot(vo, p->cv.pbuf);
 }
 
-static int cv_set_yuv_colorspace(struct vo *vo, struct mp_csp_details *csp)
-{
-    struct priv *p = vo->priv;
 
-    if (get_cv_csp_matrix(csp->format)) {
-        p->colorspace = *csp;
-        return VO_TRUE;
-    } else
-        return VO_NOTIMPL;
-}
 
 static struct cv_functions cv_functions = {
     .init               = dummy_cb,
@@ -424,8 +410,7 @@ static struct cv_functions cv_functions = {
     .unbind_texture     = cv_unbind_texture,
     .prepare_texture    = upload_opengl_texture,
     .get_screenshot     = cv_get_screenshot,
-    .get_yuv_colorspace = get_yuv_colorspace,
-    .set_yuv_colorspace = cv_set_yuv_colorspace,
+    .get_colorspace     = get_colorspace,
 };
 
 #if HAVE_VDA_HWACCEL
@@ -508,14 +493,9 @@ static mp_image_t *iosurface_get_screenshot(struct vo *vo)
     return get_screenshot(vo, p->dr.pbuf);
 }
 
-static int iosurface_set_yuv_csp(struct vo *vo, struct mp_csp_details *csp)
+static void iosurface_get_colorspace(struct vo *vo, struct mp_image_params *p)
 {
-    if (csp->format == MP_CSP_BT_601) {
-        struct priv *p = vo->priv;
-        p->colorspace = *csp;
-        return VO_TRUE;
-    } else
-        return VO_NOTIMPL;
+    p->colorspace = MP_CSP_BT_601;
 }
 
 static struct cv_functions iosurface_functions = {
@@ -525,8 +505,7 @@ static struct cv_functions iosurface_functions = {
     .unbind_texture     = iosurface_unbind_texture,
     .prepare_texture    = extract_texture_from_iosurface,
     .get_screenshot     = iosurface_get_screenshot,
-    .get_yuv_colorspace = get_yuv_colorspace,
-    .set_yuv_colorspace = iosurface_set_yuv_csp,
+    .get_colorspace     = iosurface_get_colorspace,
 };
 #endif /* HAVE_VDA_HWACCEL */
 
@@ -564,8 +543,7 @@ static int reconfig(struct vo *vo, struct mp_image_params *params, int flags)
     p->image_height = params->h;
 
     int mpgl_caps = MPGL_CAP_GL_LEGACY;
-    if (!mpgl_config_window(
-            p->mpglctx, mpgl_caps, vo->dwidth, vo->dheight, flags))
+    if (!mpgl_config_window(p->mpglctx, mpgl_caps, flags))
         return -1;
 
     init_gl(vo, vo->dwidth, vo->dheight);

@@ -70,8 +70,6 @@ enum streamtype {
 
 enum stream_ctrl {
     STREAM_CTRL_GET_TIME_LENGTH = 1,
-    STREAM_CTRL_SEEK_TO_CHAPTER,
-    STREAM_CTRL_GET_CURRENT_CHAPTER,
     STREAM_CTRL_GET_NUM_CHAPTERS,
     STREAM_CTRL_GET_CURRENT_TIME,
     STREAM_CTRL_SEEK_TO_TIME,
@@ -85,6 +83,7 @@ enum stream_ctrl {
     STREAM_CTRL_GET_CURRENT_TITLE,
     STREAM_CTRL_SET_CURRENT_TITLE,
     STREAM_CTRL_GET_CACHE_SIZE,
+    STREAM_CTRL_SET_CACHE_SIZE,
     STREAM_CTRL_GET_CACHE_FILL,
     STREAM_CTRL_GET_CACHE_IDLE,
     STREAM_CTRL_RESUME_CACHE,
@@ -99,6 +98,7 @@ enum stream_ctrl {
     STREAM_CTRL_GET_BASE_FILENAME,
     STREAM_CTRL_GET_NAV_EVENT,          // struct mp_nav_event**
     STREAM_CTRL_NAV_CMD,                // struct mp_nav_cmd*
+    STREAM_CTRL_GET_DISC_NAME
 };
 
 struct stream_lang_req {
@@ -194,30 +194,6 @@ inline static int stream_read_char(stream_t *s)
            (stream_fill_buffer(s) ? s->buffer[s->buf_pos++] : -256);
 }
 
-inline static unsigned int stream_read_dword(stream_t *s)
-{
-    unsigned int y;
-    y = stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    return y;
-}
-
-inline static uint64_t stream_read_qword(stream_t *s)
-{
-    uint64_t y;
-    y = stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    y = (y << 8) | stream_read_char(s);
-    return y;
-}
-
 unsigned char *stream_read_line(stream_t *s, unsigned char *mem, int max,
                                 int utf16);
 int stream_skip_bom(struct stream *s);
@@ -250,16 +226,8 @@ struct stream *stream_create(const char *url, int flags, struct mpv_global *glob
 struct stream *stream_open(const char *filename, struct mpv_global *global);
 stream_t *open_output_stream(const char *filename, struct mpv_global *global);
 stream_t *open_memory_stream(void *data, int len);
-struct demux_stream;
 
-/// Set the callback to be used by libstream to check for user
-/// interruption during long blocking operations (cache filling, etc).
-struct input_ctx;
-void stream_set_interrupt_callback(int (*cb)(struct input_ctx *, int),
-                                   struct input_ctx *ctx);
-/// Call the interrupt checking callback if there is one and
-/// wait for time milliseconds
-int stream_check_interrupt(int time);
+bool stream_check_interrupt(struct stream *s);
 
 bool stream_manages_timeline(stream_t *s);
 
@@ -281,5 +249,8 @@ typedef struct {
 
 void mp_url_unescape_inplace(char *buf);
 char *mp_url_escape(void *talloc_ctx, const char *s, const char *ok);
+
+// stream_file.c
+char *mp_file_url_to_filename(void *talloc_ctx, bstr url);
 
 #endif /* MPLAYER_STREAM_H */

@@ -69,10 +69,6 @@ static int reconfig(struct vo *vo, struct mp_image_params *params, int flags)
     struct priv *p = vo->priv;
     mp_image_unrefp(&p->current);
 
-    if (p->outdir && vo->config_count < 1)
-        if (!checked_mkdir(vo, p->outdir))
-            return -1;
-
     return 0;
 }
 
@@ -87,17 +83,8 @@ static void draw_osd(struct vo *vo, struct osd_state *osd)
 {
     struct priv *p = vo->priv;
 
-    struct aspect_data asp = vo->aspdat;
-    double sar = (double)asp.orgw / asp.orgh;
-    double dar = (double)asp.prew / asp.preh;
-
-    struct mp_osd_res dim = {
-        .w = asp.orgw,
-        .h = asp.orgh,
-        .display_par = sar / dar,
-    };
-
-    osd_draw_on_image(osd, dim, osd->vo_pts, OSD_DRAW_SUB_ONLY, p->current);
+    struct mp_osd_res dim = osd_res_from_image_params(vo->params);
+    osd_draw_on_image(osd, dim, osd_get_vo_pts(osd), OSD_DRAW_SUB_ONLY, p->current);
 }
 
 static void flip_page(struct vo *vo)
@@ -136,6 +123,9 @@ static void uninit(struct vo *vo)
 
 static int preinit(struct vo *vo)
 {
+    struct priv *p = vo->priv;
+    if (p->outdir && !checked_mkdir(vo, p->outdir))
+        return -1;
     vo->untimed = true;
     return 0;
 }

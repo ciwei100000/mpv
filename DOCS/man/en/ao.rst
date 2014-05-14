@@ -86,9 +86,6 @@ Available audio output drivers are:
     ``name=<client>``
         Client name that is passed to JACK (default: ``mpv``). Useful
         if you want to have certain connections established automatically.
-    ``(no-)estimate``
-        Estimate the audio delay, supposed to make the video playback smoother
-        (default: enabled).
     ``(no-)autostart``
         Automatically start jackd if necessary (default: disabled). Note that
         this tends to be unreliable and will flood stdout with server messages.
@@ -133,6 +130,12 @@ Available audio output drivers are:
         Specify the host and optionally output sink to use. An empty <host>
         string uses a local connection, "localhost" uses network transfer
         (most likely not what you want).
+
+    ``buffer=<1-2000|native>``
+        Set the audio buffer size in milliseconds. A higher value buffers
+        more data, and has a lower probability of buffer underruns. A smaller
+        value makes the audio stream react faster, e.g. to playback speed
+        changes. Default: 250.
 
 ``portaudio``
     PortAudio audio output driver. This works on all platforms, and has
@@ -189,6 +192,18 @@ Available audio output drivers are:
 
     ``outburst``
         Simulated chunk size in samples.
+
+    ``speed``
+        Simulated audio playback speed as a multiplier. Usually, a real audio
+        device will not go exactly as fast as the system clock. It will deviate
+        just a little, and this option helps simulating this.
+
+    ``latency``
+        Simulated device latency. This is additional to EOF.
+
+    ``broken-eof``
+        Simulate broken audio drivers, which always add the fixed device
+        latency to the reported audio playback position.
 
 ``pcm``
     Raw PCM/WAVE file writer audio output

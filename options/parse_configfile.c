@@ -38,14 +38,13 @@
 /// Current include depth.
 static int recursion_depth = 0;
 
-/// Setup the \ref Config from a config file.
-/** \param config The config object.
- *  \param conffile Path to the config file.
- *  \param flags M_SETOPT_* bits
- *  \return 1 on sucess, -1 on error, 0 if file not accessible.
- */
+// Load options and profiles from from a config file.
+//  conffile: path to the config file
+//  initial_section: default section where to add normal options
+//  flags: M_SETOPT_* bits
+//  returns: 1 on sucess, -1 on error, 0 if file not accessible.
 int m_config_parse_config_file(m_config_t *config, const char *conffile,
-                               int flags)
+                               char *initial_section, int flags)
 {
 #define PRINT_LINENUM   MP_ERR(config, "%s:%d: ", conffile, line_num)
 #define MAX_LINE_LEN    10000
@@ -63,7 +62,7 @@ int m_config_parse_config_file(m_config_t *config, const char *conffile,
     int param_pos;      /* param pos */
     int ret = 1;
     int errors = 0;
-    m_profile_t *profile = NULL;
+    m_profile_t *profile = m_config_add_profile(config, initial_section);
 
     flags = flags | M_SETOPT_FROM_CONFIG_FILE;
 
@@ -132,10 +131,7 @@ int m_config_parse_config_file(m_config_t *config, const char *conffile,
         /* Profile declaration */
         if (opt_pos > 2 && opt[0] == '[' && opt[opt_pos - 1] == ']') {
             opt[opt_pos - 1] = '\0';
-            if (strcmp(opt + 1, "default"))
-                profile = m_config_add_profile(config, opt + 1);
-            else
-                profile = NULL;
+            profile = m_config_add_profile(config, opt + 1);
             continue;
         }
 
@@ -232,13 +228,12 @@ int m_config_parse_config_file(m_config_t *config, const char *conffile,
             goto nextline;
         }
 
-        tmp = m_config_option_requires_param(config, bopt);
-        if (tmp > 0 && !param_set)
-            tmp = M_OPT_MISSING_PARAM;
-        if (tmp < 0) {
+        bool need_param = m_config_option_requires_param(config, bopt) > 0;
+        if (need_param && !param_set) {
             PRINT_LINENUM;
             MP_ERR(config, "error parsing option %.*s=%.*s: %s\n",
-                   BSTR_P(bopt), BSTR_P(bparam), m_option_strerror(tmp));
+                   BSTR_P(bopt), BSTR_P(bparam),
+                   m_option_strerror(M_OPT_MISSING_PARAM));
             continue;
         }
 

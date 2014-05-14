@@ -71,6 +71,7 @@ static int validate_3dlut_size_opt(struct mp_log *log, const m_option_t *opt,
 const struct m_sub_options mp_icc_conf = {
     .opts = (m_option_t[]) {
         OPT_STRING("icc-profile", profile, 0),
+        OPT_FLAG("icc-profile-auto", profile_auto, 0),
         OPT_STRING("icc-cache", cache, 0),
         OPT_INT("icc-intent", intent, 0),
         OPT_STRING_VALIDATE("3dlut-size", size_str, 0, validate_3dlut_size_opt),
@@ -79,7 +80,7 @@ const struct m_sub_options mp_icc_conf = {
     .size = sizeof(struct mp_icc_opts),
     .defaults = &(const struct mp_icc_opts) {
         .size_str = "128x256x64",
-        .intent = INTENT_ABSOLUTE_COLORIMETRIC,
+        .intent = INTENT_RELATIVE_COLORIMETRIC,
     },
 };
 
@@ -106,6 +107,17 @@ static struct bstr load_file(void *talloc_ctx, const char *filename,
     return res;
 }
 
+bool mp_icc_set_profile(struct mp_icc_opts *opts, char *profile)
+{
+    if (!opts->profile || strcmp(opts->profile, profile) != 0) {
+        if (opts->profile)
+            talloc_free(opts->profile);
+        opts->profile = talloc_strdup(opts, profile);
+        return true;
+    }
+    return false;
+}
+
 #define LUT3D_CACHE_HEADER "mpv 3dlut cache 1.0\n"
 
 struct lut3d *mp_load_icc(struct mp_icc_opts *opts, struct mp_log *log,
@@ -128,8 +140,12 @@ struct lut3d *mp_load_icc(struct mp_icc_opts *opts, struct mp_log *log,
     if (!iccdata.len)
         goto error_exit;
 
-    char *cache_info = talloc_asprintf(tmp, "intent=%d, size=%dx%dx%d\n",
-                                       opts->intent, s_r, s_g, s_b);
+    char *cache_info =
+        // Gamma is included in the header to help uniquely identify it,
+        // because we may change the parameter in the future or make it
+        // customizable.
+        talloc_asprintf(tmp, "intent=%d, size=%dx%dx%d, gamma=2.4",
+                        opts->intent, s_r, s_g, s_b);
 
     // check cache
     if (opts->cache) {
@@ -164,13 +180,9 @@ struct lut3d *mp_load_icc(struct mp_icc_opts *opts, struct mp_log *log,
         .Blue  = {0.15, 0.06, 1.0},
     };
 
-    /* Rec BT.709 defines the tone curve as:
-       V = 1.099 * L^0.45 - 0.099 for L >= 0.018
-       V = 4.500 * L              for L <  0.018
-
-       The 0.081 parameter comes from inserting 0.018 into the function */
-    cmsToneCurve *tonecurve = cmsBuildParametricToneCurve(NULL, 4,
-            (cmsFloat64Number[5]){1/0.45, 1/1.099, 0.099/1.099, 1/4.5, 0.081});
+    // 2.4 is arbitrarily used as a gamma compression factor for the 3DLUT,
+    // reducing artifacts due to rounding errors on wide gamut profiles
+    cmsToneCurve *tonecurve = cmsBuildGamma(NULL, 2.4);
     cmsHPROFILE vid_profile = cmsCreateRGBProfile(&d65, &bt709prim,
                         (cmsToneCurve*[3]){tonecurve, tonecurve, tonecurve});
     cmsFreeToneCurve(tonecurve);
@@ -201,13 +213,15 @@ struct lut3d *mp_load_icc(struct mp_icc_opts *opts, struct mp_log *log,
     cmsDeleteTransform(trafo);
 
     if (opts->cache) {
-        FILE *out = fopen(opts->cache, "wb");
+        char *fname = mp_get_user_path(NULL, global, opts->cache);
+        FILE *out = fopen(fname, "wb");
         if (out) {
             fprintf(out, "%s%s", LUT3D_CACHE_HEADER, cache_info);
             fwrite(iccdata.start, iccdata.len, 1, out);
             fwrite(output, talloc_get_size(output), 1, out);
             fclose(out);
         }
+        talloc_free(fname);
     }
 
 done: ;
@@ -240,6 +254,11 @@ const struct m_sub_options mp_icc_conf = {
     .size = sizeof(struct mp_icc_opts),
     .defaults = &(const struct mp_icc_opts) {0},
 };
+
+bool mp_icc_set_profile(struct mp_icc_opts *opts, char *profile)
+{
+    return false;
+}
 
 struct lut3d *mp_load_icc(struct mp_icc_opts *opts, struct mp_log *log,
                           struct mpv_global *global)

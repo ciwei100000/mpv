@@ -26,17 +26,22 @@
 #include <string.h>
 #include <assert.h>
 
+#include "config.h"
+
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
 #include <libavutil/avutil.h>
 #include <libavutil/avstring.h>
 #include <libavutil/mathematics.h>
+#if HAVE_AVCODEC_REPLAYGAIN_SIDE_DATA
+# include <libavutil/replaygain.h>
+#endif
 #include <libavutil/opt.h>
 #include "compat/libav.h"
 
-#include "config.h"
 #include "options/options.h"
 #include "common/msg.h"
+#include "common/tags.h"
 #include "common/av_opts.h"
 #include "common/av_common.h"
 #include "bstr/bstr.h"
@@ -97,8 +102,8 @@ static const struct format_hack format_hacks[] = {
     // for webradios
     {"aac", "audio/aacp", 25, 0.5},
     {"aac", "audio/aac",  25, 0.5},
-    {"mp3", "audio/mpeg", 25, 0.5},
     // some mp3 files don't detect correctly
+    {"mp3", "audio/mpeg", 24, 0.5},
     {"mp3", NULL,         24, .max_probe = true},
     {0}
 };
@@ -126,6 +131,8 @@ static int64_t mp_seek(void *opaque, int64_t pos, int whence)
     struct demuxer *demuxer = opaque;
     struct stream *stream = demuxer->stream;
     int64_t current_pos;
+    if (stream_manages_timeline(stream))
+        return -1;
     MP_DBG(demuxer, "mp_seek(%p, %"PRId64", %d)\n",
            stream, pos, whence);
     if (whence == SEEK_CUR)
@@ -372,6 +379,37 @@ static void select_tracks(struct demuxer *demuxer, int start)
     }
 }
 
+static void export_replaygain(demuxer_t *demuxer, AVStream *st)
+{
+#if HAVE_AVCODEC_REPLAYGAIN_SIDE_DATA
+    for (int i = 0; i < st->nb_side_data; i++) {
+        AVReplayGain *av_rgain;
+        struct replaygain_data *rgain;
+        AVPacketSideData *src_sd = &st->side_data[i];
+
+        if (src_sd->type != AV_PKT_DATA_REPLAYGAIN)
+            continue;
+
+        av_rgain = (AVReplayGain*)src_sd->data;
+        rgain    = talloc_ptrtype(demuxer, rgain);
+
+        rgain->track_gain = (av_rgain->track_gain != INT32_MIN) ?
+            av_rgain->track_gain / 100000.0f : 0.0;
+
+        rgain->track_peak = (av_rgain->track_peak != 0.0) ?
+            av_rgain->track_peak / 100000.0f : 1.0;
+
+        rgain->album_gain = (av_rgain->album_gain != INT32_MIN) ?
+            av_rgain->album_gain / 100000.0f : 0.0;
+
+        rgain->album_peak = (av_rgain->album_peak != 0.0) ?
+            av_rgain->album_peak / 100000.0f : 1.0;
+
+        demuxer->replaygain_data = rgain;
+    }
+#endif
+}
+
 static void handle_stream(demuxer_t *demuxer, int i)
 {
     lavf_priv_t *priv = demuxer->priv;
@@ -395,6 +433,8 @@ static void handle_stream(demuxer_t *demuxer, int i)
             mp_chmap_from_lavc(&sh_audio->channels, codec->channel_layout);
         sh_audio->samplerate = codec->sample_rate;
         sh_audio->i_bps = codec->bit_rate / 8;
+
+        export_replaygain(demuxer, st);
 
         break;
     }
@@ -438,6 +478,14 @@ static void handle_stream(demuxer_t *demuxer, int i)
                     / (float)(codec->height * codec->sample_aspect_ratio.den);
         sh_video->i_bps = codec->bit_rate / 8;
 
+        AVDictionaryEntry *rot = av_dict_get(st->metadata, "rotate", NULL, 0);
+        if (rot && rot->value) {
+            char *end = NULL;
+            long int r = strtol(rot->value, &end, 10);
+            if (end && !end[0])
+                sh_video->rotate = ((r % 360) + 360) % 360;
+        }
+
         // This also applies to vfw-muxed mkv, but we can't detect these easily.
         sh_video->avi_dts = matches_avinputformat_name(priv, "avi");
 
@@ -454,18 +502,26 @@ static void handle_stream(demuxer_t *demuxer, int i)
         sh_sub = sh->sub;
 
         if (codec->extradata_size) {
-            sh_sub->extradata = malloc(codec->extradata_size);
+            sh_sub->extradata = talloc_size(sh, codec->extradata_size);
             memcpy(sh_sub->extradata, codec->extradata, codec->extradata_size);
             sh_sub->extradata_len = codec->extradata_size;
         }
         sh_sub->w = codec->width;
         sh_sub->h = codec->height;
 
-        // Hack for MicroDVD: if time_base matches the ffmpeg microdvd reader's
-        // default FPS (23.976), assume the MicroDVD file did not declare a
-        // FPS, and the MicroDVD file uses frame based timing.
-        if (codec->time_base.num == 125 && codec->time_base.den == 2997)
-            sh_sub->frame_based = true;
+        if (matches_avinputformat_name(priv, "microdvd")) {
+            AVRational r;
+            if (av_opt_get_q(avfc, "subfps", AV_OPT_SEARCH_CHILDREN, &r) >= 0) {
+                // File headers don't have a FPS set.
+                if (r.num < 1 || r.den < 1)
+                    sh_sub->frame_based = av_q2d(av_inv_q(codec->time_base));
+            } else {
+                // Older libavformat versions. If the FPS matches the microdvd
+                // reader's default, assume it uses frame based timing.
+                if (codec->time_base.num == 125 && codec->time_base.den == 2997)
+                    sh_sub->frame_based = 23.976;
+            }
+        }
         break;
     }
     case AVMEDIA_TYPE_ATTACHMENT: {
@@ -513,11 +569,22 @@ static void add_new_streams(demuxer_t *demuxer)
         handle_stream(demuxer, priv->num_streams);
 }
 
-static void add_metadata(demuxer_t *demuxer, AVDictionary *metadata)
+static void update_metadata(demuxer_t *demuxer, AVPacket *pkt)
 {
-    AVDictionaryEntry *t = NULL;
-    while ((t = av_dict_get(metadata, "", t, AV_DICT_IGNORE_SUFFIX)))
-        demux_info_add(demuxer, t->key, t->value);
+#if HAVE_AVCODEC_METADATA_UPDATE_SIDE_DATA
+    int md_size;
+    const uint8_t *md;
+    md = av_packet_get_side_data(pkt, AV_PKT_DATA_METADATA_UPDATE, &md_size);
+    if (md) {
+        AVDictionary *dict = NULL;
+        av_packet_unpack_dictionary(md, md_size, &dict);
+        if (dict) {
+            mp_tags_clear(demuxer->metadata);
+            mp_tags_copy_from_av_dictionary(demuxer->metadata, dict);
+            av_dict_free(&dict);
+        }
+    }
+#endif
 }
 
 static int demux_open_lavf(demuxer_t *demuxer, enum demux_check check)
@@ -544,6 +611,13 @@ static int demux_open_lavf(demuxer_t *demuxer, enum demux_check check)
         avfc->flags |= AVFMT_FLAG_GENPTS;
     if (opts->index_mode == 0)
         avfc->flags |= AVFMT_FLAG_IGNIDX;
+
+#if LIBAVFORMAT_VERSION_MICRO >= 100
+    /* Keep side data as side data instead of mashing it into the packet
+     * stream.
+     * Note: Libav doesn't have this horrible insanity. */
+    av_opt_set(avfc, "fflags", "+keepside", 0);
+#endif
 
     if (lavfdopts->probesize) {
         if (av_opt_set_int(avfc, "probesize", lavfdopts->probesize, 0) < 0)
@@ -632,25 +706,21 @@ static int demux_open_lavf(demuxer_t *demuxer, enum demux_check check)
         uint64_t end   = av_rescale_q(c->end, c->time_base,
                                       (AVRational){1, 1000000000});
         t = av_dict_get(c->metadata, "title", NULL, 0);
-        demuxer_add_chapter(demuxer, t ? bstr0(t->value) : bstr0(NULL),
-                            start, end, i);
-        t = NULL;
-        while ((t = av_dict_get(c->metadata, "", t, AV_DICT_IGNORE_SUFFIX))) {
-            demuxer_add_chapter_info(demuxer, i, bstr0(t->key),
-                                     bstr0(t->value));
-        }
+        int index = demuxer_add_chapter(demuxer, t ? bstr0(t->value) : bstr0(""),
+                                        start, end, i);
+        mp_tags_copy_from_av_dictionary(demuxer->chapters[index].metadata, c->metadata);
     }
 
     add_new_streams(demuxer);
 
-    add_metadata(demuxer, avfc->metadata);
+    mp_tags_copy_from_av_dictionary(demuxer->metadata, avfc->metadata);
 
     // Often useful with OGG audio-only files, which have metadata in the audio
     // track metadata instead of the main metadata.
     if (demuxer->num_streams == 1) {
         for (int n = 0; n < priv->num_streams; n++) {
             if (priv->streams[n])
-                add_metadata(demuxer, avfc->streams[n]->metadata);
+                mp_tags_copy_from_av_dictionary(demuxer->metadata, avfc->streams[n]->metadata);
         }
     }
 
@@ -691,6 +761,7 @@ static int demux_lavf_fill_buffer(demuxer_t *demux)
     talloc_set_destructor(pkt, destroy_avpacket);
 
     add_new_streams(demux);
+    update_metadata(demux, pkt);
 
     assert(pkt->stream_index >= 0 && pkt->stream_index < priv->num_streams);
     struct sh_stream *stream = priv->streams[pkt->stream_index];

@@ -79,21 +79,36 @@ Available video output drivers are:
     Uses the VDPAU interface to display and optionally also decode video.
     Hardware decoding is used with ``--hwdec=vdpau``.
 
+    .. note::
+
+        Earlier versions of mpv (and MPlayer, mplayer2) provided sub-options
+        to tune vdpau postprocessing, like ``deint``, ``sharpen``, ``denoise``,
+        ``chroma-deint``, ``pullup``, ``hqscaling``. These sub-options are
+        deprecated, and you should use the ``vdpaupp`` video filter instead.
+
     ``sharpen=<-1-1>``
+        (Deprecated. See note about ``vdpaupp``.)
+
         For positive values, apply a sharpening algorithm to the video, for
         negative values a blurring algorithm (default: 0).
     ``denoise=<0-1>``
+        (Deprecated. See note about ``vdpaupp``.)
+
         Apply a noise reduction algorithm to the video (default: 0; no noise
         reduction).
     ``deint=<-4-4>``
-        Select deinterlacing mode (default: -3). Positive values choose mode
-        and enable deinterlacing. Corresponding negative values select the
-        same deinterlacing mode, but do not enable deinterlacing on startup
-        (useful in configuration files to specify which mode will be enabled by
-        the "D" key). All modes respect ``--field-dominance``.
+        (Deprecated. See note about ``vdpaupp``.)
+
+        Select deinterlacing mode (default: 0). In older versions (as well as
+        MPlayer/mplayer2) you could use this option to enable deinterlacing.
+        This doesn't work anymore, and deinterlacing is enabled with either
+        the ``D`` key (by default mapped to the command ``cycle deinterlace``),
+        or the ``--deinterlace`` option. Also, to select the default deint mode,
+        you should use something like ``--vf-defaults=vdpaupp:deint-mode=temporal``
+        instead of this sub-option.
 
         0
-            Same as -3.
+            Pick the ``vdpaupp`` video filter default, which corresponds to 3.
         1
             Show only first field.
         2
@@ -105,13 +120,19 @@ Available video output drivers are:
             Motion-adaptive temporal deinterlacing with edge-guided spatial
             interpolation. Needs fast video hardware.
     ``chroma-deint``
+        (Deprecated. See note about ``vdpaupp``.)
+
         Makes temporal deinterlacers operate both on luma and chroma (default).
         Use no-chroma-deint to solely use luma and speed up advanced
         deinterlacing. Useful with slow video memory.
     ``pullup``
+        (Deprecated. See note about ``vdpaupp``.)
+
         Try to apply inverse telecine, needs motion adaptive temporal
         deinterlacing.
     ``hqscaling=<0-9>``
+        (Deprecated. See note about ``vdpaupp``.)
+
         0
             Use default VDPAU scaling (default).
         1-9
@@ -272,10 +293,12 @@ Available video output drivers are:
 
         ``lanczos2``
             Lanczos scaling with radius=2. Provides good quality and speed.
-            This is the default when using ``opengl-hq``.
 
         ``lanczos3``
             Lanczos with radius=3.
+
+        ``spline36``
+            This is the default when using ``opengl-hq``.
 
         ``bicubic_fast``
             Bicubic filter. Has a blurring effect on the image, even if no
@@ -315,8 +338,9 @@ Available video output drivers are:
         disabled.
 
     ``stereo=<value>``
-        Select a method for stereo display. You may have to use ``--aspect`` to
-        fix the aspect value. Experimental, do not expect too much from it.
+        Select a method for stereo display. You may have to use
+        ``--video-aspect`` to fix the aspect value. Experimental, do not expect
+        too much from it.
 
         no
             Normal 2D display
@@ -329,18 +353,14 @@ Available video output drivers are:
             by very few OpenGL cards.
 
     ``srgb``
-        Enable gamma-correct scaling by working in linear light. This
-        makes use of sRGB textures and framebuffers.
-        This option forces the options ``indirect`` and ``gamma``.
+        Convert and color correct the output to sRGB before displaying it on
+        the screen. This option enables linear light scaling. It also forces
+        the options ``indirect`` and ``gamma``.
 
-        .. note::
-
-            for YUV colorspaces, gamma 1/0.45 (2.222) is assumed. RGB input is
-            always assumed to be in sRGB.
-
-        This option is not really useful, as gamma-correct scaling has not much
-        influence on typical video playback. Most visible effect comes from
-        slightly different gamma.
+        This option is equivalent to using ``icc-profile`` with an sRGB ICC
+        profile, but it is implemented without a 3DLUT and does not require
+        LittleCMS 2. If both ``srgb`` and ``icc-profile`` are present, the
+        latter takes precedence, as they are somewhat redundant.
 
     ``pbo``
         Enable use of PBOs. This is slightly faster, but can sometimes lead to
@@ -451,12 +471,26 @@ Available video output drivers are:
         rgb32f, rgba12, rgba16, rgba16f, rgba32f.
         Default: rgb.
 
-    ``gamma``
-        Always enable gamma control. (Disables delayed enabling.)
+    ``gamma=<0.0..10.0>``
+        Set a gamma value. If gamma is adjusted in other ways (like with
+        the ``--gamma`` option or keybindings and the ``gamma`` property), the
+        value is multiplied with the other gamma value.
+
+        Setting this value to 1.0 can be used to always enable gamma control.
+        (Disables delayed enabling.)
 
     ``icc-profile=<file>``
         Load an ICC profile and use it to transform linear RGB to screen output.
-        Needs LittleCMS2 support compiled in.
+        Needs LittleCMS2 support compiled in. This option overrides the ``srgb``
+        property, as using both is somewhat redundant. It also enables linear
+        light scaling.
+
+
+    ``icc-profile-auto``
+        Automatically select the ICC display profile currently specified by
+        the display settings of the operating system.
+
+        NOTE: Only implemented on OS X with Cocoa.
 
     ``icc-cache=<file>``
         Store and load the 3D LUT created from the ICC profile in this file.
@@ -468,11 +502,21 @@ Available video output drivers are:
         0
             perceptual
         1
-            relative colorimetric
+            relative colorimetric (default)
         2
             saturation
         3
-            absolute colorimetric (default)
+            absolute colorimetric
+
+    ``approx-gamma``
+        Approximate the actual BT.709 gamma function as a pure power curve of
+        1.95. A number of video editing programs and studios apparently use this
+        for mastering instead of the true curve. Most notably, anything in the
+        Apple ecosystem uses this approximation - including all programs
+        compatible with it. It's a sound idea to try enabling this flag first
+        when watching movies and shows to see if things look better that way.
+
+        This only affects the output when using either ``icc-profile`` or``srgb``.
 
     ``3dlut-size=<r>x<g>x<b>``
         Size of the 3D LUT generated from the ICC profile in each dimension.
@@ -508,7 +552,7 @@ Available video output drivers are:
 
     This is equivalent to::
 
-        --vo=opengl:lscale=lanczos2:dither-depth=auto:fbo-format=rgb16
+        --vo=opengl:lscale=spline36:dither-depth=auto:fbo-format=rgb16
 
     Note that some cheaper LCDs do dithering that gravely interferes with
     ``opengl``'s dithering. Disabling dithering with ``dither-depth=no`` helps.
@@ -641,8 +685,9 @@ Available video output drivers are:
         Set the effect strength for the ``lscale``/``cscale`` filters that
         support it.
     ``stereo=<value>``
-        Select a method for stereo display. You may have to use ``--aspect`` to
-        fix the aspect value. Experimental, do not expect too much from it.
+        Select a method for stereo display. You may have to use
+        ``--video-aspect`` to fix the aspect value. Experimental, do not expect
+        too much from it.
 
         0
             Normal 2D display
@@ -814,9 +859,14 @@ Available video output drivers are:
     .. note:: This driver is for compatibility with systems that don't provide
               working OpenGL drivers.
 
-    ``default-format``
-        Use the default RGB32 format instead of an auto-detected one.
-
     ``alpha``
         Use a buffer format that supports videos and images with alpha
         information
+    ``rgb565``
+        Use RGB565 as buffer format. This format is implemented on most
+        platforms, especially on embedded where it is far more efficient then
+        RGB8888.
+    ``triple-buffering``
+        Use 3 buffers instead of 2. This can lead to more fluid playback, but
+        uses more memory.
+
