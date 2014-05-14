@@ -25,9 +25,10 @@
 #include "config.h"
 #include "bstr/bstr.h"
 #include "options/options.h"
+#include "common/common.h"
 #include "common/msg.h"
 #include "input/input.h"
-#include "libavutil/common.h"
+#include "input/event.h"
 #include "x11_common.h"
 #include "talloc.h"
 
@@ -36,7 +37,7 @@
 #include <assert.h>
 
 #include "vo.h"
-#include "aspect.h"
+#include "win_state.h"
 #include "osdep/timer.h"
 
 #include <X11/Xmd.h>
@@ -92,6 +93,8 @@
 #define WIN_LAYER_NORMAL                 4
 #define WIN_LAYER_ONTOP                  6
 #define WIN_LAYER_ABOVE_DOCK             10
+
+#define DND_VERSION 5
 
 // ----- Motif header: -------
 
@@ -342,17 +345,17 @@ static int net_wm_support_state_test(struct vo_x11_state *x11, Atom atom)
     return 0;
 }
 
-static int x11_get_property(struct vo_x11_state *x11, Atom type, Atom **args,
-                            unsigned long *nitems)
+static bool x11_get_property(struct vo_x11_state *x11, Window wnd, Atom type,
+                             Atom **args, unsigned long *nitems)
 {
     int format;
     unsigned long bytesafter;
 
     return Success ==
-           XGetWindowProperty(x11->display, x11->rootwin, type, 0, 16384, False,
+           XGetWindowProperty(x11->display, wnd, type, 0, 16384, False,
                               AnyPropertyType, &type, &format, nitems,
                               &bytesafter, (unsigned char **) args)
-           && *nitems > 0;
+           && *nitems > 0 && bytesafter == 0;
 }
 
 static int vo_wm_detect(struct vo *vo)
@@ -362,12 +365,13 @@ static int vo_wm_detect(struct vo *vo)
     int wm = 0;
     unsigned long nitems;
     Atom *args = NULL;
+    Window win = x11->rootwin;
 
     if (vo->opts->WinID >= 0)
         return 0;
 
 // -- supports layers
-    if (x11_get_property(x11, x11->XA_WIN_PROTOCOLS, &args, &nitems)) {
+    if (x11_get_property(x11, win, x11->XA_WIN_PROTOCOLS, &args, &nitems)) {
         MP_VERBOSE(x11, "Detected wm supports layers.\n");
         for (i = 0; i < nitems; i++) {
             if (args[i] == x11->XA_WIN_LAYER)
@@ -376,7 +380,7 @@ static int vo_wm_detect(struct vo *vo)
         XFree(args);
     }
 // --- netwm
-    if (x11_get_property(x11, x11->XA_NET_SUPPORTED, &args, &nitems)) {
+    if (x11_get_property(x11, win, x11->XA_NET_SUPPORTED, &args, &nitems)) {
         MP_VERBOSE(x11, "Detected wm supports NetWM.\n");
         for (i = 0; i < nitems; i++)
             wm |= net_wm_support_state_test(vo->x11, args[i]);
@@ -401,15 +405,28 @@ static void init_atoms(struct vo_x11_state *x11)
     XA_INIT(_NET_WM_NAME);
     XA_INIT(_NET_WM_ICON_NAME);
     XA_INIT(_NET_WM_ICON);
+    XA_INIT(_NET_WM_MOVERESIZE);
     XA_INIT(_WIN_PROTOCOLS);
     XA_INIT(_WIN_LAYER);
     XA_INIT(_WIN_HINTS);
     XA_INIT(WM_PROTOCOLS);
     XA_INIT(WM_DELETE_WINDOW);
     XA_INIT(UTF8_STRING);
+    XA_INIT(TARGETS);
+    XA_INIT(XdndAware);
+    XA_INIT(XdndEnter);
+    XA_INIT(XdndLeave);
+    XA_INIT(XdndPosition);
+    XA_INIT(XdndStatus);
+    XA_INIT(XdndActionCopy);
+    XA_INIT(XdndTypeList);
+    XA_INIT(XdndDrop);
+    XA_INIT(XdndSelection);
+    XA_INIT(XdndFinished);
     char buf[50];
     sprintf(buf, "_NET_WM_CM_S%d", x11->screen);
     x11->XA_NET_WM_CM = XInternAtom(x11->display, buf, False);
+    x11->XA_uri_list = XInternAtom(x11->display, "text/uri-list", False);
 }
 
 static void vo_x11_update_screeninfo(struct vo *vo)
@@ -417,11 +434,7 @@ static void vo_x11_update_screeninfo(struct vo *vo)
     struct mp_vo_opts *opts = vo->opts;
     struct vo_x11_state *x11 = vo->x11;
     bool all_screens = opts->fullscreen && opts->fsscreen_id == -2;
-    vo->xinerama_x = vo->xinerama_y = 0;
-    if (all_screens) {
-        opts->screenwidth = x11->ws_width;
-        opts->screenheight = x11->ws_height;
-    }
+    x11->screenrc = (struct mp_rect){.x1 = x11->ws_width, .y1 = x11->ws_height};
 #if HAVE_XINERAMA
     if (opts->screen_id >= -1 && XineramaIsActive(x11->display) && !all_screens)
     {
@@ -446,15 +459,16 @@ static void vo_x11_update_screeninfo(struct vo *vo)
         }
         if (screen < 0)
             screen = 0;
-        opts->screenwidth = screens[screen].width;
-        opts->screenheight = screens[screen].height;
-        vo->xinerama_x = screens[screen].x_org;
-        vo->xinerama_y = screens[screen].y_org;
+        x11->screenrc = (struct mp_rect){
+            .x0 = screens[screen].x_org,
+            .y0 = screens[screen].y_org,
+            .x1 = screens[screen].x_org + screens[screen].width,
+            .y1 = screens[screen].y_org + screens[screen].height,
+        };
 
         XFree(screens);
     }
 #endif
-    aspect_save_screenres(vo, opts->screenwidth, opts->screenheight);
 }
 
 int vo_x11_init(struct vo *vo)
@@ -509,16 +523,8 @@ int vo_x11_init(struct vo *vo)
 
     init_atoms(vo->x11);
 
-    x11->ws_width = opts->screenwidth;
-    x11->ws_height = opts->screenheight;
-
-    if (!x11->ws_width)
-        x11->ws_width = DisplayWidth(x11->display, x11->screen);
-    if (!x11->ws_height)
-        x11->ws_height = DisplayHeight(x11->display, x11->screen);
-
-    opts->screenwidth = x11->ws_width;
-    opts->screenheight = x11->ws_height;
+    x11->ws_width = DisplayWidth(x11->display, x11->screen);
+    x11->ws_height = DisplayHeight(x11->display, x11->screen);
 
     if (strncmp(dispName, "unix:", 5) == 0)
         dispName += 4;
@@ -526,7 +532,7 @@ int vo_x11_init(struct vo *vo)
         dispName += 9;
     x11->display_is_local = dispName[0] == ':' && atoi(dispName + 1) < 10;
     MP_VERBOSE(x11, "X11 running at %dx%d (\"%s\" => %s display)\n",
-               opts->screenwidth, opts->screenheight, dispName,
+               x11->ws_width, x11->ws_height, dispName,
                x11->display_is_local ? "local" : "remote");
 
     x11->wm_type = vo_wm_detect(vo);
@@ -622,11 +628,6 @@ static void vo_x11_decoration(struct vo *vo, int d)
     if (!vo->opts->WinID)
         return;
 
-    if (vo->opts->fsmode & 8) {
-        XSetTransientForHint(x11->display, x11->window,
-                             RootWindow(x11->display, x11->screen));
-    }
-
     vo_MotifHints = XInternAtom(x11->display, "_MOTIF_WM_HINTS", 0);
     if (vo_MotifHints != None) {
         if (!x11->got_motif_hints) {
@@ -653,13 +654,12 @@ static void vo_x11_decoration(struct vo *vo, int d)
             vo_MotifWmHints.functions = x11->oldfuncs;
             d = x11->olddecor;
         }
-        vo_MotifWmHints.decorations =
-            d | ((vo->opts->fsmode & 2) ? MWM_DECOR_MENU : 0);
+        vo_MotifWmHints.decorations = d;
         XChangeProperty(x11->display, x11->window, vo_MotifHints,
                         vo_MotifHints, 32,
                         PropModeReplace,
                         (unsigned char *) &vo_MotifWmHints,
-                        (vo->opts->fsmode & 4) ? 4 : 5);
+                        5);
     }
 }
 
@@ -718,6 +718,137 @@ void vo_x11_uninit(struct vo *vo)
 
     talloc_free(x11);
     vo->x11 = NULL;
+}
+
+static void vo_x11_dnd_init_window(struct vo *vo)
+{
+    struct vo_x11_state *x11 = vo->x11;
+
+    Atom version = DND_VERSION;
+    XChangeProperty(x11->display, x11->window, x11->XAXdndAware, XA_ATOM,
+                    32, PropModeReplace, (unsigned char *)&version, 1);
+
+    x11->dnd_property = XInternAtom(x11->display, "mpv_dnd_selection", False);
+}
+
+static void dnd_select_format(struct vo_x11_state *x11, Atom *args, int items)
+{
+    for (int n = 0; n < items; n++) {
+        // There are other types; possibly not worth supporting.
+        if (args[n] == x11->XA_uri_list)
+            x11->dnd_requested_format = args[n];
+    }
+}
+
+static void dnd_reset(struct vo *vo)
+{
+    struct vo_x11_state *x11 = vo->x11;
+
+    x11->dnd_src_window = 0;
+    x11->dnd_requested_format = 0;
+}
+
+static void vo_x11_dnd_handle_message(struct vo *vo, XClientMessageEvent *ce)
+{
+    struct vo_x11_state *x11 = vo->x11;
+
+    if (!x11->window)
+        return;
+
+    if (ce->message_type == x11->XAXdndEnter) {
+        x11->dnd_requested_format = 0;
+
+        Window src = ce->data.l[0];
+        if (ce->data.l[1] & 1) {
+            unsigned long nitems = 0;
+            Atom *args = NULL;
+            if (x11_get_property(x11, src, x11->XAXdndTypeList, &args, &nitems)) {
+                dnd_select_format(x11, args, nitems);
+                XFree(args);
+            }
+        } else {
+            Atom args[3];
+            for (int n = 2; n <= 4; n++)
+                args[n - 2] = ce->data.l[n];
+            dnd_select_format(x11, args, 3);
+        }
+    } else if (ce->message_type == x11->XAXdndPosition) {
+        Window src = ce->data.l[0];
+        XEvent xev;
+
+        xev.xclient.type = ClientMessage;
+        xev.xclient.serial = 0;
+        xev.xclient.send_event = True;
+        xev.xclient.message_type = x11->XAXdndStatus;
+        xev.xclient.window = src;
+        xev.xclient.format = 32;
+        xev.xclient.data.l[0] = x11->window;
+        xev.xclient.data.l[1] = x11->dnd_requested_format ? 1 : 0;
+        xev.xclient.data.l[2] = 0;
+        xev.xclient.data.l[3] = 0;
+        xev.xclient.data.l[4] = x11->XAXdndActionCopy;
+
+        XSendEvent(x11->display, src, False, 0, &xev);
+    } else if (ce->message_type == x11->XAXdndDrop) {
+        x11->dnd_src_window = ce->data.l[0];
+        XConvertSelection(x11->display, x11->XAXdndSelection,
+                          x11->dnd_requested_format, x11->dnd_property,
+                          x11->window, ce->data.l[2]);
+    } else if (ce->message_type == x11->XAXdndLeave) {
+        dnd_reset(vo);
+    }
+}
+
+static void vo_x11_dnd_handle_selection(struct vo *vo, XSelectionEvent *se)
+{
+    struct vo_x11_state *x11 = vo->x11;
+
+    if (!x11->window || !x11->dnd_src_window)
+        return;
+
+    bool success = false;
+
+    if (se->selection == x11->XAXdndSelection &&
+        se->property == x11->dnd_property &&
+        se->target == x11->dnd_requested_format)
+    {
+        Atom type;
+        int format;
+        unsigned long nitems;
+        unsigned long bytes_left;
+        unsigned char *prop;
+        if (XGetWindowProperty(x11->display, x11->window, x11->dnd_property,
+                              0, 64 * 1024, False, x11->dnd_requested_format,
+                              &type, &format, &nitems, &bytes_left, &prop)
+                == Success)
+        {
+            if (!bytes_left && type == x11->dnd_requested_format && format == 8)
+            {
+                // No idea if this is guaranteed to be \0-padded, so use bstr.
+                success = mp_event_drop_mime_data(vo->input_ctx, "text/uri-list",
+                                                  (bstr){prop, nitems}) > 0;
+            }
+            XFree(prop);
+        }
+    }
+
+    XEvent xev;
+
+    xev.xclient.type = ClientMessage;
+    xev.xclient.serial = 0;
+    xev.xclient.send_event = True;
+    xev.xclient.message_type = x11->XAXdndFinished;
+    xev.xclient.window = x11->dnd_src_window;
+    xev.xclient.format = 32;
+    xev.xclient.data.l[0] = x11->window;
+    xev.xclient.data.l[1] = success ? 1 : 0;
+    xev.xclient.data.l[2] = success ? x11->XAXdndActionCopy : 0;
+    xev.xclient.data.l[3] = 0;
+    xev.xclient.data.l[4] = 0;
+
+    XSendEvent(x11->display, x11->dnd_src_window, False, 0, &xev);
+
+    dnd_reset(vo);
 }
 
 static void update_vo_size(struct vo *vo)
@@ -799,20 +930,52 @@ int vo_x11_check_events(struct vo *vo)
         {
             if (x11->no_autorepeat)
                 mp_input_put_key(vo->input_ctx, MP_INPUT_RELEASE_ALL);
+            x11->win_drag_button1_down = false;
             break;
         }
         case MotionNotify:
-            vo_mouse_movement(vo, Event.xmotion.x, Event.xmotion.y);
+            if (x11->win_drag_button1_down && !x11->fs &&
+                !mp_input_test_dragging(vo->input_ctx, Event.xmotion.x,
+                                                       Event.xmotion.y))
+            {
+                mp_input_put_key(vo->input_ctx, MP_INPUT_RELEASE_ALL);
+                XUngrabPointer(x11->display, CurrentTime);
+
+                XEvent xev;
+                xev.xclient.type = ClientMessage;
+                xev.xclient.serial = 0;
+                xev.xclient.send_event = True;
+                xev.xclient.message_type = x11->XA_NET_WM_MOVERESIZE;
+                xev.xclient.window = x11->window;
+                xev.xclient.format = 32;
+                xev.xclient.data.l[0] = Event.xmotion.x_root;
+                xev.xclient.data.l[1] = Event.xmotion.y_root;
+                xev.xclient.data.l[2] = 8; // _NET_WM_MOVERESIZE_MOVE
+                xev.xclient.data.l[3] = 1; // button 1
+                xev.xclient.data.l[4] = 1; // source indication: normal
+
+                XSendEvent(x11->display, x11->rootwin, False,
+                           SubstructureRedirectMask | SubstructureNotifyMask,
+                           &xev);
+            } else {
+                vo_mouse_movement(vo, Event.xmotion.x, Event.xmotion.y);
+            }
+            x11->win_drag_button1_down = false;
             break;
         case LeaveNotify:
+            x11->win_drag_button1_down = false;
             mp_input_put_key(vo->input_ctx, MP_KEY_MOUSE_LEAVE);
             break;
         case ButtonPress:
+            if (Event.xbutton.button == 1)
+                x11->win_drag_button1_down = true;
             mp_input_put_key(vo->input_ctx,
                              (MP_MOUSE_BTN0 + Event.xbutton.button - 1) |
                              get_mods(Event.xbutton.state) | MP_KEY_STATE_DOWN);
             break;
         case ButtonRelease:
+            if (Event.xbutton.button == 1)
+                x11->win_drag_button1_down = false;
             mp_input_put_key(vo->input_ctx,
                              (MP_MOUSE_BTN0 + Event.xbutton.button - 1) |
                              get_mods(Event.xbutton.state) | MP_KEY_STATE_UP);
@@ -832,6 +995,10 @@ int vo_x11_check_events(struct vo *vo)
             if (Event.xclient.message_type == x11->XAWM_PROTOCOLS &&
                 Event.xclient.data.l[0] == x11->XAWM_DELETE_WINDOW)
                 mp_input_put_key(vo->input_ctx, MP_KEY_CLOSE_WIN);
+            vo_x11_dnd_handle_message(vo, &Event.xclient);
+            break;
+        case SelectionNotify:
+            vo_x11_dnd_handle_selection(vo, &Event.xselection);
             break;
         default:
             if (Event.type == x11->ShmCompletionEvent) {
@@ -1054,9 +1221,9 @@ static void vo_x11_set_wm_icon(struct vo_x11_state *x11)
     for (int n = 0; n < num_icons; n++) {
         *cur++ = icon_w[n];
         *cur++ = icon_h[n];
-        uint32_t *src = icon_data[n];
-        for (int i = 0; i < icon_h[n] * icon_w[n]; i++)
-            *cur++ = src[i];
+        uint8_t *s = icon_data[n];
+        for (int i = 0; i < icon_h[n] * icon_w[n]; i++, s += 4)
+            *cur++ = s[0] | (s[1] << 8) | (s[2] << 16) | ((unsigned)s[3] << 24);
     }
 
     XChangeProperty(x11->display, x11->window, x11->XA_NET_WM_ICON,
@@ -1123,6 +1290,7 @@ static void vo_x11_create_window(struct vo *vo, XVisualInfo *vis, int x, int y,
 
     vo_x11_set_wm_icon(x11);
     vo_x11_update_window_title(vo);
+    vo_x11_dnd_init_window(vo);
 }
 
 static void vo_x11_map_window(struct vo *vo, int x, int y, int w, int h)
@@ -1177,12 +1345,22 @@ static void vo_x11_highlevel_resize(struct vo *vo, int x, int y, int w, int h)
  *
  * If the window already exists, it just moves and resizes it.
  */
-void vo_x11_config_vo_window(struct vo *vo, XVisualInfo *vis, int x, int y,
-                             unsigned int width, unsigned int height, int flags,
+void vo_x11_config_vo_window(struct vo *vo, XVisualInfo *vis, int flags,
                              const char *classname)
 {
     struct mp_vo_opts *opts = vo->opts;
     struct vo_x11_state *x11 = vo->x11;
+
+    vo_x11_update_screeninfo(vo);
+
+    struct vo_win_geometry geo;
+    vo_calc_window_geometry(vo, &x11->screenrc, &geo);
+    vo_apply_window_geometry(vo, &geo);
+
+    int x = geo.win.x0;
+    int y = geo.win.y0;
+    int width = geo.win.x1 - geo.win.x0;
+    int height = geo.win.y1 - geo.win.y0;
 
     if (opts->WinID >= 0) {
         if (opts->WinID == 0)
@@ -1238,10 +1416,10 @@ static void fill_rect(struct vo *vo, GC gc, int x0, int y0, int x1, int y1)
 {
     struct vo_x11_state *x11 = vo->x11;
 
-    x0 = FFMAX(x0, 0);
-    y0 = FFMAX(y0, 0);
-    x1 = FFMIN(x1, x11->win_width);
-    y1 = FFMIN(y1, x11->win_height);
+    x0 = MPMAX(x0, 0);
+    y0 = MPMAX(y0, 0);
+    x1 = MPMIN(x1, x11->win_width);
+    y1 = MPMIN(y1, x11->win_height);
 
     if (x11->window && x1 > x0 && y1 > y0)
         XFillRectangle(x11->display, x11->window, gc, x0, y0, x1 - x0, y1 - y0);
@@ -1267,11 +1445,9 @@ void vo_x11_clear_background(struct vo *vo, const struct mp_rect *rc)
 void vo_x11_clearwindow(struct vo *vo, Window vo_window)
 {
     struct vo_x11_state *x11 = vo->x11;
-    struct mp_vo_opts *opts = vo->opts;
     if (x11->f_gc == None)
         return;
-    XFillRectangle(x11->display, vo_window, x11->f_gc, 0, 0,
-                   opts->screenwidth, opts->screenheight);
+    XFillRectangle(x11->display, vo_window, x11->f_gc, 0, 0, INT_MAX, INT_MAX);
     XFlush(x11->display);
 }
 
@@ -1405,10 +1581,10 @@ static void vo_x11_fullscreen(struct vo *vo)
 
         vo_x11_update_screeninfo(vo);
 
-        x = vo->xinerama_x;
-        y = vo->xinerama_y;
-        w = opts->screenwidth;
-        h = opts->screenheight;
+        x = x11->screenrc.x0;
+        y = x11->screenrc.y0;
+        w = x11->screenrc.x1 - x;
+        h = x11->screenrc.y1 - y;
 
         if ((x11->fs_type & vo_wm_FULLSCREEN) && opts->fsscreen_id != -1) {
             // The EWMH fullscreen hint always works on the current screen, so
@@ -1488,8 +1664,6 @@ int vo_x11_control(struct vo *vo, int *events, int request, void *arg)
         vo_x11_border(vo);
         *events |= VO_EVENT_RESIZE;
         return VO_TRUE;
-    case VOCTRL_UPDATE_SCREENINFO:
-        vo_x11_update_screeninfo(vo);
         return VO_TRUE;
     case VOCTRL_GET_WINDOW_SIZE: {
         int *s = arg;

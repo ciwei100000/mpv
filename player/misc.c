@@ -50,8 +50,7 @@ double get_relative_time(struct MPContext *mpctx)
     return delta * 0.000001;
 }
 
-double rel_time_to_abs(struct MPContext *mpctx, struct m_rel_time t,
-                       double fallback_time)
+double rel_time_to_abs(struct MPContext *mpctx, struct m_rel_time t)
 {
     double length = get_time_length(mpctx);
     switch (t.type) {
@@ -66,23 +65,25 @@ double rel_time_to_abs(struct MPContext *mpctx, struct m_rel_time t,
             return length * (t.pos / 100.0);
         break;
     case REL_TIME_CHAPTER:
-        if (chapter_start_time(mpctx, t.pos) >= 0)
+        if (chapter_start_time(mpctx, t.pos) != MP_NOPTS_VALUE)
             return chapter_start_time(mpctx, t.pos);
         break;
     }
-    return fallback_time;
+    return MP_NOPTS_VALUE;
 }
 
 double get_play_end_pts(struct MPContext *mpctx)
 {
     struct MPOpts *opts = mpctx->opts;
     if (opts->play_end.type) {
-        return rel_time_to_abs(mpctx, opts->play_end, MP_NOPTS_VALUE);
+        return rel_time_to_abs(mpctx, opts->play_end);
     } else if (opts->play_length.type) {
         double startpts = get_start_time(mpctx);
-        double start = rel_time_to_abs(mpctx, opts->play_start, startpts);
-        double length = rel_time_to_abs(mpctx, opts->play_length, -1);
-        if (start != -1 && length != -1)
+        double start = rel_time_to_abs(mpctx, opts->play_start);
+        if (start == MP_NOPTS_VALUE)
+            start = startpts;
+        double length = rel_time_to_abs(mpctx, opts->play_length);
+        if (start != MP_NOPTS_VALUE && length != MP_NOPTS_VALUE)
             return start + length;
     }
     return MP_NOPTS_VALUE;
@@ -138,7 +139,7 @@ void update_window_title(struct MPContext *mpctx, bool force)
 {
     if (!mpctx->video_out && !mpctx->ao) {
         talloc_free(mpctx->last_window_title);
-        mpctx->last_window_title = false;
+        mpctx->last_window_title = NULL;
         return;
     }
     char *title = mp_property_expand_string(mpctx, mpctx->opts->wintitle);
@@ -174,10 +175,8 @@ void stream_dump(struct MPContext *mpctx)
         if (!opts->quiet && ((stream->pos / (1024 * 1024)) % 2) == 1) {
             uint64_t pos = stream->pos - stream->start_pos;
             uint64_t end = stream->end_pos - stream->start_pos;
-            char *line = talloc_asprintf(NULL, "Dumping %lld/%lld...",
-                (long long int)pos, (long long int)end);
-            write_status_line(mpctx, line);
-            talloc_free(line);
+            MP_MSG(mpctx, MSGL_STATUS, "Dumping %lld/%lld...",
+                   (long long int)pos, (long long int)end);
         }
         stream_fill_buffer(stream);
         for (;;) {

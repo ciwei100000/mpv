@@ -24,6 +24,8 @@
 
 #define MP_CMD_MAX_ARGS 10
 
+#define MP_CMD_OPT_ARG 0x1000
+
 struct mp_cmd_def {
     int id;             // one of MP_CMD_...
     const char *name;   // user-visible name (as used in input.conf)
@@ -82,7 +84,7 @@ enum mp_command_type {
     MP_CMD_ENABLE_INPUT_SECTION,
     MP_CMD_DISABLE_INPUT_SECTION,
 
-    MP_CMD_DVDNAV,
+    MP_CMD_DISCNAV,
 
     /// DVB commands
     MP_CMD_DVB_SET_CHANNEL,
@@ -98,6 +100,8 @@ enum mp_command_type {
 
     /// Internal for Lua scripts
     MP_CMD_SCRIPT_DISPATCH,
+    MP_CMD_SCRIPT_MESSAGE,
+    MP_CMD_SCRIPT_MESSAGE_TO,
 
     MP_CMD_OVERLAY_ADD,
     MP_CMD_OVERLAY_REMOVE,

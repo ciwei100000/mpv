@@ -32,8 +32,8 @@
 
 #include "options/m_option.h"
 #include "audio/format.h"
-#include "audio/reorder_ch.h"
 #include "ao.h"
+#include "internal.h"
 #include "common/msg.h"
 
 #ifdef __MINGW32__
@@ -165,7 +165,7 @@ static int init(struct ao *ao)
 }
 
 // close audio device
-static void uninit(struct ao *ao, bool cut_audio)
+static void uninit(struct ao *ao)
 {
     struct priv *priv = ao->priv;
 

@@ -62,7 +62,6 @@ struct gl_priv {
 
     int use_ycbcr;
     int use_yuv;
-    struct mp_csp_details colorspace;
     int is_yuv;
     int lscale;
     int cscale;
@@ -1395,8 +1394,13 @@ static void update_yuvconv(struct vo *vo)
 {
     struct gl_priv *p = vo->priv;
     GL *gl = p->gl;
+    if (!vo->params)
+        return;
 
-    struct mp_csp_params cparams = { .colorspace = p->colorspace };
+    struct mp_csp_params cparams = { .colorspace = MP_CSP_DETAILS_DEFAULTS };
+    cparams.colorspace.format = vo->params->colorspace;
+    cparams.colorspace.levels_in = vo->params->colorlevels;
+    cparams.colorspace.levels_out = vo->params->outputlevels;
     mp_csp_copy_equalizer_values(&cparams, &p->video_eq);
     gl_conversion_params_t params = {
         p->target, p->yuvconvtype, cparams,
@@ -1458,11 +1462,7 @@ static void draw_osd(struct vo *vo, struct osd_state *osd)
     struct mp_osd_res res = p->osd_res;
 
     if (p->scaled_osd) {
-        res = (struct mp_osd_res) {
-            .w = p->image_width,
-            .h = p->image_height,
-            .display_par = 1.0 / vo->aspdat.par,
-        };
+        res = osd_res_from_image_params(vo->params);
         gl->MatrixMode(GL_MODELVIEW);
         gl->PushMatrix();
         // Setup image space -> screen space (assumes osd_res in screen space)
@@ -1699,8 +1699,7 @@ static int initGl(struct vo *vo, uint32_t d_width, uint32_t d_height)
     return 1;
 }
 
-static bool config_window(struct vo *vo, uint32_t d_width, uint32_t d_height,
-                          uint32_t flags)
+static bool config_window(struct vo *vo, int flags)
 {
     struct gl_priv *p = vo->priv;
 
@@ -1710,33 +1709,30 @@ static bool config_window(struct vo *vo, uint32_t d_width, uint32_t d_height,
     int mpgl_caps = MPGL_CAP_GL_LEGACY;
     if (!p->allow_sw)
         mpgl_caps |= MPGL_CAP_NO_SW;
-    return mpgl_config_window(p->glctx, mpgl_caps, d_width, d_height, flags);
+    return mpgl_config_window(p->glctx, mpgl_caps, flags);
 }
 
-static int config(struct vo *vo, uint32_t width, uint32_t height,
-                  uint32_t d_width, uint32_t d_height, uint32_t flags,
-                  uint32_t format)
+static int reconfig(struct vo *vo, struct mp_image_params *params, int flags)
 {
     struct gl_priv *p = vo->priv;
 
-    struct mp_imgfmt_desc desc = mp_imgfmt_get_desc(format);
+    struct mp_imgfmt_desc desc = mp_imgfmt_get_desc(params->imgfmt);
 
-    p->image_height = height;
-    p->image_width = width;
-    p->image_format = format;
+    p->image_height = params->h;
+    p->image_width = params->w;
+    p->image_format = params->imgfmt;
     p->is_yuv = !!(desc.flags & MP_IMGFLAG_YUV_P);
     p->is_yuv |= (desc.chroma_xs << 8) | (desc.chroma_ys << 16);
-    if (format == IMGFMT_Y8)
+    if (p->image_format == IMGFMT_Y8)
         p->is_yuv = 0;
-    glFindFormat(format, p->have_texture_rg, NULL, &p->texfmt, &p->gl_format,
-                 &p->gl_type);
+    glFindFormat(p->image_format, p->have_texture_rg, NULL, &p->texfmt,
+                 &p->gl_format, &p->gl_type);
 
     p->vo_flipped = !!(flags & VOFLAG_FLIPPING);
 
-    if (vo->config_count)
-        uninitGl(vo);
+    uninitGl(vo);
 
-    if (!config_window(vo, d_width, d_height, flags))
+    if (!config_window(vo, flags))
         return -1;
 
     initGl(vo, vo->dwidth, vo->dheight);
@@ -2009,6 +2005,9 @@ static mp_image_t *get_screenshot(struct vo *vo)
     struct gl_priv *p = vo->priv;
     GL *gl = p->gl;
 
+    if (!vo->params)
+        return NULL;
+
     mp_image_t *image = mp_image_alloc(p->image_format, p->texture_width,
                                                         p->texture_height);
 
@@ -2025,9 +2024,7 @@ static mp_image_t *get_screenshot(struct vo *vo)
         gl->ActiveTexture(GL_TEXTURE0);
     }
     mp_image_set_size(image, p->image_width, p->image_height);
-    mp_image_set_display_size(image, vo->aspdat.prew, vo->aspdat.preh);
-
-    mp_image_set_colorspace_details(image, &p->colorspace);
+    mp_image_set_attributes(image, vo->params);
 
     return image;
 }
@@ -2085,7 +2082,7 @@ static int preinit(struct vo *vo)
     p->gl = p->glctx->gl;
 
     if (p->use_yuv == -1) {
-        if (!config_window(vo, 320, 200, VOFLAG_HIDDEN))
+        if (!config_window(vo, VOFLAG_HIDDEN))
             goto err_out;
         autodetectGlExtensions(vo);
     }
@@ -2126,18 +2123,16 @@ static int control(struct vo *vo, uint32_t request, void *data)
             return VO_TRUE;
         }
         break;
-    case VOCTRL_SET_YUV_COLORSPACE: {
+    case VOCTRL_GET_COLORSPACE: {
+        struct mp_image_params *params = data;
         bool supports_csp = (1 << p->use_yuv) & MASK_NOT_COMBINERS;
-        if (vo->config_count && supports_csp) {
-            p->colorspace = *(struct mp_csp_details *)data;
-            update_yuvconv(vo);
-            vo->want_redraw = true;
+        if (vo->params && supports_csp) {
+            params->colorspace = vo->params->colorspace;
+            params->colorlevels = vo->params->colorlevels;
+            params->outputlevels = vo->params->outputlevels;
         }
         return VO_TRUE;
     }
-    case VOCTRL_GET_YUV_COLORSPACE:
-        *(struct mp_csp_details *)data = p->colorspace;
-        return VO_TRUE;
     case VOCTRL_REDRAW_FRAME:
         do_render(vo);
         return true;
@@ -2168,7 +2163,7 @@ const struct vo_driver video_out_opengl_old = {
     .name = "opengl-old",
     .preinit = preinit,
     .query_format = query_format,
-    .config = config,
+    .reconfig = reconfig,
     .control = control,
     .draw_image = draw_image,
     .draw_osd = draw_osd,
@@ -2178,7 +2173,6 @@ const struct vo_driver video_out_opengl_old = {
     .priv_defaults = &(const struct gl_priv) {
         .many_fmts = 1,
         .use_yuv = -1,
-        .colorspace = MP_CSP_DETAILS_DEFAULTS,
         .filter_strength = 0.5,
         .use_rectangle = -1,
         .ati_hack = -1,

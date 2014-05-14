@@ -43,7 +43,7 @@
 #include "video/mp_image.h"
 #include "video/vfcap.h"
 
-#include "aspect.h"
+#include "win_state.h"
 #include "config.h"
 #include "vo.h"
 
@@ -260,7 +260,7 @@ static void destroy_renderer(struct vo *vo)
 }
 
 static bool try_create_renderer(struct vo *vo, int i, const char *driver,
-                                int w, int h)
+                                struct mp_rect *rc, int flags)
 {
     struct priv *vc = vo->priv;
 
@@ -271,13 +271,13 @@ static bool try_create_renderer(struct vo *vo, int i, const char *driver,
     if (!is_good_renderer(&ri, driver, vc->allow_sw, NULL))
         return false;
 
-    bool xy_valid = vo->opts->geometry.xy_valid;
+    bool xy_valid = flags & VO_WIN_FORCE_POS;
 
     // then actually try
     vc->window = SDL_CreateWindow("MPV",
-                                  xy_valid ? vo->dx : SDL_WINDOWPOS_UNDEFINED,
-                                  xy_valid ? vo->dy : SDL_WINDOWPOS_UNDEFINED,
-                                  w, h,
+                                  xy_valid ? rc->x0 : SDL_WINDOWPOS_UNDEFINED,
+                                  xy_valid ? rc->y0 : SDL_WINDOWPOS_UNDEFINED,
+                                  rc->x1 - rc->x0, rc->y1 - rc->y0,
                                   SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
     if (!vc->window) {
         MP_ERR(vo, "SDL_CreateWindow failedd\n");
@@ -315,7 +315,8 @@ static bool try_create_renderer(struct vo *vo, int i, const char *driver,
     return true;
 }
 
-static int init_renderer(struct vo *vo, int w, int h)
+// flags: VO_WIN_* bits
+static int init_renderer(struct vo *vo, struct mp_rect *rc, int flags)
 {
     struct priv *vc = vo->priv;
 
@@ -323,16 +324,16 @@ static int init_renderer(struct vo *vo, int w, int h)
     int i;
 
     if (vc->renderer_index >= 0)
-        if (try_create_renderer(vo, vc->renderer_index, NULL, w, h))
+        if (try_create_renderer(vo, vc->renderer_index, NULL, rc, flags))
             return 0;
 
     for (i = 0; i < n; ++i)
         if (try_create_renderer(vo, i, SDL_GetHint(SDL_HINT_RENDER_DRIVER),
-                                w, h))
+                                rc, flags))
             return 0;
 
     for (i = 0; i < n; ++i)
-        if (try_create_renderer(vo, i, NULL, w, h))
+        if (try_create_renderer(vo, i, NULL, rc, flags))
             return 0;
 
     MP_ERR(vo, "No supported renderer\n");
@@ -398,11 +399,31 @@ static void set_fullscreen(struct vo *vo)
     force_resize(vo);
 }
 
-static int config(struct vo *vo, uint32_t width, uint32_t height,
-                  uint32_t d_width, uint32_t d_height, uint32_t flags,
-                  uint32_t format)
+static void update_screeninfo(struct vo *vo, struct mp_rect *screenrc)
 {
     struct priv *vc = vo->priv;
+    SDL_DisplayMode mode;
+    if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(vc->window),
+                                  &mode)) {
+        MP_ERR(vo, "SDL_GetCurrentDisplayMode failed\n");
+        return;
+    }
+    *screenrc = (struct mp_rect){0, 0, mode.w, mode.h};
+}
+
+static int reconfig(struct vo *vo, struct mp_image_params *params, int flags)
+{
+    struct priv *vc = vo->priv;
+
+    struct vo_win_geometry geo;
+    struct mp_rect screenrc;
+
+    update_screeninfo(vo, &screenrc);
+    vo_calc_window_geometry(vo, &screenrc, &geo);
+    vo_apply_window_geometry(vo, &geo);
+
+    int win_w = vo->dwidth;
+    int win_h = vo->dheight;
 
     if (vc->reinit_renderer) {
         destroy_renderer(vo);
@@ -410,9 +431,9 @@ static int config(struct vo *vo, uint32_t width, uint32_t height,
     }
 
     if (vc->window)
-        SDL_SetWindowSize(vc->window, d_width, d_height);
+        SDL_SetWindowSize(vc->window, win_w, win_h);
     else {
-        if (init_renderer(vo, d_width, d_height) != 0)
+        if (init_renderer(vo, &geo.win, geo.flags) != 0)
             return -1;
     }
 
@@ -423,7 +444,7 @@ static int config(struct vo *vo, uint32_t width, uint32_t height,
     for (i = 0; i < vc->renderer_info.num_texture_formats; ++i)
         for (j = 0; j < sizeof(formats) / sizeof(formats[0]); ++j)
             if (vc->renderer_info.texture_formats[i] == formats[j].sdl)
-                if (format == formats[j].mpv)
+                if (params->imgfmt == formats[j].mpv)
                     texfmt = formats[j].sdl;
     if (texfmt == SDL_PIXELFORMAT_UNKNOWN) {
         MP_ERR(vo, "Invalid pixel format\n");
@@ -432,15 +453,16 @@ static int config(struct vo *vo, uint32_t width, uint32_t height,
 
     vc->tex_swapped = texfmt == SDL_PIXELFORMAT_YV12;
     vc->tex = SDL_CreateTexture(vc->renderer, texfmt,
-                                SDL_TEXTUREACCESS_STREAMING, width, height);
+                                SDL_TEXTUREACCESS_STREAMING,
+                                params->w, params->h);
     if (!vc->tex) {
         MP_ERR(vo, "Could not create a texture\n");
         return -1;
     }
 
     mp_image_t *texmpi = &vc->texmpi;
-    mp_image_set_size(texmpi, width, height);
-    mp_image_setfmt(texmpi, format);
+    mp_image_set_size(texmpi, params->w, params->h);
+    mp_image_setfmt(texmpi, params->imgfmt);
     switch (texmpi->num_planes) {
     case 1:
     case 3:
@@ -452,7 +474,7 @@ static int config(struct vo *vo, uint32_t width, uint32_t height,
         return -1;
     }
 
-    resize(vo, d_width, d_height);
+    resize(vo, win_w, win_h);
 
     SDL_DisableScreenSaver();
 
@@ -727,7 +749,7 @@ static void draw_osd(struct vo *vo, struct osd_state *osd)
         [SUBBITMAP_RGBA] = true,
     };
 
-    osd_draw(osd, vc->osd_res, osd->vo_pts, 0, osdformats, draw_osd_cb, vo);
+    osd_draw(osd, vc->osd_res, osd_get_vo_pts(osd), 0, osdformats, draw_osd_cb, vo);
 }
 
 static int preinit(struct vo *vo)
@@ -756,7 +778,7 @@ static int preinit(struct vo *vo)
 
     // try creating a renderer (this also gets the renderer_info data
     // for query_format to use!)
-    if (init_renderer(vo, 640, 480) != 0)
+    if (init_renderer(vo, &(struct mp_rect){.x1 = 640, .y1 = 480}, 0) != 0)
         return -1;
 
     // please reinitialize the renderer to proper size on config()
@@ -880,21 +902,6 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
     }
 }
 
-static void update_screeninfo(struct vo *vo)
-{
-    struct priv *vc = vo->priv;
-    SDL_DisplayMode mode;
-    if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(vc->window),
-                                  &mode)) {
-        MP_ERR(vo, "SDL_GetCurrentDisplayMode failed\n");
-        return;
-    }
-    struct mp_vo_opts *opts = vo->opts;
-    opts->screenwidth = mode.w;
-    opts->screenheight = mode.h;
-    aspect_save_screenres(vo, opts->screenwidth, opts->screenheight);
-}
-
 static struct mp_image *get_screenshot(struct vo *vo)
 {
     struct priv *vc = vo->priv;
@@ -959,9 +966,6 @@ static int control(struct vo *vo, uint32_t request, void *data)
     case VOCTRL_REDRAW_FRAME:
         draw_image(vo, NULL);
         return 1;
-    case VOCTRL_UPDATE_SCREENINFO:
-        update_screeninfo(vo);
-        return 1;
     case VOCTRL_GET_PANSCAN:
         return VO_TRUE;
     case VOCTRL_SET_PANSCAN:
@@ -1012,7 +1016,7 @@ const struct vo_driver video_out_sdl = {
     },
     .preinit = preinit,
     .query_format = query_format,
-    .config = config,
+    .reconfig = reconfig,
     .control = control,
     .draw_image = draw_image,
     .uninit = uninit,

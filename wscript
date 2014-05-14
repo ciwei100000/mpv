@@ -10,6 +10,16 @@ from waftools.checks.custom import *
 
 build_options = [
     {
+        'name': '--libmpv-shared',
+        'desc': 'shared library',
+        'default': 'disable',
+        'func': check_true
+    }, {
+        'name': '--client-api-examples',
+        'desc': 'build client API examples',
+        'deps': ['libmpv-shared'],
+        'func': check_true
+    }, {
         'name': '--static-build',
         'desc': 'static build',
         'default': 'disable',
@@ -31,8 +41,7 @@ build_options = [
     }, {
         'name': '--pdf-build',
         'desc': 'pdf manual generation',
-        'func': check_ctx_vars('RST2LATEX', 'PDFLATEX'),
-        'default': 'disable'
+        'func': check_ctx_vars('RST2PDF'),
     }, {
         'name': 'libdl',
         'desc': 'dynamic loader',
@@ -60,8 +69,9 @@ build_options = [
         'deps_any': [ 'os-win32', 'os-cygwin'],
         'func': check_ctx_vars('WINDRES')
     }, {
+        # does nothing - left for backward and forward compatibility
         'name': '--asm',
-        'desc': 'inline assembly',
+        'desc': 'inline assembly (currently without effect)',
         'default': 'enable',
         'func': check_true,
     }
@@ -76,10 +86,6 @@ main_dependencies = [
         'name': 'noexecstack',
         'desc': 'linker support for --nxcompat --no-seh --dynamicbase',
         'func': check_cc(linkflags=['-Wl,--nxcompat', '-Wl,--no-seh', '-Wl,--dynamicbase'])
-    }, {
-        'name': 'ebx-available',
-        'desc': 'ebx availability',
-        'func': check_cc(fragment=load_fragment('ebx.c'))
     } , {
         'name': 'libm',
         'desc': '-lm',
@@ -188,6 +194,17 @@ iconv support use --disable-iconv.",
         'desc': 'setmode()',
         'func': check_statement('io.h', 'setmode(0, 0)')
     }, {
+        'name': 'bsd-fstatfs',
+        'desc': "BSD's fstatfs()",
+        'func': check_statement(['sys/param.h', 'sys/mount.h'],
+                                'struct statfs fs; fstatfs(0, &fs); fs.f_fstypename')
+    }, {
+        'name': 'linux-fstatfs',
+        'desc': "Linux's fstatfs()",
+        'deps': [ 'os-linux' ],
+        'func': check_statement('sys/vfs.h',
+                                'struct statfs fs; fstatfs(0, &fs); fs.f_namelen')
+    }, {
         'name': 'sys-sysinfo-h',
         'desc': 'sys/sysinfo.h',
         'func': check_statement('sys/sysinfo.h',
@@ -268,7 +285,7 @@ If you really mean to compile without libass support use --disable-libass."
     }, {
         'name': '--libbluray',
         'desc': 'Bluray support',
-        'func': check_pkg_config('libbluray', '>= 0.2.1'),
+        'func': check_pkg_config('libbluray', '>= 0.3.0'),
     }, {
         'name': '--dvdread',
         'desc': 'dvdread support',
@@ -302,14 +319,18 @@ If you really mean to compile without libass support use --disable-libass."
         'name': '--lcms2',
         'desc': 'LCMS2 support',
         'func': check_pkg_config('lcms2'),
+    }, {
+        'name': '--vapoursynth',
+        'desc': 'VapourSynth filter bridge',
+        'func': check_pkg_config('vapoursynth >= 23 vapoursynth-script >= 23'),
     }
 ]
 
 libav_pkg_config_checks = [
-    'libavutil',   '>= 52.3.0',
-    'libavcodec',  '> 54.34.0',
-    'libavformat', '> 54.19.0',
-    'libswscale',  '>= 2.0.0'
+    'libavutil',   '>= 52.48.101',
+    'libavcodec',  '>= 55.34.1',
+    'libavformat', '>= 55.12.0',
+    'libswscale',  '>= 2.1.2'
 ]
 
 libav_dependencies = [
@@ -323,18 +344,11 @@ Libav libraries ({0}). Aborting.".format(" ".join(libav_pkg_config_checks))
     }, {
         'name': '--libavresample',
         'desc': 'libavresample',
-        'func': check_pkg_config('libavresample',  '>= 1.0.0'),
-    }, {
-        'name': 'avresample-set-channel-mapping',
-        'desc': 'libavresample channel mapping API',
-        'deps': [ 'libavresample' ],
-        'func': check_statement('libavresample/avresample.h',
-                                'avresample_set_channel_mapping(NULL, NULL)',
-                                use='libavresample'),
+        'func': check_pkg_config('libavresample',  '>= 1.1.0'),
     }, {
         'name': '--libswresample',
         'desc': 'libswresample',
-        'func': check_pkg_config('libswresample', '>= 0.17.102'),
+        'func': check_pkg_config('libswresample', '>= 0.17.104'),
         'deps_neg': ['libavresample'],
     }, {
         'name': 'resampler',
@@ -343,12 +357,6 @@ Libav libraries ({0}). Aborting.".format(" ".join(libav_pkg_config_checks))
         'func': check_true,
         'req':  True,
         'fmsg': 'No resampler found. Install libavresample or libswresample (FFmpeg).'
-    }, {
-        'name': 'avcodec-new-vdpau-api',
-        'desc': 'libavcodec new vdpau API',
-        'func': check_statement('libavutil/pixfmt.h',
-                                'int x = AV_PIX_FMT_VDPAU',
-                                use='libav'),
     }, {
         'name': 'avcodec-chroma-pos-api',
         'desc': 'libavcodec avcodec_enum_to_chroma_pos API',
@@ -362,33 +370,9 @@ Libav libraries ({0}). Aborting.".format(" ".join(libav_pkg_config_checks))
                                 'av_frame_get_qp_table(NULL, NULL, NULL)',
                                 use='libav')
     }, {
-        'name': 'avutil-refcounting',
-        'desc': 'libavutil ref-counting API',
-        'func': check_statement('libavutil/frame.h', 'av_frame_unref(NULL)',
-                                use='libav'),
-    } , {
-        'name': 'av-opt-set-int-list',
-        'desc': 'libavutil av_opt_set_int_list() API',
-        'func': check_statement('libavutil/opt.h',
-                                'av_opt_set_int_list(0,0,(int*)0,0,0)',
-                                use='libav')
-    }, {
         'name': '--libavfilter',
         'desc': 'libavfilter',
-        'func': compose_checks(
-            check_pkg_config('libavfilter'),
-            check_cc(fragment=load_fragment('libavfilter.c'),
-                     use='libavfilter')),
-    }, {
-        'name': '--vf-lavfi',
-        'desc': 'using libavfilter through vf_lavfi',
-        'deps': [ 'libavfilter', 'avutil-refcounting' ],
-        'func': check_true
-    }, {
-        'name': '--af-lavfi',
-        'desc': 'using libavfilter through af_lavfi',
-        'deps': [ 'libavfilter', 'av-opt-set-int-list' ],
-        'func': check_true
+        'func': check_pkg_config('libavfilter', '>= 3.90.100'),
     }, {
         'name': '--libavdevice',
         'desc': 'libavdevice',
@@ -396,7 +380,25 @@ Libav libraries ({0}). Aborting.".format(" ".join(libav_pkg_config_checks))
     }, {
         'name': '--libpostproc',
         'desc': 'libpostproc',
-        'func': check_pkg_config('libpostproc', '>= 52.0.0'),
+        'func': check_pkg_config('libpostproc', '>= 52.2.100'),
+    }, {
+        'name': 'avcodec-metadata-update-side-data',
+        'desc': 'libavcodec AV_PKT_DATA_METADATA_UPDATE side data type',
+        'func': check_statement('libavcodec/avcodec.h',
+                                'enum AVPacketSideDataType type = AV_PKT_DATA_METADATA_UPDATE',
+                                use='libav')
+    }, {
+        'name': 'avcodec-replaygain-side-data',
+        'desc': 'libavcodec AV_PKT_DATA_REPLAYGAIN side data type',
+        'func': check_statement('libavcodec/avcodec.h',
+                                'enum AVPacketSideDataType type = AV_PKT_DATA_REPLAYGAIN',
+                                use='libav')
+    },{
+        'name': 'avframe-metadata',
+        'desc': 'libavutil AVFrame metadata',
+        'func': check_statement('libavutil/frame.h',
+                                'av_frame_get_metadata(NULL)',
+                                use='libav')
     }
 ]
 
@@ -407,7 +409,7 @@ audio_output_features = [
         'func': check_pkg_config('sdl2'),
         'default': 'disable'
     }, {
-        'name': '--sdl',
+        'name': '--sdl1',
         'desc': 'SDL (1.x)',
         'deps_neg': [ 'sdl2' ],
         'func': check_pkg_config('sdl'),
@@ -659,7 +661,7 @@ hwaccel_features = [
     } , {
         'name': '--vda-hwaccel',
         'desc': 'libavcodec VDA hwaccel',
-        'deps': [ 'corevideo', 'avutil-refcounting'],
+        'deps': [ 'corevideo'],
         'func': compose_checks(
             check_headers('VideoDecodeAcceleration/VDADecoder.h'),
             check_statement('libavcodec/vda.h',
@@ -674,42 +676,27 @@ hwaccel_features = [
             """struct vda_context a = (struct vda_context) {
                    .use_ref_buffer = 1 }""", use='libav')
     }, {
+        'name': 'vda-av-vda-alloc-context',
+        'desc': "libavcodec VDA hwaccel 1.2",
+        'deps': [ 'vda-hwaccel' ],
+        'func': check_statement('libavcodec/vda.h',
+                                'av_vda_alloc_context()',
+                                use='libav')
+    }, {
         'name': '--vda-gl',
         'desc': 'VDA with OpenGL',
         'deps': [ 'gl-cocoa', 'vda-hwaccel' ],
         'func': check_true
     }, {
-        'name': '--vdpau-decoder',
-        'desc': 'VDPAU decoder (old)',
-        'deps': [ 'vdpau' ],
-        'deps_neg': ['avcodec-new-vdpau-api'],
-        'func': check_true,
-    }, {
         'name': '--vdpau-hwaccel',
-        'desc': 'libavcodec VDPAU hwaccel (new)',
-        'deps': [ 'vdpau', 'avcodec-new-vdpau-api' ],
+        'desc': 'libavcodec VDPAU hwaccel',
+        'deps': [ 'vdpau' ],
         'func': check_true,
     }
 ]
 
 radio_and_tv_features = [
     {
-        'name': '--radio',
-        'desc': 'Radio interface',
-        'func': check_true,
-        'default': 'disable'
-    }, {
-        'name': '--radio-capture',
-        'desc': 'Radio capture (through PCI/line-in)',
-        'func': check_true,
-        'deps': [ 'radio' ],
-        'deps_any': [ 'alsa', 'oss-audio', 'sndio'],
-    }, {
-        'name': '--radio-v4l2',
-        'desc': 'Video4Linux2 radio interface',
-        'func': check_cc(header_name='linux/videodev2.h'),
-        'default': 'disable'
-    }, {
         'name': '--tv',
         'desc': 'TV interface',
         'func': check_true,
@@ -728,7 +715,7 @@ radio_and_tv_features = [
     }, {
         'name': '--audio-input',
         'desc': 'audio input support',
-        'deps_any': [ 'radio-capture', 'tv-v4l2' ],
+        'deps_any': [ 'tv-v4l2' ],
         'func': check_true
     }
 ]
@@ -745,6 +732,8 @@ _INSTALL_DIRS_LIST = [
     ('bindir',  '${PREFIX}/bin',      'binary files'),
     ('libdir',  '${PREFIX}/lib',      'library files'),
     ('confdir', '${PREFIX}/etc/mpv',  'configuration files'),
+
+    ('incdir',  '${PREFIX}/include',  'include files'),
 
     ('datadir', '${PREFIX}/share',    'data files'),
     ('mandir',  '${DATADIR}/man',     'man pages '),
@@ -771,7 +760,7 @@ def options(opt):
     opt.parse_features('audio outputs',     audio_output_features)
     opt.parse_features('video outputs',     video_output_features)
     opt.parse_features('hwaccels',          hwaccel_features)
-    opt.parse_features('radio/tv features', radio_and_tv_features)
+    opt.parse_features('tv features',       radio_and_tv_features)
     opt.parse_features('scripting',         scripting_features)
 
     group = opt.get_option_group("scripting")
@@ -798,8 +787,7 @@ def configure(ctx):
     ctx.find_program(pkg_config,  var='PKG_CONFIG')
     ctx.find_program('perl',      var='BIN_PERL')
     ctx.find_program('rst2man',   var='RST2MAN',   mandatory=False)
-    ctx.find_program('rst2latex', var='RST2LATEX', mandatory=False)
-    ctx.find_program('pdflatex',  var='PDFLATEX',  mandatory=False)
+    ctx.find_program('rst2pdf',   var='RST2PDF',   mandatory=False)
     ctx.find_program(windres,     var='WINDRES',   mandatory=False)
 
     for ident, _, _ in _INSTALL_DIRS_LIST:
@@ -814,7 +802,6 @@ def configure(ctx):
     ctx.load('waf_customizations')
     ctx.load('dependencies')
     ctx.load('detections.compiler')
-    ctx.load('detections.cpu')
     ctx.load('detections.devices')
 
     if ctx.env.DEST_OS in ('freebsd', 'openbsd'):

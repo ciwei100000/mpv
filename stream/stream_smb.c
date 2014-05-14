@@ -33,7 +33,7 @@ struct priv {
 
 static void smb_auth_fn(const char *server, const char *share,
              char *workgroup, int wgmaxlen, char *username, int unmaxlen,
-	     char *password, int pwmaxlen)
+             char *password, int pwmaxlen)
 {
   strncpy(workgroup, "LAN", wgmaxlen - 1);
 }
@@ -140,6 +140,7 @@ static int open_f (stream_t *stream, int mode)
   stream->write_buffer = write_buffer;
   stream->close = close_f;
   stream->control = control;
+  stream->read_chunk = 128 * 1024;
 
   return STREAM_OK;
 }

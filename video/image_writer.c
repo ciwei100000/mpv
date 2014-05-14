@@ -123,10 +123,9 @@ static int write_lavc(struct image_writer_ctx *ctx, mp_image_t *image, FILE *fp)
         goto error_exit;
     }
 
-    pic = avcodec_alloc_frame();
+    pic = av_frame_alloc();
     if (!pic)
         goto error_exit;
-    avcodec_get_frame_defaults(pic);
     for (int n = 0; n < 4; n++) {
         pic->data[n] = image->planes[n];
         pic->linesize[n] = image->stride[n];
@@ -142,7 +141,7 @@ error_exit:
     if (avctx)
         avcodec_close(avctx);
     av_free(avctx);
-    avcodec_free_frame(&pic);
+    av_frame_free(&pic);
     av_free_packet(&pkt);
     return success;
 }
@@ -265,8 +264,8 @@ int write_image(struct mp_image *image, const struct image_writer_opts *opts,
 {
     struct mp_image *allocated_image = NULL;
     struct image_writer_opts defs = image_writer_opts_defaults;
-    int d_w = image->display_w ? image->display_w : image->w;
-    int d_h = image->display_h ? image->display_h : image->h;
+    int d_w = image->params.d_w;
+    int d_h = image->params.d_h;
     bool is_anamorphic = image->w != d_w || image->h != d_h;
 
     if (!opts)

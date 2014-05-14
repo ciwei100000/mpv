@@ -308,8 +308,7 @@ static int reconfig(struct vo *vo, struct mp_image_params *fmt, int flags)
                           TrueColor, &p->vinfo))
         return -1;
 
-    vo_x11_config_vo_window(vo, &p->vinfo, vo->dx, vo->dy, vo->dwidth,
-                            vo->dheight, flags, "x11");
+    vo_x11_config_vo_window(vo, &p->vinfo, flags, "x11");
 
     if (!resize(vo))
         return -1;
@@ -428,7 +427,7 @@ static void draw_osd(struct vo *vo, struct osd_state *osd)
 
     struct mp_image img = get_x_buffer(p, p->current_buf);
 
-    osd_draw_on_image(osd, p->osd, osd->vo_pts, 0, &img);
+    osd_draw_on_image(osd, p->osd, osd_get_vo_pts(osd), 0, &img);
 }
 
 static mp_image_t *get_screenshot(struct vo *vo)

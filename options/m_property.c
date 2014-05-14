@@ -29,6 +29,8 @@
 
 #include <libavutil/common.h>
 
+#include "libmpv/client.h"
+
 #include "talloc.h"
 #include "m_option.h"
 #include "m_property.h"
@@ -37,7 +39,6 @@
 
 const struct m_option_type m_option_type_dummy = {
     .name = "Unknown",
-    .flags = M_OPT_TYPE_ALLOW_WILDCARD, // make "vf*" property work
 };
 
 struct legacy_prop {
@@ -157,8 +158,7 @@ int m_property_do(struct mp_log *log, const m_option_t *prop_list,
     case M_PROPERTY_SET_STRING: {
         if (!log)
             return M_PROPERTY_ERROR;
-        // (reject 0 return value: success, but empty string with flag)
-        if (m_option_parse(log, &opt, bstr0(name), bstr0(arg), &val) <= 0)
+        if (m_option_parse(log, &opt, bstr0(name), bstr0(arg), &val) < 0)
             return M_PROPERTY_ERROR;
         r = do_action(prop_list, name, M_PROPERTY_SET, &val, ctx);
         m_option_free(&opt, &val);
@@ -184,21 +184,78 @@ int m_property_do(struct mp_log *log, const m_option_t *prop_list,
     case M_PROPERTY_SET: {
         if (!log)
             return M_PROPERTY_ERROR;
-        if (!opt.type->clamp) {
-            mp_warn(log, "Property '%s' without clamp().\n", name);
-        } else {
-            m_option_copy(&opt, &val, arg);
-            r = opt.type->clamp(&opt, arg);
-            m_option_free(&opt, &val);
-            if (r != 0) {
-                mp_err(log, "Property '%s': invalid value.\n", name);
-                return M_PROPERTY_ERROR;
-            }
+        m_option_copy(&opt, &val, arg);
+        r = opt.type->clamp ? opt.type->clamp(&opt, arg) : 0;
+        m_option_free(&opt, &val);
+        if (r != 0) {
+            mp_err(log, "Property '%s': invalid value.\n", name);
+            return M_PROPERTY_ERROR;
         }
         return do_action(prop_list, name, M_PROPERTY_SET, arg, ctx);
     }
+    case M_PROPERTY_GET_NODE: {
+        if ((r = do_action(prop_list, name, M_PROPERTY_GET_NODE, arg, ctx)) !=
+            M_PROPERTY_NOT_IMPLEMENTED)
+            return r;
+        if ((r = do_action(prop_list, name, M_PROPERTY_GET, &val, ctx)) <= 0)
+            return r;
+        struct mpv_node *node = arg;
+        int err = m_option_get_node(&opt, NULL, node, &val);
+        if (err == M_OPT_UNKNOWN) {
+            r = M_PROPERTY_NOT_IMPLEMENTED;
+        } else if (r < 0) {
+            r = M_PROPERTY_INVALID_FORMAT;
+        } else {
+            r = M_PROPERTY_OK;
+        }
+        m_option_free(&opt, &val);
+        return r;
+    }
+    case M_PROPERTY_SET_NODE: {
+        if ((r = do_action(prop_list, name, M_PROPERTY_SET_NODE, arg, ctx)) !=
+            M_PROPERTY_NOT_IMPLEMENTED)
+            return r;
+        struct mpv_node *node = arg;
+        int err = m_option_set_node(&opt, &val, node);
+        if (err == M_OPT_UNKNOWN) {
+            r = M_PROPERTY_NOT_IMPLEMENTED;
+        } else if (err < 0) {
+            r = M_PROPERTY_INVALID_FORMAT;
+        } else {
+            r = do_action(prop_list, name, M_PROPERTY_SET, &val, ctx);
+        }
+        m_option_free(&opt, &val);
+        return r;
+    }
     default:
         return do_action(prop_list, name, action, arg, ctx);
+    }
+}
+
+bool m_property_split_path(const char *path, bstr *prefix, char **rem)
+{
+    char *next = strchr(path, '/');
+    if (next) {
+        *prefix = bstr_splice(bstr0(path), 0, next - path);
+        *rem = next + 1;
+        return true;
+    } else {
+        *prefix = bstr0(path);
+        *rem = "";
+        return false;
+    }
+}
+
+// If *action is M_PROPERTY_KEY_ACTION, but the associated path is "", then
+// make this into a top-level action.
+static void m_property_unkey(int *action, void **arg)
+{
+    if (*action == M_PROPERTY_KEY_ACTION) {
+        struct m_property_action_arg *ka = *arg;
+        if (!ka->key[0]) {
+            *action = ka->action;
+            *arg = ka->arg;
+        }
     }
 }
 
@@ -309,27 +366,12 @@ char *m_properties_expand_string(const m_option_t *prop_list,
 void m_properties_print_help_list(struct mp_log *log,
                                   const struct m_option* list)
 {
-    char min[50], max[50];
-    int i, count = 0;
+    int count = 0;
 
-    mp_info(log,
-            "\n Name                 Type            Min        Max\n\n");
-    for (i = 0; list[i].name; i++) {
+    mp_info(log, "Name\n\n");
+    for (int i = 0; list[i].name; i++) {
         const m_option_t *opt = &list[i];
-        if (opt->flags & M_OPT_MIN)
-            sprintf(min, "%-8.0f", opt->min);
-        else
-            strcpy(min, "No");
-        if (opt->flags & M_OPT_MAX)
-            sprintf(max, "%-8.0f", opt->max);
-        else
-            strcpy(max, "No");
-        mp_info(log,
-               " %-20.20s %-15.15s %-10.10s %-10.10s\n",
-               opt->name,
-               opt->type->name,
-               min,
-               max);
+        mp_info(log, " %s\n", opt->name);
         count++;
     }
     mp_info(log, "\nTotal: %d properties\n", count);
@@ -383,6 +425,187 @@ int m_property_strdup_ro(const struct m_option* prop, int action, void* arg,
             return M_PROPERTY_UNAVAILABLE;
         *(char **)arg = talloc_strdup(NULL, var);
         return M_PROPERTY_OK;
+    }
+    return M_PROPERTY_NOT_IMPLEMENTED;
+}
+
+// This allows you to make a list of values (like from a struct) available
+// as a number of sub-properties. The property list is set up with the current
+// property values on the stack before calling this function.
+// This does not support write access.
+int m_property_read_sub(const struct m_sub_property *props, int action, void *arg)
+{
+    switch (action) {
+    case M_PROPERTY_GET_TYPE:
+        *(struct m_option *)arg = (struct m_option){.type = CONF_TYPE_NODE};
+        return M_PROPERTY_OK;
+    case M_PROPERTY_GET: {
+        struct mpv_node node;
+        node.format = MPV_FORMAT_NODE_MAP;
+        node.u.list = talloc_zero(NULL, mpv_node_list);
+        mpv_node_list *list = node.u.list;
+        for (int n = 0; props && props[n].name; n++) {
+            const struct m_sub_property *prop = &props[n];
+            if (prop->unavailable)
+                continue;
+            MP_TARRAY_GROW(list, list->values, list->num);
+            MP_TARRAY_GROW(list, list->keys, list->num);
+            struct m_option type = {.type = prop->type};
+            mpv_node *val = &list->values[list->num];
+            if (m_option_get_node(&type, list, val, (void*)&prop->value) < 0) {
+                char *s = m_option_print(&type, &prop->value);
+                val->format = MPV_FORMAT_STRING;
+                val->u.string = talloc_steal(list, s);
+            }
+            list->keys[list->num] = (char *)prop->name;
+            list->num++;
+        }
+        *(struct mpv_node *)arg = node;
+        return M_PROPERTY_OK;
+    }
+    case M_PROPERTY_PRINT: {
+        // Output "something" - what it really should return is not yet decided.
+        // It should probably be something that is easy to consume by slave
+        // mode clients. (M_PROPERTY_PRINT on the other hand can return this
+        // as human readable version just fine).
+        char *res = NULL;
+        for (int n = 0; props && props[n].name; n++) {
+            const struct m_sub_property *prop = &props[n];
+            if (prop->unavailable)
+                continue;
+            struct m_option type = {.type = prop->type};
+            char *s = m_option_print(&type, &prop->value);
+            ta_xasprintf_append(&res, "%s=%s\n", prop->name, s);
+            talloc_free(s);
+        }
+        *(char **)arg = res;
+        return M_PROPERTY_OK;
+    }
+    case M_PROPERTY_KEY_ACTION: {
+        struct m_property_action_arg *ka = arg;
+        const struct m_sub_property *prop = NULL;
+        for (int n = 0; props && props[n].name; n++) {
+            if (strcmp(props[n].name, ka->key) == 0) {
+                prop = &props[n];
+                break;
+            }
+        }
+        if (!prop)
+            return M_PROPERTY_UNKNOWN;
+        if (prop->unavailable)
+            return M_PROPERTY_UNAVAILABLE;
+        struct m_option type = {.type = prop->type};
+        switch (ka->action) {
+        case M_PROPERTY_GET: {
+            memset(ka->arg, 0, type.type->size);
+            m_option_copy(&type, ka->arg, &prop->value);
+            return M_PROPERTY_OK;
+        }
+        case M_PROPERTY_GET_TYPE:
+            *(struct m_option *)ka->arg = type;
+            return M_PROPERTY_OK;
+        }
+    }
+    }
+    return M_PROPERTY_NOT_IMPLEMENTED;
+}
+
+
+// Make a list of items available as indexed sub-properties. E.g. you can access
+// item 0 as "property/0", item 1 as "property/1", etc., where each of these
+// properties is redirected to the get_item(0, ...), get_item(1, ...), callback.
+// Additionally, the number of entries is made available as "property/count".
+// action, arg: property access.
+// count: number of items.
+// get_item: callback to access a single item.
+// ctx: userdata passed to get_item.
+int m_property_read_list(int action, void *arg, int count,
+                         m_get_item_cb get_item, void *ctx)
+{
+    m_property_unkey(&action, &arg);
+    switch (action) {
+    case M_PROPERTY_GET_TYPE:
+        *(struct m_option *)arg = (struct m_option){.type = CONF_TYPE_NODE};
+        return M_PROPERTY_OK;
+    case M_PROPERTY_GET: {
+        struct mpv_node node;
+        node.format = MPV_FORMAT_NODE_ARRAY;
+        node.u.list = talloc_zero(NULL, mpv_node_list);
+        node.u.list->num = count;
+        node.u.list->values = talloc_array(node.u.list, mpv_node, count);
+        for (int n = 0; n < count; n++) {
+            struct mpv_node *sub = &node.u.list->values[n];
+            sub->format = MPV_FORMAT_NONE;
+            int r;
+            r = get_item(n, M_PROPERTY_GET_NODE, sub, ctx);
+            if (r == M_PROPERTY_NOT_IMPLEMENTED) {
+                struct m_option opt = {0};
+                r = get_item(n, M_PROPERTY_GET_TYPE, &opt, ctx);
+                if (r != M_PROPERTY_OK)
+                    goto err;
+                union m_option_value val = {0};
+                r = get_item(n, M_PROPERTY_GET, &val, ctx);
+                if (r != M_PROPERTY_OK)
+                    goto err;
+                m_option_get_node(&opt, node.u.list, sub, &val);
+                m_option_free(&opt, &val);
+            err: ;
+            }
+        }
+        *(struct mpv_node *)arg = node;
+        return M_PROPERTY_OK;
+    }
+    case M_PROPERTY_PRINT: {
+        // See m_property_read_sub() remarks.
+        char *res = NULL;
+        for (int n = 0; n < count; n++) {
+            char *s = NULL;
+            int r = get_item(n, M_PROPERTY_PRINT, &s, ctx);
+            if (r != M_PROPERTY_OK) {
+                talloc_free(res);
+                return r;
+            }
+            ta_xasprintf_append(&res, "%d: %s\n", n, s);
+            talloc_free(s);
+        }
+        *(char **)arg = res;
+        return M_PROPERTY_OK;
+    }
+    case M_PROPERTY_KEY_ACTION: {
+        struct m_property_action_arg *ka = arg;
+        if (strcmp(ka->key, "count") == 0) {
+            switch (ka->action) {
+            case M_PROPERTY_GET_TYPE: {
+                struct m_option opt = {.type = CONF_TYPE_INT};
+                *(struct m_option *)ka->arg = opt;
+                return M_PROPERTY_OK;
+            }
+            case M_PROPERTY_GET:
+                *(int *)ka->arg = MPMAX(0, count);
+                return M_PROPERTY_OK;
+            }
+            return M_PROPERTY_NOT_IMPLEMENTED;
+        }
+        // This is expected of the form "123" or "123/rest"
+        char *next = strchr(ka->key, '/');
+        char *end = NULL;
+        const char *key_end = ka->key + strlen(ka->key);
+        long int item = strtol(ka->key, &end, 10);
+        // not a number, trailing characters, etc.
+        if ((end != key_end || ka->key == key_end) && end != next)
+            return M_PROPERTY_UNKNOWN;
+        if (item < 0 || item >= count)
+            return M_PROPERTY_UNKNOWN;
+        if (next) {
+            // Sub-path
+            struct m_property_action_arg n_ka = *ka;
+            n_ka.key = next + 1;
+            return get_item(item, M_PROPERTY_KEY_ACTION, &n_ka, ctx);
+        } else {
+            // Direct query
+            return get_item(item, ka->action, ka->arg, ctx);
+        }
+    }
     }
     return M_PROPERTY_NOT_IMPLEMENTED;
 }

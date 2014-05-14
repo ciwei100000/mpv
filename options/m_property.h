@@ -22,7 +22,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-struct m_option;
+#include "m_option.h"
+
 struct mp_log;
 
 extern const struct m_option_type m_option_type_dummy;
@@ -67,6 +68,14 @@ enum mp_property_action {
     //  arg: char*
     M_PROPERTY_SET_STRING,
 
+    // Set a mpv_node value.
+    //  arg: mpv_node*
+    M_PROPERTY_GET_NODE,
+
+    // Get a mpv_node value.
+    //  arg: mpv_node*
+    M_PROPERTY_SET_NODE,
+
     // Pass down an action to a sub-property.
     //  arg: struct m_property_action_arg*
     M_PROPERTY_KEY_ACTION,
@@ -101,6 +110,9 @@ enum mp_property_return {
 
     // Returned when asking for a property that doesn't exist.
     M_PROPERTY_UNKNOWN = -3,
+
+    // When trying to set invalid or incorrectly formatted data.
+    M_PROPERTY_INVALID_FORMAT = -4,
 };
 
 // Access a property.
@@ -109,6 +121,12 @@ enum mp_property_return {
 // returns: one of mp_property_return
 int m_property_do(struct mp_log *log, const struct m_option* prop_list,
                   const char* property_name, int action, void* arg, void *ctx);
+
+// Given a path of the form "a/b/c", this function will set *prefix to "a",
+// and rem to "b/c", and return true.
+// If there is no '/' in the path, set prefix to path, and rem to "", and
+// return false.
+bool m_property_split_path(const char *path, bstr *prefix, char **rem);
 
 // Print a list of properties.
 void m_properties_print_help_list(struct mp_log *log,
@@ -140,5 +158,42 @@ int m_property_double_ro(const struct m_option* prop, int action, void* arg,
                          double var);
 int m_property_strdup_ro(const struct m_option* prop, int action, void* arg,
                          const char *var);
+
+struct m_sub_property {
+    // Name of the sub-property - this will be prefixed with the parent
+    // property's name.
+    const char *name;
+    // Type of the data stored in the value member. See m_option.
+    const struct m_option_type *type;
+    // Data returned by the sub-property. m_property_read_sub() will make a
+    // copy of this if needed. It will never write or free the data.
+    union m_option_value value;
+    // This can be set to true if the property should be hidden.
+    bool unavailable;
+};
+
+// Convenience macros which can be used as part of a sub_property entry.
+#define SUB_PROP_INT(i) \
+    .type = CONF_TYPE_INT, .value = {.int_ = (i)}
+#define SUB_PROP_STR(s) \
+    .type = CONF_TYPE_STRING, .value = {.string = (char *)(s)}
+#define SUB_PROP_FLOAT(f) \
+    .type = CONF_TYPE_FLOAT, .value = {.float_ = (f)}
+#define SUB_PROP_FLAG(f) \
+    .type = CONF_TYPE_FLAG, .value = {.flag = (f)}
+
+int m_property_read_sub(const struct m_sub_property *props, int action, void *arg);
+
+
+// Used with m_property_read_list().
+// Get an entry. item is the 0-based index of the item. This behaves like a
+// top-level property request (but you must implement M_PROPERTY_GET_TYPE).
+// item will be in range [0, count), for count see m_property_read_list()
+// action, arg are for property access.
+// ctx is userdata passed to m_property_read_list.
+typedef int (*m_get_item_cb)(int item, int action, void *arg, void *ctx);
+
+int m_property_read_list(int action, void *arg, int count,
+                         m_get_item_cb get_item, void *ctx);
 
 #endif /* MPLAYER_M_PROPERTY_H */

@@ -149,9 +149,10 @@ static void mp_image_alloc_planes(struct mp_image *mpi)
     }
 }
 
-void mp_image_setfmt(struct mp_image *mpi, unsigned int out_fmt)
+void mp_image_setfmt(struct mp_image *mpi, int out_fmt)
 {
     struct mp_imgfmt_desc fmt = mp_imgfmt_get_desc(out_fmt);
+    mpi->params.imgfmt = fmt.id;
     mpi->fmt = fmt;
     mpi->flags = fmt.flags;
     mpi->imgfmt = fmt.id;
@@ -179,8 +180,8 @@ void mp_image_set_size(struct mp_image *mpi, int w, int h)
     if (w >= (1 << 14) || h >= (1 << 14) || w < 0 || h < 0)
         abort();
 
-    mpi->w = mpi->display_w = w;
-    mpi->h = mpi->display_h = h;
+    mpi->w = mpi->params.w = mpi->params.d_w = w;
+    mpi->h = mpi->params.h = mpi->params.d_h = h;
     for (int n = 0; n < mpi->num_planes; n++) {
         mpi->plane_w[n] = mp_chroma_div_up(mpi->w, mpi->fmt.xs[n]);
         mpi->plane_h[n] = mp_chroma_div_up(mpi->h, mpi->fmt.ys[n]);
@@ -189,13 +190,16 @@ void mp_image_set_size(struct mp_image *mpi, int w, int h)
     mpi->chroma_height = mpi->plane_h[1];
 }
 
-void mp_image_set_display_size(struct mp_image *mpi, int dw, int dh)
+void mp_image_set_params(struct mp_image *image,
+                         const struct mp_image_params *params)
 {
-    mpi->display_w = dw;
-    mpi->display_h = dh;
+    // possibly initialize other stuff
+    mp_image_setfmt(image, params->imgfmt);
+    mp_image_set_size(image, params->w, params->h);
+    image->params = *params;
 }
 
-struct mp_image *mp_image_alloc(unsigned int imgfmt, int w, int h)
+struct mp_image *mp_image_alloc(int imgfmt, int w, int h)
 {
     struct mp_image *mpi = talloc_zero(NULL, struct mp_image);
     talloc_set_destructor(mpi, mp_image_destructor);
@@ -345,13 +349,13 @@ void mp_image_copy_attributes(struct mp_image *dst, struct mp_image *src)
     dst->qscale_type = src->qscale_type;
     dst->pts = src->pts;
     if (dst->w == src->w && dst->h == src->h) {
-        dst->display_w = src->display_w;
-        dst->display_h = src->display_h;
+        dst->params.d_w = src->params.d_w;
+        dst->params.d_h = src->params.d_h;
     }
     if ((dst->flags & MP_IMGFLAG_YUV) == (src->flags & MP_IMGFLAG_YUV)) {
-        dst->colorspace = src->colorspace;
-        dst->levels = src->levels;
-        dst->chroma_location = src->chroma_location;
+        dst->params.colorspace = src->params.colorspace;
+        dst->params.colorlevels = src->params.colorlevels;
+        dst->params.chroma_location = src->params.chroma_location;
     }
     if ((dst->fmt.flags & MP_IMGFLAG_PAL) && (src->fmt.flags & MP_IMGFLAG_PAL)) {
         if (dst->planes[1] && src->planes[1])
@@ -439,34 +443,15 @@ bool mp_image_params_equals(const struct mp_image_params *p1,
            p1->d_w == p2->d_w && p1->d_h == p2->d_h &&
            p1->colorspace == p2->colorspace &&
            p1->colorlevels == p2->colorlevels &&
-           p1->chroma_location == p2->chroma_location;
+           p1->outputlevels == p2->outputlevels &&
+           p1->chroma_location == p2->chroma_location &&
+           p1->rotate == p2->rotate;
 }
 
 void mp_image_params_from_image(struct mp_image_params *params,
                                 const struct mp_image *image)
 {
-    // (Ideally mp_image should use mp_image_params directly instead)
-    *params = (struct mp_image_params) {
-        .imgfmt = image->imgfmt,
-        .w = image->w,
-        .h = image->h,
-        .d_w = image->display_w,
-        .d_h = image->display_h,
-        .colorspace = image->colorspace,
-        .colorlevels = image->levels,
-        .chroma_location = image->chroma_location,
-    };
-}
-
-void mp_image_set_params(struct mp_image *image,
-                         const struct mp_image_params *params)
-{
-    mp_image_setfmt(image, params->imgfmt);
-    mp_image_set_size(image, params->w, params->h);
-    mp_image_set_display_size(image, params->d_w, params->d_h);
-    image->colorspace = params->colorspace;
-    image->levels = params->colorlevels;
-    image->chroma_location = params->chroma_location;
+    *params = image->params;
 }
 
 // Set most image parameters, but not image format or size.
@@ -487,18 +472,6 @@ void mp_image_set_attributes(struct mp_image *image,
         }
     }
     mp_image_set_params(image, &nparams);
-}
-
-void mp_image_set_colorspace_details(struct mp_image *image,
-                                     struct mp_csp_details *csp)
-{
-    struct mp_image_params params;
-    mp_image_params_from_image(&params, image);
-    params.colorspace = csp->format;
-    params.colorlevels = csp->levels_in;
-    mp_image_params_guess_csp(&params);
-    image->colorspace = params.colorspace;
-    image->levels = params.colorlevels;
 }
 
 // If details like params->colorspace/colorlevels are missing, guess them from
@@ -561,10 +534,6 @@ void mp_image_copy_fields_from_av_frame(struct mp_image *dst,
 
 #if HAVE_AVUTIL_QP_API
     dst->qscale = av_frame_get_qp_table(src, &dst->qstride, &dst->qscale_type);
-#else
-    dst->qscale = src->qscale_table;
-    dst->qstride = src->qstride;
-    dst->qscale_type = src->qscale_type;
 #endif
 }
 
@@ -595,12 +564,10 @@ void mp_image_copy_fields_to_av_frame(struct AVFrame *dst,
         dst->repeat_pict = 1;
 
 #if HAVE_AVFRAME_COLORSPACE
-    dst->colorspace = mp_csp_to_avcol_spc(src->colorspace);
-    dst->color_range = mp_csp_levels_to_avcol_range(src->levels);
+    dst->colorspace = mp_csp_to_avcol_spc(src->params.colorspace);
+    dst->color_range = mp_csp_levels_to_avcol_range(src->params.colorlevels);
 #endif
 }
-
-#if HAVE_AVUTIL_REFCOUNTING
 
 static void frame_free(void *p)
 {
@@ -659,5 +626,3 @@ struct AVFrame *mp_image_to_av_frame_and_unref(struct mp_image *img)
     talloc_free(new_ref);
     return frame;
 }
-
-#endif /* HAVE_AVUTIL_REFCOUNTING */

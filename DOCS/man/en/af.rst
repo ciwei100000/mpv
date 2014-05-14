@@ -250,8 +250,9 @@ Available filters are:
 
     ``<out-channels>``
 
-    See also ``--format``, ``--srate``, and ``--channels`` for related options.
-    Keep in mind that ``--channels`` does not actually force the number of
+    See also ``--audio-format``, ``--audio-samplerate``, and
+    ``--audio-channels`` for related options. Keep in mind that
+    ``--audio-channels`` does not actually force the number of
     channels in most cases, while this filter can do this.
 
     *NOTE*: this filter used to be named ``force``. Also, unlike the old
@@ -279,6 +280,17 @@ Available filters are:
         Sets the desired gain in dB for all channels in the stream from -200dB
         to +60dB, where -200dB mutes the sound completely and +60dB equals a
         gain of 1000 (default: 0).
+    ``replaygain-track``
+        Adjust volume gain according to the track-gain replaygain value stored
+        in the file metadata.
+    ``replaygain-album``
+        Like replaygain-track, but using the album-gain value instead.
+    ``replaygain-preamp``
+        Pre-amplification gain in dB to apply to the selected replaygain gain
+        (default: 0).
+    ``replaygain-clip=yes|no``
+        Prevent clipping caused by replaygain by automatically lowering the
+        gain (default). Use ``replaygain-clip=no`` to disable this.
     ``softclip``
         Turns soft clipping on. Soft-clipping can make the
         sound more smooth if very high volume levels are used. Enable this
@@ -289,6 +301,12 @@ Available filters are:
     ``s16``
         Force S16 sample format if set. Lower quality, but might be faster
         in some situations.
+    ``detach``
+        Remove the filter if the volume is not changed at audio filter config
+        time. Useful with replaygain: if the current file has no replaygain
+        tags, then the filter will be removed if this option is enabled.
+        (If ``--softvol=yes`` is used and the player volume controls are used
+        during playback, a different volume filter will be inserted.)
 
     .. admonition:: Example
 

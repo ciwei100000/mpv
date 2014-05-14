@@ -87,7 +87,7 @@ struct xvctx {
     uint32_t image_width;
     uint32_t image_height;
     uint32_t image_format;
-    struct mp_csp_details cached_csp;
+    int cached_csp;
     struct mp_rect src_rect;
     struct mp_rect dst_rect;
     uint32_t max_width, max_height; // zero means: not set
@@ -392,11 +392,10 @@ static void xv_draw_colorkey(struct vo *vo, const struct mp_rect *rc)
 static void read_xv_csp(struct vo *vo)
 {
     struct xvctx *ctx = vo->priv;
-    struct mp_csp_details *cspc = &ctx->cached_csp;
-    *cspc = (struct mp_csp_details) MP_CSP_DETAILS_DEFAULTS;
+    ctx->cached_csp = 0;
     int bt709_enabled;
     if (xv_get_eq(vo, ctx->xv_port, "bt_709", &bt709_enabled))
-        cspc->format = bt709_enabled == 100 ? MP_CSP_BT_709 : MP_CSP_BT_601;
+        ctx->cached_csp = bt709_enabled == 100 ? MP_CSP_BT_709 : MP_CSP_BT_601;
 }
 
 static void resize(struct vo *vo)
@@ -417,12 +416,10 @@ static void resize(struct vo *vo)
 }
 
 /*
- * connect to server, create and map window,
+ * create and map window,
  * allocate colors and (shared) memory
  */
-static int config(struct vo *vo, uint32_t width, uint32_t height,
-                  uint32_t d_width, uint32_t d_height, uint32_t flags,
-                  uint32_t format)
+static int reconfig(struct vo *vo, struct mp_image_params *params, int flags)
 {
     struct vo_x11_state *x11 = vo->x11;
     struct xvctx *ctx = vo->priv;
@@ -430,9 +427,9 @@ static int config(struct vo *vo, uint32_t width, uint32_t height,
 
     mp_image_unrefp(&ctx->original_image);
 
-    ctx->image_height = height;
-    ctx->image_width = width;
-    ctx->image_format = format;
+    ctx->image_height = params->h;
+    ctx->image_width  = params->w;
+    ctx->image_format = params->imgfmt;
 
     if ((ctx->max_width != 0 && ctx->max_height != 0)
         && (ctx->image_width > ctx->max_width
@@ -449,14 +446,13 @@ static int config(struct vo *vo, uint32_t width, uint32_t height,
         MP_VERBOSE(vo, "Xvideo image format: 0x%x (%4.4s) %s\n",
                    ctx->fo[i].id, (char *) &ctx->fo[i].id,
                    (ctx->fo[i].format == XvPacked) ? "packed" : "planar");
-        if (ctx->fo[i].id == find_xv_format(format))
+        if (ctx->fo[i].id == find_xv_format(ctx->image_format))
             ctx->xv_format = ctx->fo[i].id;
     }
     if (!ctx->xv_format)
         return -1;
 
-    vo_x11_config_vo_window(vo, NULL, vo->dx, vo->dy, vo->dwidth,
-                            vo->dheight, flags, "xv");
+    vo_x11_config_vo_window(vo, NULL, flags, "xv");
 
     if (ctx->xv_ck_info.method == CK_METHOD_BACKGROUND)
         XSetWindowBackground(x11->display, x11->window, ctx->xv_colorkey);
@@ -479,6 +475,9 @@ static int config(struct vo *vo, uint32_t width, uint32_t height,
     ctx->current_buf = 0;
     ctx->current_ip_buf = 0;
 
+    int is_709 = params->colorspace == MP_CSP_BT_709;
+    xv_set_eq(vo, ctx->xv_port, "bt_709", is_709 * 200 - 100);
+    read_xv_csp(vo);
 
     resize(vo);
 
@@ -606,7 +605,12 @@ static struct mp_image get_xv_buffer(struct vo *vo, int buf_index)
         img.stride[n] = xv_image->pitches[sn];
     }
 
-    mp_image_set_colorspace_details(&img, &ctx->cached_csp);
+    if (vo->params) {
+        struct mp_image_params params = *vo->params;
+        if (ctx->cached_csp)
+            params.colorspace = ctx->cached_csp;
+        mp_image_set_attributes(&img, &params);
+    }
 
     return img;
 }
@@ -617,13 +621,8 @@ static void draw_osd(struct vo *vo, struct osd_state *osd)
 
     struct mp_image img = get_xv_buffer(vo, ctx->current_buf);
 
-    struct mp_osd_res res = {
-        .w = ctx->image_width,
-        .h = ctx->image_height,
-        .display_par = 1.0 / vo->aspdat.par,
-    };
-
-    osd_draw_on_image(osd, res, osd->vo_pts, 0, &img);
+    struct mp_osd_res res = osd_res_from_image_params(vo->params);
+    osd_draw_on_image(osd, res, osd_get_vo_pts(osd), 0, &img);
 }
 
 static void wait_for_completion(struct vo *vo, int max_outstanding)
@@ -850,18 +849,12 @@ static int control(struct vo *vo, uint32_t request, void *data)
         struct voctrl_get_equalizer_args *args = data;
         return xv_get_eq(vo, ctx->xv_port, args->name, args->valueptr);
     }
-    case VOCTRL_SET_YUV_COLORSPACE:;
-        struct mp_csp_details* given_cspc = data;
-        int is_709 = given_cspc->format == MP_CSP_BT_709;
-        xv_set_eq(vo, ctx->xv_port, "bt_709", is_709 * 200 - 100);
+    case VOCTRL_GET_COLORSPACE: {
+        struct mp_image_params *params = data;
         read_xv_csp(vo);
-        vo->want_redraw = true;
+        params->colorspace = ctx->cached_csp;
         return true;
-    case VOCTRL_GET_YUV_COLORSPACE:;
-        struct mp_csp_details* cspc = data;
-        read_xv_csp(vo);
-        *cspc = ctx->cached_csp;
-        return true;
+    }
     case VOCTRL_REDRAW_FRAME:
         redraw_frame(vo);
         return true;
@@ -895,7 +888,7 @@ const struct vo_driver video_out_xv = {
     .name = "xv",
     .preinit = preinit,
     .query_format = query_format,
-    .config = config,
+    .reconfig = reconfig,
     .control = control,
     .draw_image = draw_image,
     .draw_osd = draw_osd,

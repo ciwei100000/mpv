@@ -139,6 +139,12 @@ static inline int m_config_set_option0(struct m_config *config,
     return m_config_set_option(config, bstr0(name), bstr0(param));
 }
 
+// Similar to m_config_set_option_ext(), but set as data using mpv_node.
+struct mpv_node;
+int m_config_set_option_node(struct m_config *config, bstr name,
+                             struct mpv_node *data);
+
+
 int m_config_parse_suboptions(struct m_config *config, char *name,
                               char *subopts);
 
@@ -163,6 +169,9 @@ const char *m_config_get_positional_option(const struct m_config *config, int n)
 // flags (e.g. "--a" is ok, "--a=yes" is also ok).
 // Returns: error code (<0), or number of expected params (0, 1)
 int m_config_option_requires_param(struct m_config *config, bstr name);
+
+// Return all (visible) option names as NULL terminated string list.
+char **m_config_list_options(void *ta_parent, const struct m_config *config);
 
 /*  Print a list of all registered options.
  *  \param config The config object.

@@ -61,7 +61,8 @@ OPTIONS
     DTS-HD tracks can be sent over HDMI but not over the original
     coax/toslink S/PDIF system.
 
-    Note: this feature is broken.
+    Some receivers don't accept DTS core-only when ``--ad-spdif-dtshd=yes`` is
+    used, even though they accept DTS-HD.
 
     ``--dtshd`` and ``--no-dtshd`` are deprecated aliases.
 
@@ -96,37 +97,18 @@ OPTIONS
     configuration files specifying a list of fallbacks may make sense. See
     `AUDIO OUTPUT DRIVERS`_ for details and descriptions of available drivers.
 
-``--ar``, ``--no-ar``
-    Enable/disable AppleIR remote support. Enabled by default.
-
-``--aspect=<ratio>``
-    Override movie aspect ratio, in case aspect information is incorrect or
-    missing in the file being played. See also ``--no-aspect``.
-
-    Two values have special meaning:
-
-    :0:  disable aspect ratio handling, pretend the video has square pixels
-    :-1: use the video stream or container aspect (default)
-
-    But note that handling of these special values might change in the future.
-
-    .. admonition:: Examples
-
-        - ``--aspect=4:3``  or ``--aspect=1.3333``
-        - ``--aspect=16:9`` or ``--aspect=1.7777``
-
-``--ass``, ``--no-ass``
+``--sub-ass``, ``--no-sub-ass``
     Render ASS subtitles natively (enabled by default).
 
-    If ``--no-ass`` is specified, all tags and style declarations are stripped
-    and ignored on display. The subtitle renderer uses the font style as
-    specified by the ``--sub-text-`` options instead.
+    If ``--no-sub-ass`` is specified, all tags and style declarations are
+    stripped and ignored on display. The subtitle renderer uses the font style
+    as specified by the ``--sub-text-`` options instead.
 
     .. note::
 
-        Using ``--no-ass`` may lead to incorrect or completely broken rendering
-        of ASS/SSA subtitles. It can sometimes be useful to forcibly override
-        the styling of ASS subtitles, but should be avoided in general.
+        Using ``--no-sub-ass`` may lead to incorrect or completely broken
+        rendering of ASS/SSA subtitles. It can sometimes be useful to forcibly
+        override the styling of ASS subtitles, but should be avoided in general.
 
 ``--ass-force-style=<[Style.]Param=Value[,...]>``
     Override some style or script info parameters.
@@ -176,13 +158,18 @@ OPTIONS
 
         Using this option may lead to incorrect subtitle rendering.
 
-``--ass-style-override=<yes|no>``
+``--ass-style-override=<yes|no|force>``
     Control whether user style overrides should be applied.
 
-    :yes: Apply all the ``--ass-*`` style override options. Changing the default
-          for any of these options can lead to incorrect subtitle rendering
-          (default).
-    :no:  Render subtitles as forced by subtitle scripts.
+    :yes:   Apply all the ``--ass-*`` style override options. Changing the default
+            for any of these options can lead to incorrect subtitle rendering
+            (default).
+    :no:    Render subtitles as forced by subtitle scripts.
+    :force: Like ``yes``, but also override the style named ``Default`` to
+            make it look like the like text subtitle style implied by the
+            ``--sub-text-...`` option. This won't always work, because the
+            dialogue style doesn't necessary use this name, and it might break
+            other advanced uses of the ASS format.
 
 ``--ass-use-margins``
     Enables placing toptitles and subtitles in black borders when they are
@@ -239,9 +226,39 @@ OPTIONS
     a subtitle script with another video file. The ``--ass-style-override``
     option doesn't affect how this option is interpreted.
 
+``--audio-channels=<number|layout>``
+    Request a channel layout for audio output (default: stereo). This  will ask
+    the AO to open a device with the given channel layout. It's up to the AO
+    to accept this layout, or to pick a fallback or to error out if the
+    requested layout is not supported.
+
+    The ``--audio-channels`` option either takes a channel number or an explicit
+    channel layout. Channel numbers refer to default layouts, e.g. 2 channels
+    refer to stereo, 6 refers to 5.1.
+
+    See ``--audio-channels=help`` output for defined default layouts. This also
+    lists speaker names, which can be used to express arbitrary channel
+    layouts (e.g. ``fl-fr-lfe`` is 2.1).
+
+    You can use ``--audio-channels=empty`` to disable this. In this case, the AO
+    use the channel layout as the audio filter chain indicates.
+
+    This will also request the channel layout from the decoder. If the decoder
+    does not support the layout, it will fall back to its native channel layout.
+    (You can use ``--ad-lavc-downmix=no`` to make the decoder always output
+    its native layout.) Note that only some decoders support remixing audio.
+    Some that do include AC-3, AAC or DTS audio.
+
+    If the channel layout of the media file (i.e. the decoder) and the AO's
+    channel layout don't match, mpv will attempt to insert a conversion filter.
+
+``--audio-delay=<sec>``
+    Audio delay in seconds (positive or negative float value). Positive values
+    delay the audio, and negative values delay the video.
+
 ``--audio-demuxer=<[+]name>``
-    Use this audio demuxer type when using ``--audiofile``. Use a '+' before the
-    name to force it; this will skip some checks. Give the demuxer name as
+    Use this audio demuxer type when using ``--audio-file``. Use a '+' before
+    the name to force it; this will skip some checks. Give the demuxer name as
     printed by ``--audio-demuxer=help``.
 
 ``--audio-display=<no|attachment>``
@@ -254,13 +271,24 @@ OPTIONS
 
     This option has no influence on files with normal video tracks.
 
-``--audiofile=<filename>``
+``--audio-file=<filename>``
     Play audio from an external file (WAV, MP3 or Ogg Vorbis) while viewing a
     movie.
 
-``--audiofile-cache=<kBytes>``
-    Enables caching for the stream used by ``--audiofile``, using the
+``--audio-file-cache=<kBytes>``
+    Enables caching for the stream used by ``--audio-file``, using the
     specified amount of memory.
+
+``--audio-format=<format>``
+    Select the sample format used for output from the audio filter layer to
+    the sound card. The values that ``<format>`` can adopt are listed below in
+    the description of the ``format`` audio filter.
+
+``--audio-samplerate=<Hz>``
+    Select the output sample rate to be used (of course sound cards have
+    limits on this). If the sample frequency selected is different from that
+    of the current media, the lavrresample audio filter will be inserted into
+    the audio filter layer to compensate for the difference.
 
 ``--autofit=<[W[xH]]>``
     Set the initial window size to a maximum size specified by ``WxH``, without
@@ -310,19 +338,6 @@ OPTIONS
             If the video is larger than 90% of the screen width or 80% of the
             screen height, make the window smaller until either its width is 90%
             of the screen, or its height is 80% of the screen.
-
-``--autosub``, ``--no-autosub``
-    Load additional subtitle files matching the video filename. Enabled by
-    default. See also ``--autosub-match``.
-
-``--autosub-match=<exact|fuzzy|all>``
-    Adjust matching fuzziness when searching for subtitles:
-
-    :exact: exact match
-    :fuzzy: Load all subs containing movie name.
-    :all:   Load all subs in the current and ``--sub-paths`` directories.
-
-    (default: exact)
 
 ``--autosync=<factor>``
     Gradually adjusts the A/V sync based on audio delay measurements.
@@ -449,29 +464,6 @@ OPTIONS
 ``--cdrom-device=<path>``
     Specify the CD-ROM device (default: ``/dev/cdrom``).
 
-``--channels=<number|layout>``
-    Request the number of playback channels (default: 2). mpv asks the
-    decoder to decode the audio into as many channels as specified. Then it is
-    up to the decoder to fulfill the requirement. This is usually only
-    important when playing videos with AC-3, AAC or DTS audio. In that case
-    libavcodec downmixes the audio into the requested number of channels if
-    possible.
-
-    The ``--channels`` option either takes a channel number or an explicit
-    channel layout. Channel numbers refer to default layouts, e.g. 2 channels
-    refer to stereo, 6 refers to 5.1.
-
-    See ``--channels=help`` output for defined default layouts. This also
-    lists speaker names, which can be used to express arbitrary channel
-    layouts (e.g. ``fl-fr-lfe`` is 2.1).
-
-    .. note::
-
-        Currently, this option is not very useful. The main effect of this
-        option is that automatic stereo downmixing is disabled. It depends
-        mainly on the selected audio output and the associated audio subsystem
-        how playback of files with surround audio will behave.
-
 ``--chapter=<start[-end]>``
     Specify which chapter to start playing at. Optionally specify which
     chapter to end playing at. Also see ``--start``.
@@ -557,14 +549,14 @@ OPTIONS
         It is advisable to use your graphics driver's color range option
         instead, if available.
 
-``--consolecontrols``, ``--no-consolecontrols``
-    ``--no-consolecontrols`` prevents the player from reading key events from
-    standard input. Useful when reading data from standard input. This is
-    automatically enabled when ``-`` is found on the command line. There are
-    situations where you have to set it manually, e.g. if you open
-    ``/dev/stdin`` (or the equivalent on your system), use stdin in a playlist
-    or intend to read from stdin later on via the loadfile or loadlist slave
-    commands.
+``--config-dir=<path>``
+    Force a different configuration directory. If this is set, the given
+    directory is used to load configuration files, and all other configuration
+    directories are ignored. This means the global mpv configuration directory
+    as well as per-user directories are ignored, and overrides through
+    environment variables (``MPV_HOME``) are also ignored.
+
+    Note that the ``--no-config`` option takes precedence over this option.
 
 ``--contrast=<-100-100>``
     Adjust the contrast of the video signal (default: 0). Not supported by all
@@ -596,10 +588,6 @@ OPTIONS
     If this option is given, the cursor is always visible in windowed mode. In
     fullscreen mode, the cursor is shown or hidden according to
     ``--cursor-autohide``.
-
-``--audio-delay=<sec>``
-    Audio delay in seconds (positive or negative float value). Negative values
-    delay the audio, and positive values delay the video.
 
 ``--deinterlace=<yes|no|auto>``
     Enable or disable interlacing (default: auto, which usually means no).
@@ -741,6 +729,14 @@ OPTIONS
     Time in milliseconds to recognize two consecutive button presses as a
     double-click (default: 300).
 
+``--dump-stats=<filename>``
+    Write certain statistics to the given file. The file is truncated on
+    opening. The file will contain raw samples, each with a timestamp. To
+    make this file into a readable, the script ``TOOLS/stats-conv.py`` can be
+    used (which currently displays it as a graph).
+
+    This option is useful for debugging only.
+
 ``--dvbin=<options>``
     Pass the following parameters to the DVB input module, in order to
     override the default ones:
@@ -775,7 +771,7 @@ OPTIONS
 
         You need write access to the DVD device to change the speed.
 
-``--dvdangle=<ID>``
+``--dvd-angle=<ID>``
     Some DVDs contain scenes that can be viewed from multiple angles.
     This option tells mpv which angle to use (default: 1).
 
@@ -787,8 +783,7 @@ OPTIONS
 
 ``--embeddedfonts``, ``--no-embeddedfonts``
     Use fonts embedded in Matroska container files and ASS scripts (default:
-    enabled). These fonts can be used for SSA/ASS subtitle rendering
-    (``--ass`` option).
+    enabled). These fonts can be used for SSA/ASS subtitle rendering.
 
 ``--end=<time>``
     Stop at given absolute time. Use ``--length`` if the time should be relative
@@ -847,11 +842,6 @@ OPTIONS
         This option only works if the underlying media supports seeking
         (i.e. not with stdin, pipe, etc).
 
-``--format=<format>``
-    Select the sample format used for output from the audio filter layer to
-    the sound card. The values that ``<format>`` can adopt are listed below in
-    the description of the ``format`` audio filter.
-
 ``--fps=<float>``
     Override video framerate. Useful if the original value is wrong or missing.
 
@@ -890,8 +880,8 @@ OPTIONS
 
         This option does not work properly with all window managers.
         ``all`` in particular will usually only work with
-        ``--fstype=-fullscreen`` or ``--fstype=none``, and even then only with
-        some window managers.
+        ``--x11-fstype=-fullscreen`` or ``--x11-fstype=none``, and even then
+        only with some window managers.
 
     .. admonition:: Note (OS X)
 
@@ -899,11 +889,7 @@ OPTIONS
 
     See also ``--screen``.
 
-``--fsmode-dontuse=<0-31>``
-    *OBSOLETE*, use the ``--fs`` option.
-    Try this option if you still experience fullscreen problems.
-
-``--fstype=<type1,type2,...>``
+``--x11-fstype=<type1,type2,...>``
     (X11 only)
     Specify a priority list of fullscreen modes to be used. You can negate the
     modes by prefixing them with '-'. If you experience problems like the
@@ -912,7 +898,7 @@ OPTIONS
 
     .. note::
 
-        See ``--fstype=help`` for a full list of available modes.
+        See ``--x11-fstype=help`` for a full list of available modes.
 
     The available types are:
 
@@ -935,13 +921,13 @@ OPTIONS
 
     .. admonition:: Examples
 
-        ``--fstype=layer,stays_on_top,above,fullscreen``
+        ``--x11-fstype=layer,stays_on_top,above,fullscreen``
             Default order, will be used as a fallback if incorrect or
             unsupported modes are specified.
-        ``--fstype=fullscreen``
+        ``--x11-fstype=fullscreen``
             Fixes fullscreen switching on OpenBox 1.x.
 
-``--native-fs``
+``--fs-missioncontrol``
     (OS X only)
     Use OS X Mission Control's fullscreen feature instead of the custom one
     provided by mpv. This can potentially break a lot of stuff like
@@ -969,8 +955,9 @@ OPTIONS
         that if the first file for example has a low sample rate, then the
         following files may get resampled to the same low sample rate, resulting
         in reduced sound quality. If you play files with different parameters,
-        consider using options such as ``--srate`` and ``--format`` to
-        explicitly select what the shared output format will be.
+        consider using options such as ``--audio-samplerate`` and
+        ``--audio-format`` to explicitly select what the shared output format
+        will be.
 
 ``--geometry=<[W[xH]][+-x+-y]>``, ``--geometry=<x:y>``
     Adjust the initial window position or size. ``W`` and ``H`` set the window
@@ -1091,6 +1078,15 @@ OPTIONS
     the earlier demuxer position and the real target may be unnecessarily
     decoded.
 
+``--hr-seek-framedrop=<yes|no>``
+    Allow the video decoder to drop frames during seek, if these frames are
+    before the seek target. If this is enabled, precise seeking can be faster,
+    but if you're using video filters which modify timestamps or add new
+    frames, it can lead to precise seeking skipping the target frame. This
+    e.g. can break frame backstepping when deinterlacing is enabled.
+
+    Default: ``yes``
+
 ``--http-header-fields=<field1,field2>``
     Set custom HTTP fields when accessing HTTP stream.
 
@@ -1164,9 +1160,6 @@ OPTIONS
         ``mpv --hwdec=vdpau --vo=vdpau --hwdec-codecs=h264,mpeg2video``
             Enable vdpau decoding for h264 and mpeg2 only.
 
-``--identify``
-    Deprecated. Use ``TOOLS/mpv_identify.sh``.
-
 ``--idle``
     Makes mpv wait idly instead of quitting when there is no file to play.
     Mostly useful in slave mode, where mpv can be controlled through input
@@ -1199,23 +1192,21 @@ OPTIONS
     Specify input configuration file other than the default
     ``~/.mpv/input.conf``.
 
-``--input-ar-delay``
-    Delay in milliseconds before we start to autorepeat a key (0 to disable).
-
-``--input-ar-rate``
-    Number of key presses to generate per second on autorepeat.
-
 ``--no-input-default-bindings``
     Disable mpv default (builtin) key bindings.
-
-``--input-keylist``
-    Prints all keys that can be bound to commands.
 
 ``--input-cmdlist``
     Prints all commands that can be bound to keys.
 
-``--input-js-dev``
-    Specifies the joystick device to use (default: ``/dev/input/js0``).
+``--input-keylist``
+    Prints all keys that can be bound to commands.
+
+``--input-test``
+    Input test mode. Instead of executing commands on key presses, mpv
+    will show the keys and the bound commands on the OSD. Has to be used
+    with a dummy video, and the normal ways to quit the player will not
+    work (key bindings that normally quit will be shown on OSD only, just
+    like any other binding). See `INPUT.CONF`_.
 
 ``--input-file=<filename>``
     Read commands from the given file. Mostly useful with a FIFO.
@@ -1226,15 +1217,49 @@ OPTIONS
         When the given file is a FIFO mpv opens both ends, so you can do several
         `echo "seek 10" > mp_pipe` and the pipe will stay valid.
 
-``--input-test``
-    Input test mode. Instead of executing commands on key presses, mpv
-    will show the keys and the bound commands on the OSD. Has to be used
-    with a dummy video, and the normal ways to quit the player will not
-    work (key bindings that normally quit will be shown on OSD only, just
-    like any other binding). See `INPUT.CONF`_.
+``--input-terminal``, ``--no-input-terminal``
+    ``--no-input-terminal`` prevents the player from reading key events from
+    standard input. Useful when reading data from standard input. This is
+    automatically enabled when ``-`` is found on the command line. There are
+    situations where you have to set it manually, e.g. if you open
+    ``/dev/stdin`` (or the equivalent on your system), use stdin in a playlist
+    or intend to read from stdin later on via the loadfile or loadlist slave
+    commands.
 
-``--joystick``, ``--no-joystick``
+``--input-appleremote``, ``--no-input-appleremote``
+    Enable/disable AppleIR remote support. Enabled by default.
+
+``--input-ar-delay``
+    Delay in milliseconds before we start to autorepeat a key (0 to disable).
+
+``--input-ar-rate``
+    Number of key presses to generate per second on autorepeat.
+
+``--input-cursor``, ``--no-input-cursor``
+    Permit mpv to receive pointer events reported by the video output
+    driver. Necessary to use the OSC, or to select the buttons in DVD menus.
+    Support depends on the VO in use.
+
+``--input-joystick``, ``--no-input-joystick``
     Enable/disable joystick support. Disabled by default.
+
+``--input-js-dev``
+    Specifies the joystick device to use (default: ``/dev/input/js0``).
+
+``--input-lirc``, ``--no-input-lirc``
+    Enable/disable LIRC support. Enabled by default.
+
+``--input-lirc-conf=<filename>``
+    (LIRC only)
+    Specifies a configuration file for LIRC (default: ``~/.lircrc``).
+
+``--input-media-keys``, ``--no-input-media-keys``
+    OSX only: Enabled by default. Enables/disable media keys support.
+
+``--input-right-alt-gr``, ``--no-input-right-alt-gr``
+    (Cocoa and Windows only)
+    Use the right Alt key as Alt Gr to produce special characters. If disabled,
+    count the right Alt as an Alt modifier key. Enabled by default.
 
 ``--no-keepaspect``, ``--keepaspect``
     ``--no-keepaspect`` will always stretch the video to window size, and will
@@ -1266,18 +1291,15 @@ OPTIONS
     Stop after a given time relative to the start time.
     See ``--start`` for valid option values and examples.
 
-``--lirc``, ``--no-lirc``
-    Enable/disable LIRC support. Enabled by default.
-
-``--lircconf=<filename>``
-    (LIRC only)
-    Specifies a configuration file for LIRC (default: ``~/.lircrc``).
-
 ``--list-options``
     Prints all available options.
 
 ``--list-properties``
     Print a list of the available properties.
+
+``--load-scripts=<yes|no>``
+    If set to ``no``, don't auto-load scripts from ``~/.mpv/lua/``.
+    (Default: ``yes``)
 
 ``--load-unsafe-playlists``
     Normally, something like ``mpv playlist.m3u`` won't load the playlist. This
@@ -1301,15 +1323,23 @@ OPTIONS
     disables looping. If several files are specified on command line, the
     entire playlist is looped.
 
+``--loop-file``
+    Loop a single file. The difference to ``--loop=inf`` is that this doesn't
+    loop the playlist, just the file itself. If the playlist contains only a
+    single file, the difference between the two option is that this option
+    performs a seek on loop, instead of reloading the file.
+
 ``--lua=<filename>``
     Load a Lua script. You can load multiple scripts by separating them with
     commas (``,``).
 
+``--lua-opts=key1=value1,key2=value2,...``
+    Set options for scripts. A Lua script can query an option by key. If an
+    option is used and what semantics the option value has depends entirely on
+    the loaded Lua scripts. Values not claimed by any scripts are ignored.
+
 ``--mc=<seconds/frame>``
     Maximum A-V sync correction per frame (in seconds)
-
-``--media-keys``, ``--no-media-keys``
-      OSX only: Enabled by default. Enables/disable media keys support.
 
 ``--merge-files``
     Pretend that all files passed to mpv are concatenated into a single, big
@@ -1333,7 +1363,7 @@ OPTIONS
     previous setting (e.g. in the config file). Overrides the
     ``--monitorpixelaspect`` setting if enabled.
 
-    See also ``--monitorpixelaspect`` and ``--aspect``.
+    See also ``--monitorpixelaspect`` and ``--video-aspect``.
 
     .. admonition:: Examples
 
@@ -1343,54 +1373,49 @@ OPTIONS
 ``--monitorpixelaspect=<ratio>``
     Set the aspect of a single pixel of your monitor or TV screen (default:
     1). A value of 1 means square pixels (correct for (almost?) all LCDs). See
-    also ``--monitoraspect`` and ``--aspect``.
+    also ``--monitoraspect`` and ``--video-aspect``.
 
-``--mouse-movements``, ``--no-mouse-movements``
-    Permit mpv to receive pointer events reported by the video output
-    driver. Necessary to select the buttons in DVD menus. Supported for
-    X11-based VOs (x11, xv, etc) and the gl, direct3d and corevideo VOs.
-
-``--no-msgcolor``
+``--no-msg-color``
     Disable colorful console output on terminals.
 
-``--msglevel=<module1=level1:module2=level2:...>``
+``--msg-level=<module1=level1:module2=level2:...>``
     Control verbosity directly for each module. The ``all`` module changes the
     verbosity of all the modules not explicitly specified on the command line.
 
-    Run mpv with ``--msglevel=all=trace`` to see all messages mpv outputs. You
+    Run mpv with ``--msg-level=all=trace`` to see all messages mpv outputs. You
     can use the module names printed in the output (prefixed to each line in
     ``[...]``) to limit the output to interesting modules.
 
     .. note::
 
         Some messages are printed before the command line is parsed and are
-        therefore not affected by ``--msglevel``. To control these messages,
+        therefore not affected by ``--msg-level``. To control these messages,
         you have to use the ``MPV_VERBOSE`` environment variable; see
         `ENVIRONMENT VARIABLES`_ for details.
 
     Available levels:
 
-    :no:        complete silence
-    :fatal:     fatal messages only
-    :error:     error messages
-    :warn:      warning messages
-    :info:      informational messages
-    :status:    status messages (default)
-    :v:         verbose messages
-    :debug:     debug messages
-    :trace:     very noisy debug messages
+        :no:        complete silence
+        :fatal:     fatal messages only
+        :error:     error messages
+        :warn:      warning messages
+        :info:      informational messages
+        :status:    status messages (default)
+        :v:         verbose messages
+        :debug:     debug messages
+        :trace:     very noisy debug messages
 
-    One special case is the ``identify`` module name. This is silenced by
-    default, and can be enabled with the ``-identify`` option.
+``--msg-module``
+    Prepend module name to each console message.
 
-``--msgmodule``
-    Prepend module name in front of each console message.
+``--msg-time``
+    Prepend timing information to each console message.
 
 ``--mute=<auto|yes|no>``
     Set startup audio mute status. ``auto`` (default) will not change the mute
     status. Also see ``--volume``.
 
-``--name``
+``--x11-name``
     Set the window class name for X11-based video output methods.
 
 ``--native-keyrepeat``
@@ -1399,25 +1424,21 @@ OPTIONS
     depends on the VO backend and how it handles keyboard input. Does not
     apply to terminal input.)
 
-``--no-aspect``
-    Ignore aspect ratio information from video file and assume the video has
-    square pixels. See also ``--aspect``.
-
 ``--no-cache``
     Turn off input stream caching. See ``--cache``.
 
 ``--no-config``
     Do not load default configuration files. This prevents loading of
     ``~/.mpv/config`` and ``~/.mpv/input.conf``, as well as loading the
-    same files from system wide configuration directories.
-
-    Loading of some configuration files is not affected by this option, such
-    as configuration files for DVB code and fontconfig.
+    same files from system wide configuration directories. Other configuration
+    files are blocked as well, such as resume playback files.
 
     .. note::
 
         Files explicitly requested by command line options, like
         ``--include`` or ``--use-filedir-conf``, will still be loaded.
+
+    Also see ``--config-dir``.
 
 ``--no-idx``
     Do not use index present in the file even if one is present.
@@ -1442,8 +1463,7 @@ OPTIONS
     you can try ``--vo=null`` instead.
 
 ``--ontop``
-    Makes the player window stay on top of other windows. Supported by video
-    output drivers which use X11, as well as corevideo.
+    Makes the player window stay on top of other windows.
 
 ``--ordered-chapters``, ``--no-ordered-chapters``
     Enabled by default.
@@ -1489,13 +1509,13 @@ OPTIONS
 ``--osd-bar-h=<0.1-50>``
     Height of the OSD bar, in percentage of the screen height (default: 3.125).
 
-``--osd-back-color=<#RRGGBB>``, ``--sub-text-back-color=<#RRGGBB>``
+``--osd-back-color=<color>``, ``--sub-text-back-color=<color>``
     See ``--osd-color``. Color used for OSD/sub text background.
 
 ``--osd-blur=<0..20.0>``, ``--sub-text-blur=<0..20.0>``
     Gaussian blur factor. 0 means no blur applied (default).
 
-``--osd-border-color=<#RRGGBB>``, ``--sub-text-border-color=<#RRGGBB>``
+``--osd-border-color=<color>``, ``--sub-text-border-color=<color>``
     See ``--osd-color``. Color used for the OSD/sub font border.
 
     .. note::
@@ -1510,16 +1530,28 @@ OPTIONS
 
     Default: 2.5.
 
-``--osd-color=<#RRGGBB|#AARRGGBB>``, ``--sub-text-color=<#RRGGBB|#AARRGGBB>``
+``--osd-color=<color>``, ``--sub-text-color=<color>``
     Specify the color used for OSD/unstyled text subtitles.
 
-    The color is specified as a RGB hex triplet, and each 2-digit group
-    expresses a color value in the range 0 (``00``) to 255 (``FF``).
-    For example, ``#FF0000`` is red. This is similar to web colors.
+    The color is specified in the form ``r/g/b``, where each color component
+    is specified as number in the range 0.0 to 1.0. It's also possible to
+    specify the transparency by using ``r/g/b/a``, where the alpha value 0
+    means fully transparent, and 1.0 means opaque. If the alpha component is
+    not given, the color is 100% opaque.
 
-    You can specify transparency by specifying an alpha value in the form
-    ``#AARRGGBB``. ``00`` is fully transparent, while ``FF`` is opaque (opaque
-    is default with the shorter color specification).
+    Passing a single number to the option sets the OSD to gray, and the form
+    ``gray/a`` lets you specify alpha additionally.
+
+    .. admonition:: Examples
+
+        - ``--osd-color=1.0/0.0/0.0`` set OSD to opaque red
+        - ``--osd-color=1.0/0.0/0.0/0.75`` set OSD to opaque red with 75% alpha
+        - ``--osd-color=0.5/0.75`` set OSD to 50% gray with 75% alpha
+
+    Alternatively, the color can be specified as a RGB hex triplet in the form
+    ``#RRGGBB``, where each 2-digit group expresses a color value in the
+    range 0 (``00``) to 255 (``FF``). For example, ``#FF0000`` is red.
+    This is similar to web colors.
 
     .. admonition:: Examples
 
@@ -1542,7 +1574,7 @@ OPTIONS
 
         The ``--sub-text-font`` option (and most other ``--sub-text-``
         options) are ignored when ASS-subtitles are rendered, unless the
-        ``--no-ass`` option is specified.
+        ``--no-sub-ass`` option is specified.
 
 ``--osd-font-size=<size>``, ``--sub-text-font-size=<size>``
     Specify the OSD/sub font size. The unit is the size in scaled pixels at a
@@ -1591,7 +1623,7 @@ OPTIONS
     are always in actual pixels. The effect is that changing the window size
     won't change the OSD font size.
 
-``--osd-shadow-color=<#RRGGBB>, --sub-text-shadow-color=<#RRGGBB>``
+``--osd-shadow-color=<color>, --sub-text-shadow-color=<color>``
     See ``--osd-color``. Color used for OSD/sub text shadow.
 
 ``--osd-shadow-offset=<size>, --sub-text-shadow-offset=<size>``
@@ -1623,17 +1655,6 @@ OPTIONS
 ``--pause``
     Start the player in paused state.
 
-``--playing-msg=<string>``
-    Print out a string after starting playback. The string is expanded for
-    properties, e.g. ``--playing-msg='file: ${filename}'`` will print the string
-    ``file:`` followed by a space and the currently played filename.
-
-    See `Property Expansion`_.
-
-``--status-msg=<string>``
-    Print out a custom string during playback instead of the standard status
-    line. Expands properties. See `Property Expansion`_.
-
 ``--stream-capture=<filename>``
     Allows capturing the primary stream (not additional audio tracks or other
     kind of streams) into the given file. Capturing can also be started and
@@ -1648,20 +1669,25 @@ OPTIONS
     file is dumped.
 
 ``--playlist=<filename>``
-    Play files according to a playlist file (ASX, Winamp, SMIL, or
-    one-file-per-line format).
+    Play files according to a playlist file (Supports some common formats.If
+    no format is detected, t will be treated as list of files, separated by
+    newline characters. Note that XML playlist formats are not supported.)
 
     .. warning::
 
-        The way mpv parses and uses playlist files is not safe against
-        maliciously constructed files. Such files may trigger harmful actions.
+        The way mpv uses playlist files is not safe against maliciously
+        constructed files. Such files may trigger harmful actions.
         This has been the case for all mpv and MPlayer versions, but
         unfortunately this fact was not well documented earlier, and some people
         have even misguidedly recommended use of ``--playlist`` with untrusted
         sources. Do NOT use ``--playlist`` with random internet sources or files
         you do not trust!
 
-        FIXME: This needs to be clarified and documented thoroughly.
+        The main problem is that playlists can point to arbitrary network
+        addresses (including local addresses inside of your LAN), and thus
+        can't be considered secure. Playlists also can contain entries using
+        other protocols, such as local files, or (most severely), special
+        protocols like ``avdevice://``, which are inherently unsafe.
 
 ``--priority=<prio>``
     (Windows only.)
@@ -1753,7 +1779,7 @@ OPTIONS
     Particularly useful on slow terminals or broken ones which do not properly
     handle carriage return (i.e. ``\r``).
 
-    Also see ``--really-quiet`` and ``--msglevel``.
+    Also see ``--really-quiet`` and ``--msg-level``.
 
 ``--quvi-fetch-subtitles=<yes|no>``
     Toggles fetching of subtitles from streaming sites with libquvi. Disabled
@@ -1789,61 +1815,6 @@ OPTIONS
     functionality is limited to switching between ``best`` and ``default`` if
     the ``cycle`` input command is used.
 
-``--radio=<option1:option2:...>``
-    These options set various parameters of the radio capture module. For
-    listening to radio with mpv, use ``radio://<frequency>`` (if channels
-    option is not given) or ``radio://<channel_number>`` (if channels option
-    is given) as a movie URL. You can see allowed frequency range by running
-    mpv with ``-v``. To start the grabbing subsystem, use
-    ``radio://<frequency or channel>/capture``. If the capture keyword is not
-    given, you can listen to radio using the line-in cable only. Using capture
-    to listen is not recommended due to synchronization problems, which makes
-    this process uncomfortable.
-
-    Available options are:
-
-    ``device=<value>``
-        Radio device to use (default: ``/dev/radio0`` for Linux and
-        ``/dev/tuner0`` for \*BSD).
-
-    ``driver=<value>``
-        Radio driver to use (default: v4l2 if available, otherwise v4l).
-        Currently, v4l and v4l2 drivers are supported.
-
-    ``volume=<0..100>``
-        Sound volume for radio device (default 100).
-
-    ``channels=<frequency>-<name>,<frequency>-<name>,...``
-        Set channel list. Use _ for spaces in names (or play with quoting ;-) ).
-        The channel names will then be written using OSD, and the slave
-        commands ``radio_step_channel`` and ``radio_set_channel`` will be usable
-        for a remote control (see LIRC). If given, number in movie URL will be
-        treated as channel position in channel list.
-
-        .. admonition:: Example
-
-            ``radio://1``, ``radio://104.4``, ``radio_set_channel 1``
-
-    ``adevice=<value>`` (radio capture only)
-        Name of device to capture sound from. Without such a name, capture will
-        be disabled, even if the ``capture`` keyword appears in the URL.
-        For ALSA devices, use it in the form ``hw=<card>.<device>``. If the
-        device name contains a '=', the module will use ALSA to capture,
-        otherwise OSS.
-
-    ``arate=<value>`` (radio capture only)
-        Rate in samples per second (default: 44100).
-
-        .. note::
-
-            When using audio capture set also ``--rawaudio=rate=<value>`` option
-            with the same value as arate. If you have problems with sound speed
-            (runs too quickly), try to play with different rate values (e.g.
-            48000, 44100, 32000,...).
-
-    ``achannels=<value>`` (radio capture only)
-        Number of audio channels to capture.
-
 ``--really-quiet``
     Display even less output and status messages than with ``--quiet``.
 
@@ -1856,7 +1827,7 @@ OPTIONS
     behavior is the opposite of MPlayer's, which tries to reset all settings
     when starting next file.)
 
-    Default: ``--reset-on-next-file=pause`` (only the pause mode is reset).
+    Default: Do not reset anything.
 
     This can be changed with this option. It accepts a list of options, and
     mpv will reset the value of these options on playback start to the initial
@@ -1871,18 +1842,13 @@ OPTIONS
 
     .. admonition:: Examples
 
+        - ``--reset-on-next-file=pause``
+          Reset pause mode when switching to the next file.
         - ``--reset-on-next-file=fullscreen,speed``
           Reset fullscreen and playback speed settings if they were changed
           during playback.
         - ``--reset-on-next-file=all``
           Try to reset all settings that were changed during playback.
-        - ``--reset-on-next-file=""``
-          Do not reset pause mode.
-
-``--right-alt-gr``, ``--no-right-alt-gr``
-    (Cocoa and Windows only)
-    Use the right Alt key as Alt Gr to produce special characters. If disabled,
-    count the right Alt as an Alt modifier key. Enabled by default.
 
 ``--rtsp-transport=<lavf|udp|tcp|http>``
     Select RTSP transport method (default: tcp). This selects the underlying
@@ -1981,6 +1947,12 @@ OPTIONS
         Filename of the currently played video.
     ``%F``
         Same as ``%f``, but strip the file extension, including the dot.
+    ``%x``
+        Directory path of the currently played video. If the video is not on
+        the filesystem (but e.g. ``http://``), this expand to an empty string.
+    ``%X{fallback}``
+        Same as ``%x``, but if the video file is not on the filesystem, return
+        the fallback string inside the ``{...}``.
     ``%p``
         Current playback time, in the same format as used in the OSD. The
         result is a string of the form "HH:MM:SS". For example, if the video is
@@ -2032,14 +2004,6 @@ OPTIONS
     ``%%``
         Replaced with the ``%`` character itself.
 
-``--screenh=<pixels>``
-    Specify the screen height for video output drivers which do not know the
-    screen resolution, like ``x11`` and TV-out.
-
-``--screenw=<pixels>``
-    Specify the screen width for video output drivers which do not know the
-    screen resolution, like ``x11`` and TV-out.
-
 ``--secondary-sid=<ID|auto|no>``
     Select a secondary subtitle stream. This is similar to ``--sid``. If a
     secondary subtitle is selected, it will be rendered as toptitle (i.e. on
@@ -2054,14 +2018,14 @@ OPTIONS
     .. note::
 
         Styling and interpretation of any formatting tags is disabled for the
-        secondary subtitle. Internally, the same mechanism as ``--no-ass`` is
-        used to strip the styling.
+        secondary subtitle. Internally, the same mechanism as ``--no-sub-ass``
+        is used to strip the styling.
 
     .. note::
 
         If the main subtitle stream contains formatting tags which display the
         subtitle at the top of the screen, it will overlap with the secondary
-        subtitle. To prevent this, you could use ``--no-ass`` to disable
+        subtitle. To prevent this, you could use ``--no-sub-ass`` to disable
         styling in the main subtitle stream.
 
 ``--show-profile=<profile>``
@@ -2145,12 +2109,6 @@ OPTIONS
 ``--speed=<0.01-100>``
     Slow down or speed up playback by the factor given as parameter.
 
-``--srate=<Hz>``
-    Select the output sample rate to be used (of course sound cards have
-    limits on this). If the sample frequency selected is different from that
-    of the current media, the lavrresample audio filter will be
-    inserted into the audio filter layer to compensate for the difference.
-
 ``--start=<relative time>``
     Seek to given time position.
 
@@ -2220,19 +2178,19 @@ OPTIONS
     implemented, but does not work (happens often on GNOME). You might be able
     to to work this around using ``--heartbeat-cmd`` instead.
 
-``--sub=<subtitlefile1,subtitlefile2,...>``
+``--sub-file=<subtitlefile1,subtitlefile2,...>``
     Use/display these subtitle files. Only one file can be displayed at the
     same time.
 
-``--sub-fix-timing``, ``--no-sub-fix-timing``
-    By default, external text subtitles are preprocessed to remove minor gaps
-    or overlaps between subtitles (if the difference is smaller than 200 ms,
-    the gap or overlap is removed). This does not affect image subtitles,
-    subtitles muxed with audio/video, or subtitles in the ASS format.
+``--sub-auto=<no|exact|fuzzy|all>``, ``--no-sub-auto``
+    Load additional subtitle files matching the video filename. The parameter
+    specifies how external subtitle files are matched. ``exact`` is enabled by
+    default.
 
-``--sub-demuxer=<[+]name>``
-    Force subtitle demuxer type for ``--sub``. Give the demuxer name as
-    printed by ``--sub-demuxer=help``.
+    :no:    Don't automatically load external subtitle files.
+    :exact: Load the media filename with subtitle file extension (default).
+    :fuzzy: Load all subs containing movie name.
+    :all:   Load all subs in the current and ``--sub-paths`` directories.
 
 ``--sub-paths=<path1:path2:...>``
     Specify extra directories to search for subtitles matching the video.
@@ -2252,7 +2210,11 @@ OPTIONS
         - ``/tmp/subs/``
         - ``~/.mpv/sub/``
 
-``--subcp=<codepage>``
+``--sub-demuxer=<[+]name>``
+    Force subtitle demuxer type for ``--sub-file``. Give the demuxer name as
+    printed by ``--sub-demuxer=help``.
+
+``--sub-codepage=<codepage>``
     If your system supports ``iconv(3)``, you can use this option to specify
     the subtitle codepage. By default, ENCA will be used to guess the charset.
     If mpv is not compiled with ENCA, ``UTF-8:UTF-8-BROKEN`` is the default,
@@ -2268,48 +2230,52 @@ OPTIONS
 
     .. admonition:: Examples
 
-        - ``--subcp=utf8:latin2`` Use Latin 2 if input is not UTF-8.
-        - ``--subcp=utf8:cp1250`` Use CP1250 if input is not UTF-8.
-        - ``--subcp=cp1250`` Always force recoding to cp1250.
+        - ``--sub-codepage=utf8:latin2`` Use Latin 2 if input is not UTF-8.
+        - ``--sub-codepage=cp1250`` Always force recoding to cp1250.
 
-    The pseudo codepage ``UTF-8-BROKEN`` is used internally. If this is used
-    as codepage, the subtitle will be interpreted as UTF-8, but with "Latin 1"
-    as fallback for bytes which are not valid UTF-8 sequences. iconv is never
-    involved in this mode.
+    The pseudo codepage ``UTF-8-BROKEN`` is used internally. When it
+    is the codepage, subtitles are interpreted as UTF-8 with "Latin 1" as
+    fallback for bytes which are not valid UTF-8 sequences. iconv is
+    never involved in this mode.
 
     If the player was compiled with ENCA support, you can control it with the
-    following syntax::
+    following syntax:
 
-        ``--subcp=enca:<language>:<fallback codepage>``
+    ``--sub-codepage=enca:<language>:<fallback codepage>``
 
-    You can specify your language using a two letter language code to make
-    ENCA detect the codepage automatically. If unsure, enter anything (if the
-    language is invalid, mpv will complain and list valid languages).
-    Fallback codepage specifies the codepage to use if autodetection fails.
-    If no fallback is specified, ``UTF-8-BROKEN`` is used.
+    Language is specified using a two letter code to help ENCA detect
+    the codepage automatically. If an invalid language code is
+    entered, mpv will complain and list valid languages.  (Note
+    however that this list will only be printed when the conversion code is actually
+    called, for example when loading an external subtitle). The
+    fallback codepage is used if autodetection fails.  If no fallback
+    is specified, ``UTF-8-BROKEN`` is used.
 
     .. admonition:: Examples
 
-        - ``--subcp=enca:cs:latin2`` guess the encoding, assuming the subtitles
-          are Czech, fall back on latin 2, if the detection fails.
-        - ``--subcp=enca:pl:cp1250`` guess the encoding for Polish, fall back on
-          cp1250.
-        - ``--subcp=enca:pl`` guess the encoding for Polish, fall back on UTF-8.
-        - ``--subcp=enca`` try universal detection, fall back on UTF-8.
+        - ``--sub-codepage=enca:pl:cp1250`` guess the encoding, assuming the subtitles
+          are Polish, fall back on cp1250
+        - ``--sub-codepage=enca:pl`` guess the encoding for Polish, fall back on UTF-8.
+        - ``--sub-codepage=enca`` try universal detection, fall back on UTF-8.
 
     If the player was compiled with libguess support, you can use it with:
 
-    ``--subcp=guess:<language>:<fallback codepage>``
+    ``--sub-codepage=guess:<language>:<fallback codepage>``
 
-    Note that libguess always needs a language. There is no universal detection
-    mode. Use ``--subcp=guess:help`` to get a list of languages (like with ENCA,
-    it will be printed only if the conversion code is somehow called, for
-    example when loading an external subtitle).
+    libguess always needs a language. There is no universal detection
+    mode. Use ``--sub-codepage=guess:help`` to get a list of
+    languages subject to the same caveat as with ENCA above.
+
+``--sub-fix-timing``, ``--no-sub-fix-timing``
+    By default, external text subtitles are preprocessed to remove minor gaps
+    or overlaps between subtitles (if the difference is smaller than 200 ms,
+    the gap or overlap is removed). This does not affect image subtitles,
+    subtitles muxed with audio/video, or subtitles in the ASS format.
 
 ``--sub-delay=<sec>``
     Delays subtitles by ``<sec>`` seconds. Can be negative.
 
-``--subfps=<rate>``
+``--sub-fps=<rate>``
     Specify the framerate of the subtitle file (default: movie fps).
 
     .. note::
@@ -2391,12 +2357,37 @@ OPTIONS
     Display OSD messages on the console when no video output is available.
     Enabled by default.
 
-``--term-osd-esc=<string>``
-    Specify the escape sequence to use before writing an OSD message on the
-    console. The escape sequence should move the pointer to the beginning of
-    the line used for the OSD and clear it (default: ``^[[A\r^[[K``).
-
     ``force`` enables terminal OSD even if a video window is created.
+
+``--term-osd-bar``, ``--no-term-osd-bar``
+    Enable printing a progress bar under the status line on the terminal.
+    (Disabled by default.)
+
+``--term-osd-bar-chars=<string>``
+    Customize the ``--term-osd-bar`` feature. The string is expected to
+    consist of 5 characters (start, left space, position indicator,
+    right space, end). You can use unicode characters, but note that double-
+    width characters will not be treated correctly.
+
+    Default: ``[-+-]``.
+
+``--term-playing-msg=<string>``
+    Print out a string after starting playback. The string is expanded for
+    properties, e.g. ``--playing-msg='file: ${filename}'`` will print the string
+    ``file:`` followed by a space and the currently played filename.
+
+    See `Property Expansion`_.
+
+``--term-status-msg=<string>``
+    Print out a custom string during playback instead of the standard status
+    line. Expands properties. See `Property Expansion`_.
+
+``--no-terminal``, ``--terminal``
+    Disable any use of the terminal and stdin/stdout/stderr. This completely
+    silences any message output.
+
+    Unlike ``--really-quiet``, this disables input and terminal initialization
+    as well.
 
 ``--title=<string>``
     Set the window title. Properties are expanded on playback start.
@@ -2585,7 +2576,7 @@ OPTIONS
         Choose the quality of the JPEG compression (< 60 recommended for full
         size).
 
-``--tvscan=<option1:option2:...>``
+``--tv-scan=<option1:option2:...>``
     Tune the TV channel scanner. mpv will also print value for
     ``--tv=channels=`` option, including existing and just found channels.
 
@@ -2659,7 +2650,7 @@ OPTIONS
         ``--vd--lavc-o=debug=pict``
 
 ``--vd-lavc-show-all=<yes|no>``
-    Show even broken/corrupt frames (default: yes). If this option is set to
+    Show even broken/corrupt frames (default: no). If this option is set to
     no, libavcodec won't output frames that were either decoded before an
     initial keyframe was decoded, or frames that are recognized as corrupted.
 
@@ -2717,6 +2708,26 @@ OPTIONS
     If video and screen aspect match perfectly, these options do nothing.
 
     This option is disabled if the ``--no-keepaspect`` option is used.
+
+``--video-aspect=<ratio>``
+    Override movie aspect ratio, in case aspect information is incorrect or
+    missing in the file being played. See also ``--no-video-aspect``.
+
+    Two values have special meaning:
+
+    :0:  disable aspect ratio handling, pretend the video has square pixels
+    :-1: use the video stream or container aspect (default)
+
+    But note that handling of these special values might change in the future.
+
+    .. admonition:: Examples
+
+        - ``--video-aspect=4:3``  or ``--video-aspect=1.3333``
+        - ``--video-aspect=16:9`` or ``--video-aspect=1.7777``
+
+``--no-video-aspect``
+    Ignore aspect ratio information from video file and assume the video has
+    square pixels. See also ``--video-aspect``.
 
 ``--video-pan-x=<value>``, ``--video-pan-y=<value>``
     Moves the displayed video rectangle by the given value in the X or Y

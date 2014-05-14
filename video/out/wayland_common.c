@@ -34,16 +34,16 @@
 #include "bstr/bstr.h"
 #include "options/options.h"
 #include "common/msg.h"
-#include "libavutil/common.h"
 #include "talloc.h"
 
 #include "wayland_common.h"
 
 #include "vo.h"
-#include "aspect.h"
+#include "win_state.h"
 #include "osdep/timer.h"
 
 #include "input/input.h"
+#include "input/event.h"
 #include "input/keycodes.h"
 
 #define MOD_SHIFT_MASK      0x01
@@ -426,6 +426,99 @@ static const struct wl_seat_listener seat_listener = {
     seat_handle_capabilities,
 };
 
+static void data_offer_handle_offer(void *data,
+                                    struct wl_data_offer *offer,
+                                    const char *mime_type)
+{
+    struct vo_wayland_state *wl = data;
+    if (strcmp(mime_type, "text/uri-list") != 0)
+        MP_VERBOSE(wl, "unsupported mime type for drag and drop: %s\n", mime_type);
+}
+
+static const struct wl_data_offer_listener data_offer_listener = {
+    data_offer_handle_offer,
+};
+
+static void data_device_handle_data_offer(void *data,
+                                          struct wl_data_device *wl_data_device,
+                                          struct wl_data_offer *id)
+{
+    struct vo_wayland_state *wl = data;
+    if (wl->input.offer) {
+        MP_ERR(wl, "There is already a dnd entry point.\n");
+        wl_data_offer_destroy(wl->input.offer);
+    }
+
+    wl->input.offer = id;
+    wl_data_offer_add_listener(id, &data_offer_listener, wl);
+}
+
+static void data_device_handle_enter(void *data,
+                                     struct wl_data_device *wl_data_device,
+                                     uint32_t serial,
+                                     struct wl_surface *surface,
+                                     wl_fixed_t x,
+                                     wl_fixed_t y,
+                                     struct wl_data_offer *id)
+{
+    struct vo_wayland_state *wl = data;
+    if (wl->input.offer != id)
+        MP_FATAL(wl, "Fatal dnd error (Please report this issue)\n");
+
+    wl_data_offer_accept(id, serial, "text/uri-list");
+}
+
+static void data_device_handle_leave(void *data,
+                                     struct wl_data_device *wl_data_device)
+{
+    struct vo_wayland_state *wl = data;
+    if (wl->input.offer) {
+        wl_data_offer_destroy(wl->input.offer);
+        wl->input.offer = NULL;
+    }
+    // dnd fd is closed on POLLHUP
+}
+
+static void data_device_handle_motion(void *data,
+                                      struct wl_data_device *wl_data_device,
+                                      uint32_t time,
+                                      wl_fixed_t x,
+                                      wl_fixed_t y)
+{
+}
+
+static void data_device_handle_drop(void *data,
+                                    struct wl_data_device *wl_data_device)
+{
+    struct vo_wayland_state *wl = data;
+
+    int pipefd[2];
+
+    if (pipe(pipefd) == -1) {
+        MP_FATAL(wl, "can't create pipe for dnd communication\n");
+        return;
+    }
+
+    wl->input.dnd_fd = pipefd[0];
+    wl_data_offer_receive(wl->input.offer, "text/uri-list", pipefd[1]);
+    close(pipefd[1]);
+}
+
+static void data_device_handle_selection(void *data,
+                                         struct wl_data_device *wl_data_device,
+                                         struct wl_data_offer *id)
+{
+}
+
+static const struct wl_data_device_listener data_device_listener = {
+    data_device_handle_data_offer,
+    data_device_handle_enter,
+    data_device_handle_leave,
+    data_device_handle_motion,
+    data_device_handle_drop,
+    data_device_handle_selection
+};
+
 static void registry_handle_global (void *data,
                                     struct wl_registry *reg,
                                     uint32_t id,
@@ -462,11 +555,28 @@ static void registry_handle_global (void *data,
         wl_list_insert(&wl->display.output_list, &output->link);
     }
 
+    else if (strcmp(interface, "wl_data_device_manager") == 0) {
+
+        wl->input.devman = wl_registry_bind(reg,
+                                            id,
+                                            &wl_data_device_manager_interface,
+                                            1);
+    }
+
     else if (strcmp(interface, "wl_seat") == 0) {
 
         wl->input.seat = wl_registry_bind(reg, id, &wl_seat_interface, 1);
-
         wl_seat_add_listener(wl->input.seat, &seat_listener, wl);
+
+        wl->input.datadev = wl_data_device_manager_get_data_device(
+                wl->input.devman, wl->input.seat);
+        wl_data_device_add_listener(wl->input.datadev, &data_device_listener, wl);
+    }
+
+    else if (strcmp(interface, "wl_subcompositor") == 0) {
+
+        wl->display.subcomp = wl_registry_bind(reg, id,
+                                               &wl_subcompositor_interface, 1);
     }
 }
 
@@ -591,7 +701,6 @@ static void shedule_resize(struct vo_wayland_state *wl,
     wl->vo->dheight = height;
 }
 
-
 static bool create_display (struct vo_wayland_state *wl)
 {
     if (wl->vo->probing && !getenv("XDG_RUNTIME_DIR"))
@@ -650,9 +759,27 @@ static void destroy_display (struct vo_wayland_state *wl)
 
 static bool create_window (struct vo_wayland_state *wl)
 {
-    wl->window.surface = wl_compositor_create_surface(wl->display.compositor);
-    wl->window.shell_surface = wl_shell_get_shell_surface(wl->display.shell,
-                                                          wl->window.surface);
+    wl->window.video_surface =
+        wl_compositor_create_surface(wl->display.compositor);
+    wl->window.shell_surface =
+        wl_shell_get_shell_surface(wl->display.shell, wl->window.video_surface);
+
+    // Commits on surfaces bound to a subsurface are cached until the parent
+    // surface is commited, in this case the video surface.
+    // Which means we can call commit anywhere.
+    struct wl_region *input =
+        wl_compositor_create_region(wl->display.compositor);
+    for (int i = 0; i < MAX_OSD_PARTS; ++i) {
+        wl->window.osd_surfaces[i] =
+            wl_compositor_create_surface(wl->display.compositor);
+        wl_surface_set_input_region(wl->window.osd_surfaces[i], input);
+        wl->window.osd_subsurfaces[i] =
+            wl_subcompositor_get_subsurface(wl->display.subcomp,
+                                            wl->window.osd_surfaces[i],
+                                            wl->window.video_surface); // parent
+        wl_subsurface_set_sync(wl->window.osd_subsurfaces[i]);
+    }
+    wl_region_destroy(input);
 
     if (!wl->window.shell_surface) {
         MP_ERR(wl, "creating shell surface failed\n");
@@ -673,8 +800,8 @@ static void destroy_window (struct vo_wayland_state *wl)
     if (wl->window.shell_surface)
         wl_shell_surface_destroy(wl->window.shell_surface);
 
-    if (wl->window.surface)
-        wl_surface_destroy(wl->window.surface);
+    if (wl->window.video_surface)
+        wl_surface_destroy(wl->window.video_surface);
 }
 
 static bool create_cursor (struct vo_wayland_state *wl)
@@ -714,6 +841,8 @@ static bool create_input (struct vo_wayland_state *wl)
         return false;
     }
 
+    wl->input.dnd_fd = -1;
+
     return true;
 }
 
@@ -731,9 +860,14 @@ static void destroy_input (struct vo_wayland_state *wl)
     if (wl->input.pointer)
         wl_pointer_destroy(wl->input.pointer);
 
+    if (wl->input.datadev)
+        wl_data_device_destroy(wl->input.datadev);
+
+    if (wl->input.devman)
+        wl_data_device_manager_destroy(wl->input.devman);
+
     if (wl->input.seat)
         wl_seat_destroy(wl->input.seat);
-
 }
 
 /*** mplayer2 interface ***/
@@ -850,11 +984,68 @@ static int vo_wayland_check_events (struct vo *vo)
             wl_display_flush(dp);
     }
 
+    /* If drag & drop was ended poll the file descriptor from the offer if
+     * there is data to read.
+     * We only accept the mime type text/uri-list.
+     */
+    if (wl->input.dnd_fd != -1) {
+        fd.fd = wl->input.dnd_fd;
+        fd.events = POLLIN | POLLHUP | POLLERR;
+
+        if (poll(&fd, 1, 0) > 0) {
+            if (fd.revents & POLLERR) {
+                MP_ERR(wl, "error occured on the drag&drop fd\n");
+                close(wl->input.dnd_fd);
+                wl->input.dnd_fd = -1;
+            }
+
+            if (fd.revents & POLLIN) {
+                int const to_read = 2048;
+                char *buffer = malloc(to_read);
+                size_t buffer_len = to_read;
+                size_t str_len = 0;
+                int has_read = 0;
+
+                if (!buffer)
+                    goto fail;
+
+                while (0 < (has_read = read(fd.fd, buffer+str_len, to_read))) {
+                    if (buffer_len + to_read < buffer_len) {
+                        MP_ERR(wl, "Integer overflow while reading from fd\n");
+                        break;
+                    }
+
+                    str_len += has_read;
+                    buffer_len += to_read;
+                    void *ptr = realloc(buffer, buffer_len);
+                    if (!ptr)
+                        break;
+                    buffer = ptr;
+
+                    if (has_read < to_read) {
+                        buffer[str_len] = 0;
+                        struct bstr file_list = bstr0(buffer);
+                        mp_event_drop_mime_data(vo->input_ctx, "text/uri-list",
+                                                file_list);
+                        break;
+                    }
+                }
+            fail:
+                free(buffer);
+            }
+
+            if (fd.revents & POLLHUP) {
+                close(wl->input.dnd_fd);
+                wl->input.dnd_fd = -1;
+            }
+        }
+    }
+
     // window events are reset by the resizing code
     return wl->window.events;
 }
 
-static void vo_wayland_update_screeninfo (struct vo *vo)
+static void vo_wayland_update_screeninfo(struct vo *vo, struct mp_rect *screenrc)
 {
     struct vo_wayland_state *wl = vo->wayland;
     struct mp_vo_opts *opts = vo->opts;
@@ -862,7 +1053,7 @@ static void vo_wayland_update_screeninfo (struct vo *vo)
 
     wl_display_roundtrip(wl->display.display);
 
-    vo->xinerama_x = vo->xinerama_y = 0;
+    *screenrc = (struct mp_rect){0};
 
     int screen_id = 0;
 
@@ -892,22 +1083,20 @@ static void vo_wayland_update_screeninfo (struct vo *vo)
 
     if (fsscreen_output) {
         wl->display.fs_output = fsscreen_output->output;
-        opts->screenwidth = fsscreen_output->width;
-        opts->screenheight = fsscreen_output->height;
+        screenrc->x1 = fsscreen_output->width;
+        screenrc->y1 = fsscreen_output->height;
     }
     else {
         wl->display.fs_output = NULL; /* current output is always 0 */
 
         if (first_output) {
-            opts->screenwidth = first_output->width;
-            opts->screenheight = first_output->height;
+            screenrc->x1 = first_output->width;
+            screenrc->y1 = first_output->height;
         }
     }
 
-    wl->window.fs_width = opts->screenwidth;
-    wl->window.fs_height = opts->screenheight;
-
-    aspect_save_screenres(vo, opts->screenwidth, opts->screenheight);
+    wl->window.fs_width = screenrc->x1;
+    wl->window.fs_height = screenrc->y1;
 }
 
 int vo_wayland_control (struct vo *vo, int *events, int request, void *arg)
@@ -928,9 +1117,6 @@ int vo_wayland_control (struct vo *vo, int *events, int request, void *arg)
     case VOCTRL_BORDER:
         vo_wayland_border(vo);
         *events |= VO_EVENT_RESIZE;
-        return VO_TRUE;
-    case VOCTRL_UPDATE_SCREENINFO:
-        vo_wayland_update_screeninfo(vo);
         return VO_TRUE;
     case VOCTRL_GET_WINDOW_SIZE: {
         int *s = arg;
@@ -962,19 +1148,25 @@ int vo_wayland_control (struct vo *vo, int *events, int request, void *arg)
     return VO_NOTIMPL;
 }
 
-bool vo_wayland_config (struct vo *vo, uint32_t d_width,
-                        uint32_t d_height, uint32_t flags)
+bool vo_wayland_config (struct vo *vo, uint32_t flags)
 {
     struct vo_wayland_state *wl = vo->wayland;
 
-    wl->window.p_width = d_width;
-    wl->window.p_height = d_height;
-    wl->window.aspect = d_width / (float) MPMAX(d_height, 1);
+    struct mp_rect screenrc;
+    vo_wayland_update_screeninfo(vo, &screenrc);
+
+    struct vo_win_geometry geo;
+    vo_calc_window_geometry(vo, &screenrc, &geo);
+    vo_apply_window_geometry(vo, &geo);
+
+    wl->window.p_width = vo->dwidth;
+    wl->window.p_height = vo->dheight;
+    wl->window.aspect = vo->dwidth / (float) MPMAX(vo->dheight, 1);
 
     if (!(flags & VOFLAG_HIDDEN)) {
         if (!wl->window.is_init) {
-            wl->window.width = d_width;
-            wl->window.height = d_height;
+            wl->window.width = vo->dwidth;
+            wl->window.height = vo->dheight;
         }
 
         if (vo->opts->fullscreen) {

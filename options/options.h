@@ -8,8 +8,6 @@
 typedef struct mp_vo_opts {
     struct m_obj_settings *video_driver_list, *vo_defs;
 
-    int screenwidth;
-    int screenheight;
     int ontop;
     int fullscreen;
     int screen_id;
@@ -28,7 +26,6 @@ typedef struct mp_vo_opts {
     struct m_geometry autofit;
     struct m_geometry autofit_larger;
 
-    int fsmode;
     int keepaspect;
     int border;
 
@@ -40,19 +37,23 @@ typedef struct mp_vo_opts {
     float monitor_pixel_aspect;
     int force_window_position;
 
-    int native_fs;
+    int fs_missioncontrol;
 } mp_vo_opts;
 
 typedef struct MPOpts {
+    int use_terminal;
     char *msglevels;
+    char *dump_stats;
     int verbose;
-    int msg_identify;
     int msg_color;
     int msg_module;
+    int msg_time;
 
     char **reset_options;
     char **lua_files;
+    char **lua_opts;
     int lua_load_osc;
+    int auto_load_scripts;
 
     struct m_obj_settings *audio_driver_list, *ao_defs;
     int fixed_vo;
@@ -95,6 +96,7 @@ typedef struct MPOpts {
     char *stream_capture;
     char *stream_dump;
     int loop_times;
+    int loop_file;
     int shuffle;
     int ordered_chapters;
     char *ordered_chapters_files;
@@ -104,6 +106,7 @@ typedef struct MPOpts {
     int merge_files;
     int quiet;
     int load_config;
+    char *force_configdir;
     int use_filedir_conf;
     int stream_cache_size;
     int stream_cache_def_size;
@@ -118,13 +121,15 @@ typedef struct MPOpts {
     int initial_audio_sync;
     int hr_seek;
     float hr_seek_demuxer_offset;
+    int hr_seek_framedrop;
     float audio_delay;
     float default_max_pts_correction;
     int autosync;
     int softsleep;
     int frame_dropping;
     int term_osd;
-    char *term_osd_esc;
+    int term_osd_bar;
+    char *term_osd_bar_chars;
     char *playing_msg;
     char *status_msg;
     char *osd_status_msg;
@@ -190,7 +195,6 @@ typedef struct MPOpts {
     char **sub_name;
     char **sub_paths;
     int sub_auto;
-    int sub_match_fuzziness;
     int osd_bar_visible;
     float osd_bar_align_x;
     float osd_bar_align_y;
@@ -271,7 +275,7 @@ typedef struct MPOpts {
         char *lirc_configfile;
         int use_lircc;
         int use_alt_gr;
-        int use_ar;
+        int use_appleremote;
         int use_media_keys;
         int default_bindings;
         int test;
@@ -296,6 +300,7 @@ typedef struct MPOpts {
         int neverdrop;
         int video_first;
         int audio_first;
+        int metadata;
     } encode_output;
 } MPOpts;
 

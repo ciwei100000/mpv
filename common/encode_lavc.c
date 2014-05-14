@@ -25,6 +25,7 @@
 #include "encode_lavc.h"
 #include "common/global.h"
 #include "common/msg.h"
+#include "common/msg_control.h"
 #include "video/vfcap.h"
 #include "options/options.h"
 #include "osdep/timer.h"
@@ -102,6 +103,15 @@ static bool value_has_flag(const char *value, const char *flag)
         return val; \
     }
 
+#define CHECK_FAIL_UNLOCK(ctx, val) \
+    if (ctx && (ctx->failed || ctx->finished)) { \
+        MP_ERR(ctx, \
+               "Called a function on a %s encoding context. Bailing out.\n", \
+               ctx->failed ? "failed" : "finished"); \
+        pthread_mutex_unlock(&ctx->lock); \
+        return val; \
+    }
+
 int encode_lavc_available(struct encode_lavc_context *ctx)
 {
     CHECK_FAIL(ctx, 0);
@@ -133,6 +143,7 @@ struct encode_lavc_context *encode_lavc_init(struct encode_output_conf *options,
         mp_msg_force_stderr(global, true);
 
     ctx = talloc_zero(NULL, struct encode_lavc_context);
+    pthread_mutex_init(&ctx->lock, NULL);
     ctx->log = mp_log_new(ctx, global->log, "encode-lavc");
     ctx->global = global;
     encode_lavc_discontinuity(ctx);
@@ -233,10 +244,16 @@ struct encode_lavc_context *encode_lavc_init(struct encode_output_conf *options,
     return ctx;
 }
 
+void encode_lavc_set_metadata(struct encode_lavc_context *ctx,
+                              struct mp_tags *metadata)
+{
+    if (ctx->options->metadata)
+        ctx->metadata = metadata;
+}
+
 int encode_lavc_start(struct encode_lavc_context *ctx)
 {
     AVDictionaryEntry *de;
-    unsigned i;
 
     if (ctx->header_written < 0)
         return 0;
@@ -246,6 +263,7 @@ int encode_lavc_start(struct encode_lavc_context *ctx)
     CHECK_FAIL(ctx, 0);
 
     if (ctx->expect_video) {
+        unsigned i;
         for (i = 0; i < ctx->avc->nb_streams; ++i)
             if (ctx->avc->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
                 break;
@@ -256,6 +274,7 @@ int encode_lavc_start(struct encode_lavc_context *ctx)
         }
     }
     if (ctx->expect_audio) {
+        unsigned i;
         for (i = 0; i < ctx->avc->nb_streams; ++i)
             if (ctx->avc->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
                 break;
@@ -285,6 +304,13 @@ int encode_lavc_start(struct encode_lavc_context *ctx)
     MP_INFO(ctx, "Opening muxer: %s [%s]\n",
             ctx->avc->oformat->long_name, ctx->avc->oformat->name);
 
+    if (ctx->metadata) {
+        for (int i = 0; i < ctx->metadata->num_keys; i++) {
+            av_dict_set(&ctx->avc->metadata,
+                ctx->metadata->keys[i], ctx->metadata->values[i], 0);
+        }
+    }
+
     if (avformat_write_header(ctx->avc, &ctx->foptions) < 0) {
         encode_lavc_fail(ctx, "could not write header\n");
         return 0;
@@ -308,6 +334,7 @@ void encode_lavc_free(struct encode_lavc_context *ctx)
         encode_lavc_fail(ctx,
                          "called encode_lavc_free without encode_lavc_finish\n");
 
+    pthread_mutex_destroy(&ctx->lock);
     talloc_free(ctx);
 }
 
@@ -382,7 +409,19 @@ void encode_lavc_finish(struct encode_lavc_context *ctx)
 
 void encode_lavc_set_video_fps(struct encode_lavc_context *ctx, float fps)
 {
+    pthread_mutex_lock(&ctx->lock);
     ctx->vo_fps = fps;
+    pthread_mutex_unlock(&ctx->lock);
+}
+
+void encode_lavc_set_audio_pts(struct encode_lavc_context *ctx, double pts)
+{
+    if (ctx) {
+        pthread_mutex_lock(&ctx->lock);
+        ctx->last_audio_in_pts = pts;
+        ctx->samples_since_last_pts = 0;
+        pthread_mutex_unlock(&ctx->lock);
+    }
 }
 
 static void encode_2pass_prepare(struct encode_lavc_context *ctx,
@@ -771,11 +810,15 @@ void encode_lavc_discontinuity(struct encode_lavc_context *ctx)
     if (!ctx)
         return;
 
-    CHECK_FAIL(ctx, );
+    pthread_mutex_lock(&ctx->lock);
+
+    CHECK_FAIL_UNLOCK(ctx, );
 
     ctx->audio_pts_offset = MP_NOPTS_VALUE;
     ctx->last_video_in_pts = MP_NOPTS_VALUE;
     ctx->discontinuity_pts_offset = MP_NOPTS_VALUE;
+
+    pthread_mutex_unlock(&ctx->lock);
 }
 
 static void encode_lavc_printoptions(struct mp_log *log, void *obj,
@@ -1004,7 +1047,9 @@ int encode_lavc_getstatus(struct encode_lavc_context *ctx,
     if (!ctx)
         return -1;
 
-    CHECK_FAIL(ctx, -1);
+    pthread_mutex_lock(&ctx->lock);
+
+    CHECK_FAIL_UNLOCK(ctx, -1);
 
     minutes = (now - ctx->t0) / 60.0 * (1 - f) / f;
     megabytes = ctx->avc->pb ? (avio_size(ctx->avc->pb) / 1048576.0 / f) : 0;
@@ -1020,12 +1065,16 @@ int encode_lavc_getstatus(struct encode_lavc_context *ctx,
         snprintf(buf, bufsize, "{%.1fmin %.1fMB}",
                  minutes, megabytes);
     buf[bufsize - 1] = 0;
+
+    pthread_mutex_unlock(&ctx->lock);
     return 0;
 }
 
 void encode_lavc_expect_stream(struct encode_lavc_context *ctx, int mt)
 {
-    CHECK_FAIL(ctx, );
+    pthread_mutex_lock(&ctx->lock);
+
+    CHECK_FAIL_UNLOCK(ctx, );
 
     switch (mt) {
     case AVMEDIA_TYPE_VIDEO:
@@ -1035,11 +1084,18 @@ void encode_lavc_expect_stream(struct encode_lavc_context *ctx, int mt)
         ctx->expect_audio = true;
         break;
     }
+
+    pthread_mutex_unlock(&ctx->lock);
 }
 
 bool encode_lavc_didfail(struct encode_lavc_context *ctx)
 {
-    return ctx && ctx->failed;
+    if (!ctx)
+        return false;
+    pthread_mutex_lock(&ctx->lock);
+    bool fail = ctx && ctx->failed;
+    pthread_mutex_unlock(&ctx->lock);
+    return fail;
 }
 
 void encode_lavc_fail(struct encode_lavc_context *ctx, const char *format, ...)

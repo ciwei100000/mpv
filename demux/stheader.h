@@ -81,6 +81,7 @@ typedef struct sh_video {
     float aspect;         // aspect ratio stored in the file (for prescaling)
     int i_bps;            // == bitrate  (compressed bytes/sec)
     int disp_w, disp_h;   // display size
+    int rotate;           // intended display rotation, in degrees, [0, 359]
     MP_BITMAPINFOHEADER *bih;
 } sh_video_t;
 
@@ -88,9 +89,9 @@ typedef struct sh_sub {
     unsigned char *extradata;   // extra header data passed from demuxer
     int extradata_len;
     int w, h;                   // mp4 vobsubs
-    int frame_based;            // timestamps are frame-based
+    double frame_based;         // timestamps are frame-based (and this is the
+                                // fallback framerate used for timestamps)
     bool is_utf8;               // if false, subtitle packet charset is unknown
-    struct ass_track *track;    // loaded by libass
     struct dec_sub *dec_sub;    // decoder context
 } sh_sub_t;
 

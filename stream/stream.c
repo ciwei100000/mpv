@@ -30,8 +30,8 @@
 #include <strings.h>
 #include <assert.h>
 
-#include <libavutil/intreadwrite.h>
 #include <libavutil/common.h>
+#include "compat/mpbswap.h"
 
 #include "talloc.h"
 
@@ -56,15 +56,10 @@ char *cdrom_device = NULL;
 char *dvd_device = NULL;
 int dvd_title = 0;
 
-struct input_ctx;
-static int (*stream_check_interrupt_cb)(struct input_ctx *ctx, int time);
-static struct input_ctx *stream_check_interrupt_ctx;
-
 extern const stream_info_t stream_info_vcd;
 extern const stream_info_t stream_info_cdda;
 extern const stream_info_t stream_info_dvb;
 extern const stream_info_t stream_info_tv;
-extern const stream_info_t stream_info_radio;
 extern const stream_info_t stream_info_pvr;
 extern const stream_info_t stream_info_smb;
 extern const stream_info_t stream_info_null;
@@ -77,6 +72,7 @@ extern const stream_info_t stream_info_ifo;
 extern const stream_info_t stream_info_dvd;
 extern const stream_info_t stream_info_dvdnav;
 extern const stream_info_t stream_info_bluray;
+extern const stream_info_t stream_info_bdnav;
 extern const stream_info_t stream_info_rar_filter;
 extern const stream_info_t stream_info_rar_entry;
 extern const stream_info_t stream_info_edl;
@@ -96,9 +92,6 @@ static const stream_info_t *const stream_list[] = {
 #if HAVE_TV
     &stream_info_tv,
 #endif
-#if HAVE_RADIO
-    &stream_info_radio,
-#endif
 #if HAVE_PVR
     &stream_info_pvr,
 #endif
@@ -114,6 +107,7 @@ static const stream_info_t *const stream_list[] = {
 #endif
 #if HAVE_LIBBLURAY
     &stream_info_bluray,
+    &stream_info_bdnav,
 #endif
 
     &stream_info_memory,
@@ -411,7 +405,7 @@ static int stream_reconnect(stream_t *s)
             sleep_ms = MPMIN(sleep_ms * 2, RECONNECT_SLEEP_MAX_MS);
         }
 
-        if (stream_check_interrupt(0))
+        if (stream_check_interrupt(s))
             return 0;
 
         s->eof = 1;
@@ -759,20 +753,11 @@ void free_stream(stream_t *s)
     talloc_free(s);
 }
 
-void stream_set_interrupt_callback(int (*cb)(struct input_ctx *, int),
-                                   struct input_ctx *ctx)
+bool stream_check_interrupt(struct stream *s)
 {
-    stream_check_interrupt_cb = cb;
-    stream_check_interrupt_ctx = ctx;
-}
-
-int stream_check_interrupt(int time)
-{
-    if (!stream_check_interrupt_cb) {
-        mp_sleep_us(time * 1000);
-        return 0;
-    }
-    return stream_check_interrupt_cb(stream_check_interrupt_ctx, time);
+    if (!s->global || !s->global->stream_interrupt_cb)
+        return false;
+    return s->global->stream_interrupt_cb(s->global->stream_interrupt_cb_ctx);
 }
 
 stream_t *open_memory_stream(void *data, int len)
@@ -847,134 +832,74 @@ static int stream_enable_cache(stream_t **stream, int64_t size, int64_t min,
     return res;
 }
 
-/**
- * Helper function to read 16 bits little-endian and advance pointer
- */
-static uint16_t get_le16_inc(const uint8_t **buf)
+static uint16_t stream_read_word_endian(stream_t *s, bool big_endian)
 {
-    uint16_t v = AV_RL16(*buf);
-    *buf += 2;
-    return v;
+    unsigned int y = stream_read_char(s);
+    y = (y << 8) | stream_read_char(s);
+    if (big_endian)
+        y = bswap_16(y);
+    return y;
 }
 
-/**
- * Helper function to read 16 bits big-endian and advance pointer
- */
-static uint16_t get_be16_inc(const uint8_t **buf)
+// Read characters until the next '\n' (including), or until the buffer in s is
+// exhausted.
+static int read_characters(stream_t *s, uint8_t *dst, int dstsize, int utf16)
 {
-    uint16_t v = AV_RB16(*buf);
-    *buf += 2;
-    return v;
-}
-
-/**
- * Find a newline character in buffer
- * \param buf buffer to search
- * \param len amount of bytes to search in buffer, may not overread
- * \param utf16 chose between UTF-8/ASCII/other and LE and BE UTF-16
- *              0 = UTF-8/ASCII/other, 1 = UTF-16-LE, 2 = UTF-16-BE
- */
-static const uint8_t *find_newline(const uint8_t *buf, int len, int utf16)
-{
-    uint32_t c;
-    const uint8_t *end = buf + len;
-    switch (utf16) {
-    case 0:
-        return (uint8_t *)memchr(buf, '\n', len);
-    case 1:
-        while (buf < end - 1) {
-            GET_UTF16(c, buf < end - 1 ? get_le16_inc(&buf) : 0, return NULL;)
-            if (buf <= end && c == '\n')
-                return buf - 1;
-        }
-        break;
-    case 2:
-        while (buf < end - 1) {
-            GET_UTF16(c, buf < end - 1 ? get_be16_inc(&buf) : 0, return NULL;)
-            if (buf <= end && c == '\n')
-                return buf - 1;
-        }
-        break;
-    }
-    return NULL;
-}
-
-#define EMPTY_STMT do{}while(0);
-
-/**
- * Copy a number of bytes, converting to UTF-8 if input is UTF-16
- * \param dst buffer to copy to
- * \param dstsize size of dst buffer
- * \param src buffer to copy from
- * \param len amount of bytes to copy from src
- * \param utf16 chose between UTF-8/ASCII/other and LE and BE UTF-16
- *              0 = UTF-8/ASCII/other, 1 = UTF-16-LE, 2 = UTF-16-BE
- */
-static int copy_characters(uint8_t *dst, int dstsize,
-                           const uint8_t *src, int *len, int utf16)
-{
-    uint32_t c;
-    uint8_t *dst_end = dst + dstsize;
-    const uint8_t *end = src + *len;
-    switch (utf16) {
-    case 0:
-        if (*len > dstsize)
-            *len = dstsize;
-        memcpy(dst, src, *len);
-        return *len;
-    case 1:
-        while (src < end - 1 && dst_end - dst > 8) {
+    if (utf16 == 1 || utf16 == 2) {
+        uint8_t *cur = dst;
+        while (1) {
+            if ((cur - dst) + 8 >= dstsize) // PUT_UTF8 writes max. 8 bytes
+                return -1; // line too long
+            uint32_t c;
             uint8_t tmp;
-            GET_UTF16(c, src < end - 1 ? get_le16_inc(&src) : 0, EMPTY_STMT)
-            PUT_UTF8(c, tmp, *dst++ = tmp; EMPTY_STMT)
+            GET_UTF16(c, stream_read_word_endian(s, utf16 == 2), return -1;)
+            if (s->eof)
+                break; // legitimate EOF; ignore the case of partial reads
+            PUT_UTF8(c, tmp, *cur++ = tmp;)
+            if (c == '\n')
+                break;
         }
-        *len -= end - src;
-        return dstsize - (dst_end - dst);
-    case 2:
-        while (src < end - 1 && dst_end - dst > 8) {
-            uint8_t tmp;
-            GET_UTF16(c, src < end - 1 ? get_be16_inc(&src) : 0, EMPTY_STMT)
-            PUT_UTF8(c, tmp, *dst++ = tmp; EMPTY_STMT)
-        }
-        *len -= end - src;
-        return dstsize - (dst_end - dst);
+        return cur - dst;
+    } else {
+        if (s->buf_pos >= s->buf_len)
+            stream_fill_buffer(s);
+        uint8_t *src = s->buffer + s->buf_pos;
+        int src_len = s->buf_len - s->buf_pos;
+        uint8_t *end = memchr(src, '\n', src_len);
+        int len = end ? end - src + 1 : src_len;
+        if (len > dstsize)
+            return -1; // line too long
+        memcpy(dst, src, len);
+        s->buf_pos += len;
+        return len;
     }
-    return 0;
 }
 
+// On error, or if the line is larger than max-1, return NULL and unset s->eof.
+// On EOF, return NULL, and s->eof will be set.
+// Otherwise, return the line (including \n or \r\n at the end of the line).
+// If the return value is non-NULL, it's always the same as mem.
+// utf16: 0: UTF8 or 8 bit legacy, 1: UTF16-LE, 2: UTF16-BE
 unsigned char *stream_read_line(stream_t *s, unsigned char *mem, int max,
                                 int utf16)
 {
-    int len;
-    const unsigned char *end;
-    unsigned char *ptr = mem;
-    if (utf16 == -1)
-        utf16 = 0;
     if (max < 1)
         return NULL;
-    max--; // reserve one for 0-termination
-    do {
-        len = s->buf_len - s->buf_pos;
-        // try to fill the buffer
-        if (len <= 0 &&
-            (!stream_fill_buffer(s) ||
-             (len = s->buf_len - s->buf_pos) <= 0))
-            break;
-        end = find_newline(s->buffer + s->buf_pos, len, utf16);
-        if (end)
-            len = end - (s->buffer + s->buf_pos) + 1;
-        if (len > 0 && max > 0) {
-            int l = copy_characters(ptr, max, s->buffer + s->buf_pos, &len,
-                                    utf16);
-            max -= l;
-            ptr += l;
-            if (!len)
-                break;
+    int read = 0;
+    while (1) {
+        // Reserve 1 byte of ptr for terminating \0.
+        int l = read_characters(s, &mem[read], max - read - 1, utf16);
+        if (l < 0 || memchr(&mem[read], '\0', l)) {
+            MP_WARN(s, "error reading line\n");
+            s->eof = false;
+            return NULL;
         }
-        s->buf_pos += len;
-    } while (!end);
-    ptr[0] = 0;
-    if (s->eof && ptr == mem)
+        read += l;
+        if (l == 0 || (read > 0 && mem[read - 1] == '\n'))
+            break;
+    }
+    mem[read] = '\0';
+    if (s->eof && read == 0) // legitimate EOF
         return NULL;
     return mem;
 }

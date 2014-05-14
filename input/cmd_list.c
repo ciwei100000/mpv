@@ -122,6 +122,7 @@ const struct mp_cmd_def mp_cmds[] = {
       ARG_STRING,
       OARG_CHOICE(0, ({"replace", 0},          {"0", 0},
                       {"append", 1},           {"1", 1})),
+      OPT_KEYVALUELIST(ARG(str_list), MP_CMD_OPT_ARG),
   }},
   { MP_CMD_LOADLIST, "loadlist", {
       ARG_STRING,
@@ -158,7 +159,7 @@ const struct mp_cmd_def mp_cmds[] = {
   }},
   { MP_CMD_DISABLE_INPUT_SECTION, "disable_section", { ARG_STRING } },
 
-  { MP_CMD_DVDNAV, "dvdnav", { ARG_STRING } },
+  { MP_CMD_DISCNAV, "discnav", { ARG_STRING } },
 
   { MP_CMD_AF, "af", { ARG_STRING, ARG_STRING } },
 
@@ -167,6 +168,9 @@ const struct mp_cmd_def mp_cmds[] = {
   { MP_CMD_VO_CMDLINE, "vo_cmdline", { ARG_STRING } },
 
   { MP_CMD_SCRIPT_DISPATCH, "script_dispatch", { ARG_STRING, ARG_INT } },
+  { MP_CMD_SCRIPT_MESSAGE, "script_message", { ARG_STRING }, .vararg = true },
+  { MP_CMD_SCRIPT_MESSAGE_TO, "script_message_to", { ARG_STRING, ARG_STRING },
+    .vararg = true },
 
   { MP_CMD_OVERLAY_ADD, "overlay_add",
       { ARG_INT, ARG_INT, ARG_INT, ARG_STRING, ARG_INT, ARG_STRING, ARG_INT,
@@ -230,6 +234,7 @@ static const struct legacy_cmd legacy_cmds[] = {
     {"show_tracks",             "show_text ${track-list}"},
     {"show_playlist",           "show_text ${playlist}"},
     {"speed_mult",              "multiply speed"},
+    {"dvdnav",                  "discnav"},
 
     // Approximate (can fail if user added additional whitespace)
     {"pt_step 1",               "playlist_next"},
@@ -271,7 +276,7 @@ bool mp_input_is_abort_cmd(struct mp_cmd *cmd)
     if (cmd->id == MP_CMD_COMMAND_LIST) {
         for (struct mp_cmd *sub = cmd->args[0].v.p; sub; sub = sub->queue_next)
         {
-            if (mp_input_is_abort_cmd(cmd))
+            if (mp_input_is_abort_cmd(sub))
                 return true;
         }
     }

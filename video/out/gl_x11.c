@@ -162,7 +162,7 @@ static GLXFBConfig select_fb_config(struct vo *vo, const int *attribs, int flags
         return NULL;
 
     // The list in fbc is sorted (so that the first element is the best).
-    GLXFBConfig fbconfig = fbc[0];
+    GLXFBConfig fbconfig = fbcount > 0 ? fbc[0] : NULL;
 
     if (flags & VOFLAG_ALPHA) {
         for (int n = 0; n < fbcount; n++) {
@@ -197,8 +197,7 @@ static void set_glx_attrib(int *attribs, int name, int value)
     }
 }
 
-static bool config_window_x11(struct MPGLContext *ctx, uint32_t d_width,
-                              uint32_t d_height, uint32_t flags)
+static bool config_window_x11(struct MPGLContext *ctx, int flags)
 {
     struct vo *vo = ctx->vo;
     struct glx_context *glx_ctx = ctx->priv;
@@ -206,8 +205,7 @@ static bool config_window_x11(struct MPGLContext *ctx, uint32_t d_width,
     if (glx_ctx->context) {
         // GL context and window already exist.
         // Only update window geometry etc.
-        vo_x11_config_vo_window(vo, glx_ctx->vinfo, vo->dx, vo->dy, d_width,
-                                d_height, flags, "gl");
+        vo_x11_config_vo_window(vo, glx_ctx->vinfo, flags, "gl");
         return true;
     }
 
@@ -272,8 +270,7 @@ static bool config_window_x11(struct MPGLContext *ctx, uint32_t d_width,
     glXGetFBConfigAttrib(vo->x11->display, fbc, GLX_GREEN_SIZE, &ctx->depth_g);
     glXGetFBConfigAttrib(vo->x11->display, fbc, GLX_BLUE_SIZE, &ctx->depth_b);
 
-    vo_x11_config_vo_window(vo, glx_ctx->vinfo, vo->dx, vo->dy, d_width,
-                            d_height, flags, "gl");
+    vo_x11_config_vo_window(vo, glx_ctx->vinfo, flags, "gl");
 
     bool success = false;
     if (ctx->requested_gl_version >= MPGL_VER(3, 0))
