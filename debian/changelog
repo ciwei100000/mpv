@@ -1,3 +1,9 @@
+mpv (0.4.0~git20140514-1) UNRELEASED; urgency=medium
+
+  * New upstream git snapshot
+
+ -- Alessandro Ghedini <ghedo@debian.org>  Wed, 14 May 2014 20:24:28 +0200
+
 mpv (0.3.9-2) unstable; urgency=low
 
   [ Reinhard Tartler ]
