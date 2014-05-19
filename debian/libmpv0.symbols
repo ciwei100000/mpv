@@ -17,6 +17,7 @@ libmpv.so.0 libmpv0 #MINVER#
  mpv_get_time_us@Base 0.4.0git20140514
  mpv_get_wakeup_pipe@Base 0.4.0git20140514
  mpv_initialize@Base 0.4.0git20140514
+ mpv_load_config_file@Base 0.4.0git20140519
  mpv_main@Base 0.4.0git20140514
  mpv_observe_property@Base 0.4.0git20140514
  mpv_request_event@Base 0.4.0git20140514
