@@ -300,6 +300,19 @@ List of Input Commands
     Show the progress bar, the elapsed time and the total duration of the file
     on the OSD.
 
+``discnav "<command>"``
+    Send a menu control command to the DVD/BD menu implementation. The following
+    commands are defined: ``up``, ``down``, ``left``, ``right``,
+    ``menu`` (request to enter menu), ``prev`` (previous screen),
+    ``select`` (activate current button), ``mouse`` (the mouse was clicked),
+    ``mouse_move`` (the mouse cursor changed position).
+
+    ``mouse_move`` will use the current mouse position.
+
+    Note that while the menu is active, the input section ``discnav-menu`` will
+    be enabled, so different key bindings can be mapped for menu mode.
+
+
 Input Commands that are Possibly Subject to Change
 --------------------------------------------------
 
@@ -660,6 +673,12 @@ Property list
 ``disc-title`` (RW)
     Current BD/DVD title number. Writing works only for ``dvdnav://`` and
     ``bd://`` (and aliases for these).
+
+``disc-menu-active``
+    Return ``yes`` if the BD/DVD menu is active, or ``no`` on normal video
+    playback. The property is unavailable when playing something that is not
+    a BD or DVD. Use the ``discnav menu`` command to actually enter or leave
+    menu mode.
 
 ``chapters``
     Number of chapters.

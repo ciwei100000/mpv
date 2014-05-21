@@ -238,18 +238,16 @@ const m_option_t mp_opts[] = {
 
 // ------------------------- stream options --------------------
 
-    OPT_CHOICE_OR_INT("cache", stream_cache_size, 0, 32, 0x7fffffff,
+    OPT_CHOICE_OR_INT("cache", stream_cache.size, 0, 32, 0x7fffffff,
                       ({"no", 0},
-                       {"auto", -1}),
-                      OPTDEF_INT(-1)),
-    OPT_CHOICE_OR_INT("cache-default", stream_cache_def_size, 0, 32, 0x7fffffff,
-                      ({"no", 0}),
-                      OPTDEF_INT(320)),
-    OPT_FLOATRANGE("cache-min", stream_cache_min_percent, 0, 0, 99),
-    OPT_FLOATRANGE("cache-seek-min", stream_cache_seek_min_percent, 0,
-                   0, 99),
-    OPT_CHOICE_OR_INT("cache-pause", stream_cache_pause, 0,
-                      0, 40, ({"no", -1})),
+                       {"auto", -1})),
+    OPT_CHOICE_OR_INT("cache-default", stream_cache.def_size, 0, 32, 0x7fffffff,
+                      ({"no", 0})),
+    OPT_INTRANGE("cache-initial", stream_cache.initial, 0, 0, 0x7fffffff),
+    OPT_INTRANGE("cache-seek-min", stream_cache.seek_min, 0, 0, 0x7fffffff),
+    OPT_CHOICE_OR_INT("cache-pause-below", stream_cache_pause, 0, 0, 0x7fffffff,
+                      ({"no", 0})),
+    OPT_INTRANGE("cache-pause-restart", stream_cache_unpause, 0, 0, 0x7fffffff),
 
     {"cdrom-device", &cdrom_device, CONF_TYPE_STRING, 0, 0, 0, NULL},
 #if HAVE_DVDREAD || HAVE_DVDNAV
@@ -319,7 +317,6 @@ const m_option_t mp_opts[] = {
 
     // demuxer.c - select audio/sub file/demuxer
     OPT_STRING("audio-file", audio_stream, 0),
-    OPT_INTRANGE("audio-file-cache", audio_stream_cache, 0, 50, 65536),
     OPT_STRING("demuxer", demuxer_name, 0),
     OPT_STRING("audio-demuxer", audio_demuxer_name, 0),
     OPT_STRING("sub-demuxer", sub_demuxer_name, 0),
@@ -451,6 +448,8 @@ const m_option_t mp_opts[] = {
     OPT_FLAG("ontop", vo.ontop, M_OPT_FIXED),
     OPT_FLAG("border", vo.border, M_OPT_FIXED),
 
+    OPT_FLAG("window-dragging", allow_win_drag, CONF_GLOBAL),
+
     OPT_CHOICE("softvol", softvol, 0,
                ({"no", SOFTVOL_NO},
                 {"yes", SOFTVOL_YES},
@@ -509,7 +508,7 @@ const m_option_t mp_opts[] = {
 
     OPT_INT64("wid", vo.WinID, CONF_GLOBAL),
 #if HAVE_X11
-    OPT_STRINGLIST("x11-fstype", vo.fstype_list, 0),
+    OPT_FLAG("x11-netwm", vo.x11_netwm, 0),
 #endif
     OPT_STRING("heartbeat-cmd", heartbeat_cmd, 0),
     OPT_FLOAT("heartbeat-interval", heartbeat_interval, CONF_MIN, 0),
@@ -663,7 +662,9 @@ const struct MPOpts mp_default_opts = {
         .keepaspect = 1,
         .border = 1,
         .WinID = -1,
+        .x11_netwm = 1,
     },
+    .allow_win_drag = 1,
     .wintitle = "mpv - ${media-title}",
     .heartbeat_interval = 30.0,
     .stop_screensaver = 1,
@@ -691,9 +692,14 @@ const struct MPOpts mp_default_opts = {
     .hr_seek_framedrop = 1,
     .load_config = 1,
     .position_resume = 1,
-    .stream_cache_min_percent = 20.0,
-    .stream_cache_seek_min_percent = 50.0,
-    .stream_cache_pause = 10.0,
+    .stream_cache = {
+        .size = -1,
+        .def_size = 25000,
+        .initial = 0,
+        .seek_min = 500,
+    },
+    .stream_cache_pause = 500,
+    .stream_cache_unpause = 1000,
     .network_rtsp_transport = 2,
     .chapterrange = {-1, -1},
     .edition_id = -1,

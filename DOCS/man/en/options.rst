@@ -275,10 +275,6 @@ OPTIONS
     Play audio from an external file (WAV, MP3 or Ogg Vorbis) while viewing a
     movie.
 
-``--audio-file-cache=<kBytes>``
-    Enables caching for the stream used by ``--audio-file``, using the
-    specified amount of memory.
-
 ``--audio-format=<format>``
     Select the sample format used for output from the audio filter layer to
     the sound card. The values that ``<format>`` can adopt are listed below in
@@ -395,28 +391,33 @@ OPTIONS
     because no space is reserved for seeking back yet.
 
 ``--cache-default=<kBytes|no>``
-    Set the size of the cache in kilobytes (default: 320 KB). Using ``no``
+    Set the size of the cache in kilobytes (default: 25000 KB). Using ``no``
     will not automatically enable the cache e.g. when playing from a network
     stream. Note that using ``--cache`` will always override this option.
 
-``--cache-pause=<no|percentage>``
-    If the cache percentage goes below the specified value, pause and wait
-    until the percentage set by ``--cache-min`` is reached, then resume
-    playback (default: 10). If ``no`` is specified, this behavior is disabled.
+``--cache-pause-below=<kBytes|no>``
+    If the cache size goes below the specified value (in KB), pause and wait
+    until the size set by ``--cache-pause-restart`` is reached, then  resume
+    playback (default: 500). If ``no`` is specified, this behavior is disabled.
 
     When the player is paused this way, the status line shows ``Buffering``
     instead of ``Paused``, and the OSD uses a clock symbol instead of the
     normal paused symbol.
 
-``--cache-min=<percentage>``
-    Playback will start when the cache has been filled up to ``<percentage>`` of
-    the total (default: 20).
+``--cache-pause-restart=<kBytes>``
+    If the cache is paused due to the ``--cache-pause-below`` functionality,
+    then the player unpauses as soon as the cache has this much data (in KB).
+    (Default: 1000)
 
-``--cache-seek-min=<percentage>``
-    If a seek is to be made to a position within ``<percentage>`` of the cache
+``--cache-initial=<kBytes>``
+    Playback will start when the cache has been filled up with this many
+    kilobytes of data (default: 0).
+
+``--cache-seek-min=<kBytes>``
+    If a seek is to be made to a position within ``<kBytes>`` of the cache
     size from the current position, mpv will wait for the cache to be
     filled to this position rather than performing a stream seek (default:
-    50).
+    500).
 
     This matters for small forward seeks. With slow streams (especially http
     streams) there is a tradeoff between skipping the data between current
@@ -878,54 +879,14 @@ OPTIONS
 
     .. admonition:: Note (X11)
 
-        This option does not work properly with all window managers.
-        ``all`` in particular will usually only work with
-        ``--x11-fstype=-fullscreen`` or ``--x11-fstype=none``, and even then
-        only with some window managers.
+        This option does works properly only with window managers which
+        understand the EWMH ``_NET_WM_FULLSCREEN_MONITORS`` hint.
 
     .. admonition:: Note (OS X)
 
         ``all`` does not work on OSX and will behave like ``current``.
 
     See also ``--screen``.
-
-``--x11-fstype=<type1,type2,...>``
-    (X11 only)
-    Specify a priority list of fullscreen modes to be used. You can negate the
-    modes by prefixing them with '-'. If you experience problems like the
-    fullscreen window being covered by other windows, try using a different
-    order.
-
-    .. note::
-
-        See ``--x11-fstype=help`` for a full list of available modes.
-
-    The available types are:
-
-    above
-        Use the ``_NETWM_STATE_ABOVE`` hint if available.
-    below
-        Use the ``_NETWM_STATE_BELOW`` hint if available.
-    fullscreen
-        Use the ``_NETWM_STATE_FULLSCREEN`` hint if available.
-    layer
-        Use the ``_WIN_LAYER`` hint with the default layer.
-    layer=<0...15>
-        Use the ``_WIN_LAYER`` hint with the given layer number.
-    netwm
-        Force NETWM style.
-    none
-        Clear the list of modes; you can add modes to enable afterward.
-    stays_on_top
-        Use ``_NETWM_STATE_STAYS_ON_TOP`` hint if available.
-
-    .. admonition:: Examples
-
-        ``--x11-fstype=layer,stays_on_top,above,fullscreen``
-            Default order, will be used as a fallback if incorrect or
-            unsupported modes are specified.
-        ``--x11-fstype=fullscreen``
-            Fixes fullscreen switching on OpenBox 1.x.
 
 ``--fs-missioncontrol``
     (OS X only)
@@ -2802,3 +2763,18 @@ OPTIONS
     fully, and will add black bars to compensate for the video aspect ratio.
 
     See also ``--slave-broken``.
+
+``--no-window-dragging``
+    Don't move the window when clicking on it and moving the mouse pointer.
+
+``--x11-netwm=no``
+    (X11 only)
+    Disable use of the NetWM protocol when switching to or from fullscreen.
+    This may or may not help with broken window managers. This provides some
+    functionality that was implemented by the now removed ``--fstype`` option.
+    Actually, it is not known to the developers to which degree this option
+    was needed, so feedback is welcome.
+
+    By default, NetWM support is autodetected, and using this option forces
+    autodetection to fail.
+
