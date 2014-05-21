@@ -512,6 +512,15 @@ static int mp_property_disc_title(m_option_t *prop, int action, void *arg,
     }
 }
 
+static int mp_property_disc_menu(m_option_t *prop, int action, void *arg,
+                                 MPContext *mpctx)
+{
+    int state = mp_nav_in_menu(mpctx);
+    if (state < 0)
+        return M_PROPERTY_UNAVAILABLE;
+    return m_property_int_ro(prop, action, arg, !!state);
+}
+
 /// Current chapter (RW)
 static int mp_property_chapter(m_option_t *prop, int action, void *arg,
                                MPContext *mpctx)
@@ -2264,12 +2273,11 @@ static int access_options(struct m_property_action_arg *ka, MPContext *mpctx)
     case M_PROPERTY_GET:
         m_option_copy(opt->opt, ka->arg, opt->data);
         return M_PROPERTY_OK;
-    case M_PROPERTY_SET:
-        if (!(opt->opt->flags & (M_OPT_PRE_PARSE | M_OPT_FIXED))) {
-            m_option_copy(opt->opt, opt->data, ka->arg);
-            return M_PROPERTY_OK;
-        }
-        return M_PROPERTY_ERROR;
+    case M_PROPERTY_SET: {
+        int r = m_config_set_option_raw(mpctx->mconfig, opt, ka->arg,
+                                        M_SETOPT_RUNTIME);
+        return r < 0 ? M_PROPERTY_ERROR : M_PROPERTY_OK;
+    }
     case M_PROPERTY_GET_TYPE:
         *(struct m_option *)ka->arg = *opt->opt;
         return M_PROPERTY_OK;
@@ -2359,6 +2367,8 @@ static const m_option_t mp_properties[] = {
     { "time-remaining", mp_property_remaining, CONF_TYPE_TIME },
     { "playtime-remaining", mp_property_playtime_remaining, CONF_TYPE_TIME },
     { "disc-title", mp_property_disc_title, CONF_TYPE_INT, M_OPT_MIN, -1, 0, NULL },
+    { "disc-menu-active", mp_property_disc_menu,  CONF_TYPE_FLAG,
+      M_OPT_RANGE, 0, 1, NULL },
     { "chapter", mp_property_chapter, CONF_TYPE_INT,
       M_OPT_MIN, -1, 0, NULL },
     M_OPTION_PROPERTY_CUSTOM("edition", mp_property_edition),

@@ -52,11 +52,12 @@ struct vf_priv_s {
     struct mp_image *next_image;// used to compute frame duration of oldest image
     struct mp_image **buffered; // oldest image first
     int num_buffered;
-    double prev_pts;            // pts of last frame returned
     int in_frameno;             // frame number of buffered[0] (the oldest)
-    int out_frameno;            // frame number of last requested frame
-    bool getting_frame;         // getAsyncFrame is in progress
-    struct mp_image *got_frame; // frame callback result
+    int out_frameno;            // frame number of first requested/ready frame
+    double out_pts;             // pts corresponding to first requested/ready frame
+    struct mp_image **requested;// frame callback results (can point to dummy_img)
+                                // requested[0] is the frame to return first
+    int max_requests;           // upper bound for requested[] array
     bool failed;                // frame callback returned with an error
     bool shutdown;              // ask node to return
     bool in_node_active;        // node might still be called
@@ -64,7 +65,11 @@ struct vf_priv_s {
     // --- options
     char *cfg_file;
     int cfg_maxbuffer;
+    int cfg_maxrequests;
 };
+
+// priv->requested[n] points to this if a request for frame n is in-progress
+static const struct mp_image dummy_img;
 
 struct mpvs_fmt {
     VSPresetFormat vs;
@@ -177,10 +182,14 @@ static void VS_CC vs_frame_done(void *userData, const VSFrameRef *f, int n,
     struct vf_priv_s *p = vf->priv;
 
     pthread_mutex_lock(&p->lock);
-    assert(p->getting_frame);
-    assert(!p->got_frame);
-    p->getting_frame = false;
 
+    // If these assertions fail, n is an unrequested frame (or filtered twice).
+    assert(n >= p->out_frameno && n < p->out_frameno + p->max_requests);
+    int index = n - p->out_frameno;
+    MP_DBG(vf, "filtered frame %d (%d)\n", n, index);
+    assert(p->requested[index] == &dummy_img);
+
+    struct mp_image *res = NULL;
     if (f) {
         struct mp_image img = map_vs_frame(p, f, false);
         img.pts = MP_NOPTS_VALUE;
@@ -189,19 +198,18 @@ static void VS_CC vs_frame_done(void *userData, const VSFrameRef *f, int n,
             int err1, err2;
             int num = p->vsapi->propGetInt(map, "_DurationNum", 0, &err1);
             int den = p->vsapi->propGetInt(map, "_DurationDen", 0, &err2);
-            if (!err1 && !err2 && p->prev_pts != MP_NOPTS_VALUE) {
-                img.pts = p->prev_pts;
-                p->prev_pts += num / (double)den;
-            }
+            if (!err1 && !err2)
+                img.pts = num / (double)den; // abusing pts for frame length
         }
         if (img.pts == MP_NOPTS_VALUE)
-            MP_ERR(vf, "No PTS after filter!\n");
-        p->got_frame = mp_image_new_copy(&img);
+            MP_ERR(vf, "No PTS after filter at frame %d!\n", n);
+        res = mp_image_new_copy(&img);
         p->vsapi->freeFrame(f);
     } else {
         p->failed = true;
-        MP_ERR(vf, "Filter error: %s\n", errorMsg);
+        MP_ERR(vf, "Filter error at frame %d: %s\n", n, errorMsg);
     }
+    p->requested[index] = res;
     pthread_cond_broadcast(&p->wakeup);
     pthread_mutex_unlock(&p->lock);
 }
@@ -222,8 +230,8 @@ static int filter_ext(struct vf_instance *vf, struct mp_image *mpi)
         return 0;
 
     // Turn PTS into frame duration (the pts field is abused for storing it)
-    if (p->prev_pts == MP_NOPTS_VALUE)
-        p->prev_pts = mpi->pts;
+    if (p->out_pts == MP_NOPTS_VALUE)
+        p->out_pts = mpi->pts;
     mpi->pts = p->next_image ? p->next_image->pts - mpi->pts : 0;
 
     // Try to get new frames until we get rid of the input mpi.
@@ -243,18 +251,30 @@ static int filter_ext(struct vf_instance *vf, struct mp_image *mpi)
             pthread_cond_broadcast(&p->wakeup);
         }
 
-        if (p->got_frame) {
-            vf_add_output_frame(vf, p->got_frame);
-            p->got_frame = NULL;
+        while (p->requested[0] && p->requested[0] != &dummy_img) {
+            struct mp_image *out = p->requested[0];
+            if (out->pts != MP_NOPTS_VALUE) {
+                double duration = out->pts;
+                out->pts = p->out_pts;
+                p->out_pts += duration;
+            }
+            vf_add_output_frame(vf, out);
+            for (int n = 0; n < p->max_requests - 1; n++)
+                p->requested[n] = p->requested[n + 1];
+            p->requested[p->max_requests - 1] = NULL;
+            p->out_frameno++;
         }
 
-        if (!p->getting_frame) {
-            // Note: this assumes getFrameAsync() will never call infiltGetFrame
-            //       (if it does, we would deadlock)
-            p->getting_frame = true;
-            p->failed = false;
-            p->vsapi->getFrameAsync(p->out_frameno++, p->out_node,
-                                    vs_frame_done, vf);
+        for (int n = 0; n < p->max_requests; n++) {
+            if (!p->requested[n]) {
+                // Note: this assumes getFrameAsync() will never call
+                //       infiltGetFrame (if it does, we would deadlock)
+                p->requested[n] = (struct mp_image *)&dummy_img;
+                p->failed = false;
+                MP_DBG(vf, "requesting frame %d (%d)\n", p->out_frameno + n, n);
+                p->vsapi->getFrameAsync(p->out_frameno + n, p->out_node,
+                                        vs_frame_done, vf);
+            }
         }
 
         if (!mpi)
@@ -298,13 +318,20 @@ static const VSFrameRef *VS_CC infiltGetFrame(int frameno, int activationReason,
     VSFrameRef *ret = NULL;
 
     pthread_mutex_lock(&p->lock);
+    MP_DBG(vf, "VS asking for frame %d (at %d)\n", frameno, p->in_frameno);
     while (1) {
-        if (p->shutdown)
+        if (p->shutdown) {
+            p->vsapi->setFilterError("EOF or filter reinit/uninit", frameCtx);
             break;
+        }
         if (frameno < p->in_frameno) {
-            p->vsapi->setFilterError("Requesting a frame too far in the past. "
-                                     "Try increasing the maxbuffer suboption",
-                                     frameCtx);
+            char msg[180];
+            snprintf(msg, sizeof(msg),
+                "Frame %d requested, but only have frames starting from %d. "
+                "Try increasing the buffered-frames suboption.",
+                frameno, p->in_frameno);
+            MP_FATAL(vf, "%s\n", msg);
+            p->vsapi->setFilterError(msg, frameCtx);
             break;
         }
         if (frameno >= p->in_frameno + MP_TALLOC_ELEMS(p->buffered)) {
@@ -354,15 +381,27 @@ static void VS_CC infiltFree(void *instanceData, VSCore *core, const VSAPI *vsap
     pthread_mutex_unlock(&p->lock);
 }
 
+// number of getAsyncFrame calls in progress
+// must be called with p->lock held
+static int num_requested(struct vf_priv_s *p)
+{
+    int r = 0;
+    for (int n = 0; n < p->max_requests; n++)
+        r += p->requested[n] == &dummy_img;
+    return r;
+}
+
 static void destroy_vs(struct vf_instance *vf)
 {
     struct vf_priv_s *p = vf->priv;
 
-    // Wait until our frame callback returns.
+    MP_DBG(vf, "destroying VS filters\n");
+
+    // Wait until our frame callbacks return.
     pthread_mutex_lock(&p->lock);
     p->shutdown = true;
     pthread_cond_broadcast(&p->wakeup);
-    while (p->getting_frame)
+    while (num_requested(p))
         pthread_cond_wait(&p->wakeup, &p->lock);
     pthread_mutex_unlock(&p->lock);
 
@@ -380,18 +419,22 @@ static void destroy_vs(struct vf_instance *vf)
     p->vscore = NULL;
 
     assert(!p->in_node_active);
+    assert(num_requested(p) == 0); // async callback didn't return?
 
     p->shutdown = false;
-    talloc_free(p->got_frame);
-    p->got_frame = NULL;
+    // Kill filtered images that weren't returned yet
+    for (int n = 0; n < p->max_requests; n++)
+        mp_image_unrefp(&p->requested[n]);
     // Kill queued frames too
     for (int n = 0; n < p->num_buffered; n++)
         talloc_free(p->buffered[n]);
     p->num_buffered = 0;
     talloc_free(p->next_image);
     p->next_image = NULL;
-    p->prev_pts = MP_NOPTS_VALUE;
+    p->out_pts = MP_NOPTS_VALUE;
     p->out_frameno = p->in_frameno = 0;
+
+    MP_DBG(vf, "uninitialized.\n");
 }
 
 static int reinit_vs(struct vf_instance *vf)
@@ -401,6 +444,8 @@ static int reinit_vs(struct vf_instance *vf)
     int res = -1;
 
     destroy_vs(vf);
+
+    MP_DBG(vf, "initializing...\n");
 
     // First load an empty script to get a VSScript, so that we get the vsapi
     // and vscore.
@@ -443,6 +488,7 @@ static int reinit_vs(struct vf_instance *vf)
         goto error;
     }
 
+    MP_DBG(vf, "initialized.\n");
     res = 0;
 error:
     if (p->vsapi) {
@@ -531,14 +577,18 @@ static int vf_open(vf_instance_t *vf)
     vf->query_format = query_format;
     vf->control = control;
     vf->uninit = uninit;
-    p->buffered = talloc_array(vf, struct mp_image *, p->cfg_maxbuffer);
+    int maxbuffer = p->cfg_maxbuffer * p->cfg_maxrequests;
+    p->buffered = talloc_array(vf, struct mp_image *, maxbuffer);
+    p->max_requests = p->cfg_maxrequests;
+    p->requested = talloc_zero_array(vf, struct mp_image *, p->max_requests);
     return 1;
 }
 
 #define OPT_BASE_STRUCT struct vf_priv_s
 static const m_option_t vf_opts_fields[] = {
     OPT_STRING("file", cfg_file, 0),
-    OPT_INTRANGE("maxbuffer", cfg_maxbuffer, 0, 1, 9999, OPTDEF_INT(5)),
+    OPT_INTRANGE("buffered-frames", cfg_maxbuffer, 0, 1, 9999, OPTDEF_INT(4)),
+    OPT_INTRANGE("concurrent-frames", cfg_maxrequests, 0, 1, 99, OPTDEF_INT(2)),
     {0}
 };
 

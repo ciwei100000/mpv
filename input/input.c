@@ -127,6 +127,7 @@ struct input_ctx {
     bool using_alt_gr;
     bool using_ar;
     bool using_cocoa_media_keys;
+    bool win_drag;
 
     // Autorepeat stuff
     short ar_state;
@@ -1008,10 +1009,8 @@ static void input_wait_read(struct input_ctx *ictx, int time)
 
 static void input_wait_read(struct input_ctx *ictx, int time)
 {
-    if (time > 0) {
-        struct timespec deadline = mpthread_get_deadline(time / 1000.0);
-        pthread_cond_timedwait(&ictx->wakeup, &ictx->mutex, &deadline);
-    }
+    if (time > 0)
+        mpthread_cond_timedwait_rel(&ictx->wakeup, &ictx->mutex, time / 1000.0);
 
     for (int i = 0; i < ictx->num_fds; i++)
         read_fd(ictx, &ictx->fds[i]);
@@ -1239,7 +1238,10 @@ bool mp_input_test_mouse_active(struct input_ctx *ictx, int x, int y)
 
 bool mp_input_test_dragging(struct input_ctx *ictx, int x, int y)
 {
-    return test_mouse(ictx, x, y, MP_INPUT_ALLOW_VO_DRAGGING);
+    input_lock(ictx);
+    bool r = !ictx->win_drag || test_mouse(ictx, x, y, MP_INPUT_ALLOW_VO_DRAGGING);
+    input_unlock(ictx);
+    return r;
 }
 
 static void bind_dealloc(struct cmd_bind *bind)
@@ -1547,6 +1549,8 @@ struct input_ctx *mp_input_init(struct mpv_global *global)
         ictx->using_cocoa_media_keys = true;
     }
 #endif
+
+    ictx->win_drag = global->opts->allow_win_drag;
 
     if (input_conf->in_file) {
         int mode = O_RDONLY;

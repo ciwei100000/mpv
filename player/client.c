@@ -27,6 +27,8 @@
 #include "options/m_config.h"
 #include "options/m_option.h"
 #include "options/m_property.h"
+#include "options/path.h"
+#include "options/parse_configfile.h"
 #include "osdep/threads.h"
 #include "osdep/timer.h"
 #include "osdep/io.h"
@@ -67,8 +69,8 @@ struct observe_property {
     bool need_new_value;    // a new value should be retrieved
     bool updating;          // a new value is being retrieved
     bool dead;              // property unobserved while retrieving value
-    bool value_valid;
-    union m_option_value value;
+    bool new_value_valid, user_value_valid;
+    union m_option_value new_value, user_value;
     struct mpv_handle *client;
 };
 
@@ -235,6 +237,18 @@ void mpv_suspend(mpv_handle *ctx)
 void mpv_resume(mpv_handle *ctx)
 {
     mp_dispatch_resume(ctx->mpctx->dispatch);
+}
+
+static void lock_core(mpv_handle *ctx)
+{
+    if (ctx->mpctx->initialized)
+        mp_dispatch_lock(ctx->mpctx->dispatch);
+}
+
+static void unlock_core(mpv_handle *ctx)
+{
+    if (ctx->mpctx->initialized)
+        mp_dispatch_unlock(ctx->mpctx->dispatch);
 }
 
 void mpv_destroy(mpv_handle *ctx)
@@ -477,7 +491,7 @@ mpv_event *mpv_wait_event(mpv_handle *ctx, double timeout)
 {
     mpv_event *event = ctx->cur_event;
 
-    struct timespec deadline = mpthread_get_deadline(timeout);
+    int64_t deadline = mp_add_timeout(mp_time_us(), timeout);
 
     pthread_mutex_lock(&ctx->lock);
 
@@ -519,7 +533,7 @@ mpv_event *mpv_wait_event(mpv_handle *ctx, double timeout)
             break;
         if (timeout <= 0)
             break;
-        int r = pthread_cond_timedwait(&ctx->wakeup, &ctx->lock, &deadline);
+        int r = mpthread_cond_timedwait(&ctx->wakeup, &ctx->lock, deadline);
         if (r == ETIMEDOUT)
             break;
     }
@@ -631,47 +645,33 @@ void mpv_free_node_contents(mpv_node *node)
 int mpv_set_option(mpv_handle *ctx, const char *name, mpv_format format,
                    void *data)
 {
-    if (ctx->mpctx->initialized) {
-        char prop[100];
-        snprintf(prop, sizeof(prop), "options/%s", name);
-        int err = mpv_set_property(ctx, prop, format, data);
-        switch (err) {
-        case MPV_ERROR_PROPERTY_UNAVAILABLE:
-        case MPV_ERROR_PROPERTY_ERROR:
-            return MPV_ERROR_OPTION_ERROR;
-        case MPV_ERROR_PROPERTY_FORMAT:
-            return MPV_ERROR_OPTION_FORMAT;
-        case MPV_ERROR_PROPERTY_NOT_FOUND:
-            return MPV_ERROR_OPTION_NOT_FOUND;
-        default:
-            return err;
-        }
-    } else {
-        const struct m_option *type = get_mp_type(format);
-        if (!type)
-            return MPV_ERROR_OPTION_FORMAT;
-        struct mpv_node tmp;
-        if (format != MPV_FORMAT_NODE) {
-            tmp.format = format;
-            memcpy(&tmp.u, data, type->type->size);
-            format = MPV_FORMAT_NODE;
-            data = &tmp;
-        }
-        int err = m_config_set_option_node(ctx->mpctx->mconfig, bstr0(name),
-                                           data);
-        switch (err) {
-        case M_OPT_MISSING_PARAM:
-        case M_OPT_INVALID:
-            return MPV_ERROR_OPTION_ERROR;
-        case M_OPT_OUT_OF_RANGE:
-            return MPV_ERROR_OPTION_FORMAT;
-        case M_OPT_UNKNOWN:
-            return MPV_ERROR_OPTION_NOT_FOUND;
-        default:
-            if (err >= 0)
-                return 0;
-            return MPV_ERROR_OPTION_ERROR;
-        }
+    int flags = ctx->mpctx->initialized ? M_SETOPT_RUNTIME : 0;
+    const struct m_option *type = get_mp_type(format);
+    if (!type)
+        return MPV_ERROR_OPTION_FORMAT;
+    struct mpv_node tmp;
+    if (format != MPV_FORMAT_NODE) {
+        tmp.format = format;
+        memcpy(&tmp.u, data, type->type->size);
+        format = MPV_FORMAT_NODE;
+        data = &tmp;
+    }
+    lock_core(ctx);
+    int err = m_config_set_option_node(ctx->mpctx->mconfig, bstr0(name),
+                                       data, flags);
+    unlock_core(ctx);
+    switch (err) {
+    case M_OPT_MISSING_PARAM:
+    case M_OPT_INVALID:
+        return MPV_ERROR_OPTION_ERROR;
+    case M_OPT_OUT_OF_RANGE:
+        return MPV_ERROR_OPTION_FORMAT;
+    case M_OPT_UNKNOWN:
+        return MPV_ERROR_OPTION_NOT_FOUND;
+    default:
+        if (err >= 0)
+            return 0;
+        return MPV_ERROR_OPTION_ERROR;
     }
 }
 
@@ -1041,8 +1041,10 @@ static void property_free(void *p)
 {
     struct observe_property *prop = p;
     const struct m_option *type = get_mp_type_get(prop->format);
-    if (type)
-        m_option_free(type, &prop->value);
+    if (type) {
+        m_option_free(type, &prop->new_value);
+        m_option_free(type, &prop->user_value);
+    }
 }
 
 int mpv_observe_property(mpv_handle *ctx, uint64_t userdata,
@@ -1128,7 +1130,8 @@ void mp_client_property_change(struct MPContext *mpctx, const char **list)
             if (!prop->changed && !prop->need_new_value) {
                 for (int x = 0; list && list[x]; x++) {
                     if (match_property(prop->name, list[x])) {
-                        prop->changed = prop->need_new_value = true;
+                        prop->changed = true;
+                        prop->need_new_value = prop->format != 0;
                         break;
                     }
                 }
@@ -1164,17 +1167,16 @@ static void update_prop(void *p)
     pthread_mutex_lock(&ctx->lock);
     ctx->properties_updating--;
     prop->updating = false;
-    bool new_value_valid = req.status >= 0;
-    if (prop->value_valid != new_value_valid) {
+    m_option_free(type, &prop->new_value);
+    prop->new_value_valid = req.status >= 0;
+    if (prop->new_value_valid)
+        memcpy(&prop->new_value, &val, type->type->size);
+    if (prop->user_value_valid != prop->new_value_valid) {
         prop->changed = true;
-    } else if (prop->value_valid && new_value_valid) {
-        if (!compare_value(&prop->value, &val, prop->format))
+    } else if (prop->user_value_valid && prop->new_value_valid) {
+        if (!compare_value(&prop->user_value, &prop->new_value, prop->format))
             prop->changed = true;
     }
-    m_option_free(type, &prop->value);
-    if (new_value_valid)
-        memcpy(&prop->value, &val, type->type->size);
-    prop->value_valid = new_value_valid;
     if (prop->dead)
         talloc_steal(ctx->cur_event, prop);
     wakeup_client(ctx);
@@ -1192,19 +1194,23 @@ static bool gen_property_change_event(struct mpv_handle *ctx)
         if ((prop->changed || prop->updating) && n < ctx->lowest_changed)
             ctx->lowest_changed = n;
         if (prop->changed) {
-            bool new_val = prop->need_new_value;
-            prop->changed = prop->need_new_value = false;
-            if (prop->format && new_val) {
+            prop->changed = false;
+            if (prop->format && prop->need_new_value) {
+                prop->need_new_value = false;
                 ctx->properties_updating++;
                 prop->updating = true;
                 mp_dispatch_enqueue(ctx->mpctx->dispatch, update_prop, prop);
             } else {
+                const struct m_option *type = get_mp_type_get(prop->format);
+                prop->user_value_valid = prop->new_value_valid;
+                if (prop->new_value_valid)
+                    m_option_copy(type, &prop->user_value, &prop->new_value);
                 ctx->cur_property_event = (struct mpv_event_property){
                     .name = prop->name,
-                    .format = prop->value_valid ? prop->format : 0,
+                    .format = prop->user_value_valid ? prop->format : 0,
                 };
-                if (prop->value_valid)
-                    ctx->cur_property_event.data = &prop->value;
+                if (prop->user_value_valid)
+                    ctx->cur_property_event.data = &prop->user_value;
                 *ctx->cur_event = (struct mpv_event){
                     .event_id = MPV_EVENT_PROPERTY_CHANGE,
                     .reply_userdata = prop->reply_id,
@@ -1215,6 +1221,19 @@ static bool gen_property_change_event(struct mpv_handle *ctx)
         }
     }
     return false;
+}
+
+int mpv_load_config_file(mpv_handle *ctx, const char *filename)
+{
+    int flags = ctx->mpctx->initialized ? M_SETOPT_RUNTIME : 0;
+    lock_core(ctx);
+    int r = m_config_parse_config_file(ctx->mpctx->mconfig, filename, NULL, flags);
+    unlock_core(ctx);
+    if (r == 0)
+        return MPV_ERROR_INVALID_PARAMETER;
+    if (r < 0)
+        return MPV_ERROR_OPTION_ERROR;
+    return 0;
 }
 
 int mpv_request_log_messages(mpv_handle *ctx, const char *min_level)
