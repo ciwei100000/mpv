@@ -135,17 +135,18 @@ static int64_t mp_seek(void *opaque, int64_t pos, int whence)
         return -1;
     MP_DBG(demuxer, "mp_seek(%p, %"PRId64", %d)\n",
            stream, pos, whence);
-    if (whence == SEEK_CUR)
+    if (whence == SEEK_END || whence == AVSEEK_SIZE) {
+        int64_t end;
+        if (stream_control(stream, STREAM_CTRL_GET_SIZE, &end) != STREAM_OK)
+            return -1;
+        if (whence == AVSEEK_SIZE)
+            return end;
+        pos += end;
+    } else if (whence == SEEK_CUR) {
         pos += stream_tell(stream);
-    else if (whence == SEEK_END && stream->end_pos > 0)
-        pos += stream->end_pos;
-    else if (whence == SEEK_SET)
-        pos += stream->start_pos;
-    else if (whence == AVSEEK_SIZE && stream->end_pos > 0) {
-        stream_update_size(stream);
-        return stream->end_pos - stream->start_pos;
-    } else
+    } else if (whence != SEEK_SET) {
         return -1;
+    }
 
     if (pos < 0)
         return -1;
@@ -155,7 +156,7 @@ static int64_t mp_seek(void *opaque, int64_t pos, int whence)
         return -1;
     }
 
-    return pos - stream->start_pos;
+    return pos;
 }
 
 static int64_t mp_read_seek(void *opaque, int stream_idx, int64_t ts, int flags)
@@ -824,11 +825,13 @@ static void demux_seek_lavf(demuxer_t *demuxer, float rel_seek_secs, int flags)
 
     if (flags & SEEK_FACTOR) {
         struct stream *s = demuxer->stream;
-        if (s->end_pos > 0 && demuxer->ts_resets_possible &&
+        int64_t end = 0;
+        stream_control(s, STREAM_CTRL_GET_SIZE, &end);
+        if (end > 0 && demuxer->ts_resets_possible &&
             !(priv->avif->flags & AVFMT_NO_BYTE_SEEK))
         {
             avsflags |= AVSEEK_FLAG_BYTE;
-            priv->last_pts = (s->end_pos - s->start_pos) * rel_seek_secs;
+            priv->last_pts = end * rel_seek_secs;
         } else if (priv->avfc->duration != 0 &&
                    priv->avfc->duration != AV_NOPTS_VALUE)
         {

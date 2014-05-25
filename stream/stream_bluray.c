@@ -712,7 +712,7 @@ static void select_initial_angle(stream_t *s) {
     bd_free_title_info(info);
 }
 
-static int bluray_stream_open(stream_t *s, int mode)
+static int bluray_stream_open(stream_t *s)
 {
     struct bluray_priv_s *b = s->priv;
 
@@ -801,7 +801,6 @@ static int bluray_stream_open(stream_t *s, int mode)
     s->type        = STREAMTYPE_BLURAY;
     s->end_pos     = bd_get_title_size(bd);
     s->sector_size = BLURAY_SECTOR_SIZE;
-    s->flags       = MP_STREAM_SEEK;
     s->priv        = b;
 
     MP_VERBOSE(s, "Blu-ray successfully opened.\n");

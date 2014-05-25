@@ -91,14 +91,13 @@ static int control(stream_t *s, int cmd, void *arg)
     struct priv *p = s->priv;
     switch (cmd) {
     case STREAM_CTRL_GET_SIZE: {
-        off_t size;
-
-        size = lseek(p->fd, 0, SEEK_END);
+        off_t size = lseek(p->fd, 0, SEEK_END);
         lseek(p->fd, s->pos, SEEK_SET);
         if (size != (off_t)-1) {
-            *(uint64_t *)arg = size;
+            *(int64_t *)arg = size;
             return 1;
         }
+        break;
     }
     }
     return STREAM_UNSUPPORTED;
@@ -203,7 +202,7 @@ static bool check_stream_network(stream_t *stream)
 }
 #endif
 
-static int open_f(stream_t *stream, int mode)
+static int open_f(stream_t *stream)
 {
     int fd;
     struct priv *priv = talloc_ptrtype(stream, priv);
@@ -212,15 +211,8 @@ static int open_f(stream_t *stream, int mode)
     };
     stream->priv = priv;
 
-    int m = O_CLOEXEC;
-    if (mode == STREAM_READ)
-        m |= O_RDONLY;
-    else if (mode == STREAM_WRITE)
-        m |= O_RDWR | O_CREAT | O_TRUNC;
-    else {
-        MP_ERR(stream, "Unknown open mode %d\n", mode);
-        return STREAM_UNSUPPORTED;
-    }
+    bool write = stream->mode == STREAM_WRITE;
+    int m = O_CLOEXEC | (write ? O_RDWR | O_CREAT | O_TRUNC : O_RDONLY);
 
     char *filename = mp_file_url_to_filename(stream, bstr0(stream->url));
     if (filename) {
@@ -230,19 +222,16 @@ static int open_f(stream_t *stream, int mode)
     }
 
     if (!strcmp(filename, "-")) {
-        if (mode == STREAM_READ) {
+        if (!write) {
             MP_INFO(stream, "Reading from stdin...\n");
             fd = 0;
-#if HAVE_SETMODE
-            setmode(fileno(stdin), O_BINARY);
-#endif
         } else {
-            MP_INFO(stream, "Writing to stdout\n");
+            MP_INFO(stream, "Writing to stdout...\n");
             fd = 1;
-#if HAVE_SETMODE
-            setmode(fileno(stdout), O_BINARY);
-#endif
         }
+#ifdef __MINGW32__
+        setmode(fd, O_BINARY);
+#endif
         priv->fd = fd;
         priv->close = false;
     } else {
@@ -256,34 +245,25 @@ static int open_f(stream_t *stream, int mode)
                     filename, strerror(errno));
             return STREAM_ERROR;
         }
-#ifndef __MINGW32__
         struct stat st;
         if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
             MP_ERR(stream, "File is a directory: '%s'\n", filename);
             close(fd);
             return STREAM_ERROR;
         }
-#endif
         priv->fd = fd;
         priv->close = true;
     }
 
-    int64_t len = lseek(fd, 0, SEEK_END);
+    off_t len = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-#ifdef __MINGW32__
-    // seeks on stdin incorrectly succeed on MinGW
-    if (fd == 0)
-        len = -1;
-#endif
-    stream->type = STREAMTYPE_FILE;
-    stream->flags = MP_STREAM_FAST_SKIPPING;
-    if (len >= 0) {
+    if (len != (off_t)-1) {
         stream->seek = seek;
-        stream->end_pos = len;
+        stream->seekable = true;
     }
 
-    MP_VERBOSE(stream, "File size is %" PRId64 " bytes\n", len);
-
+    stream->type = STREAMTYPE_FILE;
+    stream->fast_skip = true;
     stream->fill_buffer = fill_buffer;
     stream->write_buffer = write_buffer;
     stream->control = control;
@@ -300,4 +280,5 @@ const stream_info_t stream_info_file = {
     .name = "file",
     .open = open_f,
     .protocols = (const char*[]){ "file", "", NULL },
+    .can_write = true,
 };

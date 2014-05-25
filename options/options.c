@@ -281,8 +281,6 @@ const m_option_t mp_opts[] = {
     OPT_CHOICE_OR_INT("frames", play_frames, M_OPT_FIXED, 0, INT_MAX,
                       ({"all", -1})),
 
-    // seek to byte/seconds position
-    OPT_INT64("sb", seek_to_byte, 0),
     OPT_REL_TIME("start", play_start, 0),
     OPT_REL_TIME("end", play_end, 0),
     OPT_REL_TIME("length", play_length, 0),
@@ -500,6 +498,8 @@ const m_option_t mp_opts[] = {
                ({"auto", MP_CSP_LEVELS_AUTO},
                 {"limited", MP_CSP_LEVELS_TV},
                 {"full", MP_CSP_LEVELS_PC})),
+    OPT_CHOICE_OR_INT("video-rotate", video_rotate, 0, 0, 359,
+                      ({"no", -1})),
 
     OPT_CHOICE_OR_INT("cursor-autohide", cursor_autohide_delay, 0,
                       0, 30000, ({"no", -1}, {"always", -2})),

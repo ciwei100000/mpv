@@ -663,7 +663,7 @@ static int control(stream_t *stream,int cmd,void* arg)
 }
 
 
-static int open_s(stream_t *stream, int mode)
+static int open_s(stream_t *stream)
 {
   int k;
   dvd_priv_t *d = stream->priv;
@@ -918,7 +918,6 @@ static int open_s(stream_t *stream, int mode)
     stream->fill_buffer = fill_buffer;
     stream->control = control;
     stream->close = stream_dvd_close;
-    stream->start_pos = (int64_t)d->cur_pack*2048;
     stream->end_pos = (int64_t)(d->cur_pgc->cell_playback[d->last_cell-1].last_sector)*2048;
     MP_VERBOSE(stream, "DVD start=%d end=%d  \n",d->cur_pack,d->cur_pgc->cell_playback[d->last_cell-1].last_sector);
     stream->priv = (void*)d;
@@ -933,7 +932,7 @@ fail:
   return STREAM_UNSUPPORTED;
 }
 
-static int ifo_stream_open (stream_t *stream, int mode)
+static int ifo_stream_open (stream_t *stream)
 {
     char* filename;
     dvd_priv_t *priv = talloc_ptrtype(stream, priv);
@@ -964,7 +963,7 @@ static int ifo_stream_open (stream_t *stream, int mode)
     free(filename);
     stream->url=talloc_strdup(stream, "dvd://");
 
-    return open_s(stream, mode);
+    return open_s(stream);
 }
 
 const stream_info_t stream_info_dvd = {

@@ -1076,9 +1076,6 @@ static void play_current_file(struct MPContext *mpctx)
     load_per_file_options(mpctx->mconfig, mpctx->playlist->current->params,
                           mpctx->playlist->current->num_params);
 
-    if (opts->use_terminal && !opts->consolecontrols)
-        getch2_disable();
-
 #if HAVE_LIBASS
     if (opts->ass_style_override)
         ass_set_style_overrides(mpctx->ass_library, opts->ass_force_style_list);
@@ -1112,8 +1109,6 @@ static void play_current_file(struct MPContext *mpctx)
         goto terminate_playback;
     }
     mpctx->initialized_flags |= INITIALIZED_STREAM;
-
-    mpctx->stream->start_pos += opts->seek_to_byte;
 
     if (opts->stream_dump && opts->stream_dump[0]) {
         stream_dump(mpctx);
@@ -1231,6 +1226,13 @@ goto_reopen_demuxer: ;
     }
     reselect_demux_streams(mpctx);
 
+    if (mpctx->current_track[0][STREAM_VIDEO] &&
+        mpctx->current_track[0][STREAM_VIDEO]->attached_picture)
+    {
+        MP_INFO(mpctx,
+            "Displaying attached picture. Use --no-audio-display to prevent this.\n");
+    }
+
     demux_info_update(mpctx->master_demuxer);
     print_file_properties(mpctx);
 
@@ -1263,10 +1265,8 @@ goto_reopen_demuxer: ;
             else
                 dir = DVB_CHANNEL_LOWER;
 
-            if (dvb_step_channel(mpctx->stream, dir)) {
+            if (dvb_step_channel(mpctx->stream, dir))
                 mpctx->stop_play = PT_RELOAD_DEMUXER;
-                mpctx->stream->start_pos = stream_tell(mpctx->stream);
-            }
         }
 #endif
         goto terminate_playback;
@@ -1342,7 +1342,7 @@ goto_reopen_demuxer: ;
         goto goto_reopen_demuxer;
     }
 
-terminate_playback:  // don't jump here after ao/vo/getch initialization!
+terminate_playback:
 
     mp_nav_destroy(mpctx);
 
@@ -1372,9 +1372,6 @@ terminate_playback:  // don't jump here after ao/vo/getch initialization!
     // xxx handle this as INITIALIZED_CONFIG?
     if (mpctx->stop_play != PT_RESTART)
         m_config_restore_backups(mpctx->mconfig);
-
-    if (opts->use_terminal && opts->consolecontrols)
-        getch2_enable();
 
     mpctx->filename = NULL;
     mpctx->resolve_result = NULL;

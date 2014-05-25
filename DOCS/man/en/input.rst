@@ -242,11 +242,12 @@ List of Input Commands
         shell script, and call that with ``run``.
 
 ``quit [<code>]``
-    Exit the player using the given exit code.
+    Exit the player. If an argument is given, it's used as process exit code.
 
-``quit_watch_later``
+``quit_watch_later [<code>]``
     Exit player, and store current playback position. Playing that file later
-    will seek to the previous position on start.
+    will seek to the previous position on start. The (optional) argument is
+    exactly as in the ``quit`` command.
 
 ``sub_add "<file>"``
     Load the given subtitle file. It is not selected as current subtitle after
@@ -582,7 +583,7 @@ Property list
 
 ``file-size``
     Length in bytes of the source file/stream. (This is the same as
-    ``${stream-end} - ${stream-start}``. For ordered chapters and such, the
+    ``${stream-end}``. For ordered chapters and such, the
     size of the currently played segment is returned.)
 
 ``path``
@@ -608,9 +609,6 @@ Property list
 
 ``stream-pos`` (RW)
     Raw byte position in source stream.
-
-``stream-start``
-    Raw start byte offset in source stream (rarely different from 0).
 
 ``stream-end``
     Raw end position in bytes in source stream.
@@ -1247,7 +1245,7 @@ Property Expansion
 ------------------
 
 All string arguments to input commands as well as certain options (like
-``--playing-msg``) are subject to property expansion.
+``--term-playing-msg``) are subject to property expansion.
 
 .. admonition:: Example for input.conf
 

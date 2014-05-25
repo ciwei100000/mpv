@@ -472,11 +472,12 @@ double get_current_pos_ratio(struct MPContext *mpctx, bool use_range)
         ans = MPCLAMP((pos - start) / len, 0, 1);
     } else {
         struct stream *s = demuxer->stream;
-        int64_t size = s->end_pos - s->start_pos;
-        int64_t fpos = demuxer->filepos >= 0 ?
-                       demuxer->filepos : stream_tell(demuxer->stream);
-        if (size > 0)
-            ans = MPCLAMP((double)(fpos - s->start_pos) / size, 0, 1);
+        int64_t size;
+        if (stream_control(s, STREAM_CTRL_GET_SIZE, &size) > 0 && size > 0) {
+            int64_t fpos =
+                demuxer->filepos >= 0 ? demuxer->filepos : stream_tell(s);
+            ans = MPCLAMP(fpos / (double)size, 0, 1);
+        }
     }
     if (use_range) {
         if (mpctx->opts->play_frames > 0)
@@ -1054,7 +1055,9 @@ void run_playloop(struct MPContext *mpctx)
 
         mpctx->time_frame -= get_relative_time(mpctx);
         double audio_pts = playing_audio_pts(mpctx);
-        if (full_audio_buffers && !mpctx->restart_playback) {
+        if (!mpctx->sync_audio_to_video) {
+            mpctx->time_frame = 0;
+        } else if (full_audio_buffers && !mpctx->restart_playback) {
             double buffered_audio = ao_get_delay(mpctx->ao);
             MP_TRACE(mpctx, "audio delay=%f\n", buffered_audio);
 

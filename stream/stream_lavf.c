@@ -32,7 +32,7 @@
 #include "bstr/bstr.h"
 #include "talloc.h"
 
-static int open_f(stream_t *stream, int mode);
+static int open_f(stream_t *stream);
 static char **read_icy(stream_t *stream);
 
 static int fill_buffer(stream_t *s, char *buffer, int max_len)
@@ -89,8 +89,8 @@ static int control(stream_t *s, int cmd, void *arg)
     switch(cmd) {
     case STREAM_CTRL_GET_SIZE:
         size = avio_size(avio);
-        if(size >= 0) {
-            *(uint64_t *)arg = size;
+        if (size >= 0) {
+            *(int64_t *)arg = size;
             return 1;
         }
         break;
@@ -113,7 +113,7 @@ static int control(stream_t *s, int cmd, void *arg)
         // avio doesn't seem to support this - emulate it by reopening
         close_f(s);
         s->priv = NULL;
-        return open_f(s, STREAM_READ);
+        return open_f(s);
     }
     }
     return STREAM_UNSUPPORTED;
@@ -127,28 +127,22 @@ static int interrupt_cb(void *ctx)
 
 static const char * const prefix[] = { "lavf://", "ffmpeg://" };
 
-static int open_f(stream_t *stream, int mode)
+static int open_f(stream_t *stream)
 {
     struct MPOpts *opts = stream->opts;
-    int flags = 0;
     AVIOContext *avio = NULL;
     int res = STREAM_ERROR;
     AVDictionary *dict = NULL;
     void *temp = talloc_new(NULL);
 
-    if (mode == STREAM_READ)
-        flags = AVIO_FLAG_READ;
-    else if (mode == STREAM_WRITE)
-        flags = AVIO_FLAG_WRITE;
-    else {
-        MP_ERR(stream, "[ffmpeg] Unknown open mode %d\n", mode);
-        res = STREAM_UNSUPPORTED;
-        goto out;
-    }
+    stream->seek = NULL;
+    stream->seekable = false;
+
+    int flags = stream->mode == STREAM_WRITE ? AVIO_FLAG_WRITE : AVIO_FLAG_READ;
 
     const char *filename = stream->url;
     if (!filename) {
-        MP_ERR(stream, "[ffmpeg] No URL\n");
+        MP_ERR(stream, "No URL\n");
         goto out;
     }
     for (int i = 0; i < sizeof(prefix) / sizeof(prefix[0]); i++)
@@ -161,13 +155,12 @@ static int open_f(stream_t *stream, int mode)
          * this (the rtsp demuxer's probe function checks for a "rtsp:"
          * filename prefix), so it has to be handled specially here.
          */
-        stream->seek = NULL;
         stream->demuxer = "lavf";
         stream->lavf_type = "rtsp";
         talloc_free(temp);
         return STREAM_OK;
     }
-    MP_VERBOSE(stream, "[ffmpeg] Opening %s\n", filename);
+    MP_VERBOSE(stream, "Opening %s\n", filename);
 
     // Replace "mms://" with "mmsh://", so that most mms:// URLs just work.
     bstr b_filename = bstr0(filename);
@@ -214,15 +207,15 @@ static int open_f(stream_t *stream, int mode)
     int err = avio_open2(&avio, filename, flags, &cb, &dict);
     if (err < 0) {
         if (err == AVERROR_PROTOCOL_NOT_FOUND)
-            MP_ERR(stream, "[ffmpeg] Protocol not found. Make sure"
+            MP_ERR(stream, "Protocol not found. Make sure"
                    " ffmpeg/Libav is compiled with networking support.\n");
         goto out;
     }
 
     AVDictionaryEntry *t = NULL;
     while ((t = av_dict_get(dict, "", t, AV_DICT_IGNORE_SUFFIX))) {
-        MP_VERBOSE(stream, "[ffmpeg] Could not set stream option %s=%s\n",
-               t->key, t->value);
+        MP_VERBOSE(stream, "Could not set stream option %s=%s\n",
+                   t->key, t->value);
     }
 
     if (avio->av_class) {
@@ -238,12 +231,8 @@ static int open_f(stream_t *stream, int mode)
         stream->lavf_type = "flv";
     }
     stream->priv = avio;
-    int64_t size = avio_size(avio);
-    if (size >= 0)
-        stream->end_pos = size;
-    stream->seek = seek;
-    if (!avio->seekable)
-        stream->seek = NULL;
+    stream->seekable = avio->seekable;
+    stream->seek = stream->seekable ? seek : NULL;
     stream->fill_buffer = fill_buffer;
     stream->write_buffer = write_buffer;
     stream->control = control;
@@ -332,4 +321,5 @@ const stream_info_t stream_info_ffmpeg = {
      "rtmpt", "rtmpte", "rtmpts", "srtp", "tcp", "udp", "tls", "unix", "sftp",
      "md5",
      NULL },
+  .can_write = true,
 };

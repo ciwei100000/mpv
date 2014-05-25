@@ -69,12 +69,13 @@ int64_t mp_time_relative_us(int64_t *t)
 int64_t mp_add_timeout(int64_t time_us, double timeout_sec)
 {
     assert(time_us > 0); // mp_time_us() returns strictly positive values
-    double t = timeout_sec * 1000 * 1000;
-    if (t >= (double)(INT64_MAX - time_us))
+    double t = MPCLAMP(timeout_sec * (1000 * 1000), -0x1p63, 0x1p63);
+    int64_t ti = t == 0x1p63 ? INT64_MAX : (int64_t)t;
+    if (ti > INT64_MAX - time_us)
         return INT64_MAX;
-    if (t <= -(double)time_us)
+    if (ti <= -time_us)
         return 1;
-    return time_us + (int64_t)t;
+    return time_us + ti;
 }
 
 static void get_realtime(struct timespec *out_ts)
@@ -98,7 +99,7 @@ struct timespec mp_time_us_to_timespec(int64_t time_us)
     // CLOCK_REALTIME - so we have to remap the times.
     int64_t unow = mp_time_us();
     int64_t diff_us = time_us - unow;
-    long diff_secs = diff_us / (1000L * 1000L);
+    int64_t diff_secs = diff_us / (1000L * 1000L);
     long diff_nsecs = (diff_us - diff_secs * (1000L * 1000L)) * 1000L;
     if (diff_nsecs < 0) {
         diff_secs -= 1;
@@ -108,6 +109,8 @@ struct timespec mp_time_us_to_timespec(int64_t time_us)
         diff_secs += 1;
         diff_nsecs -= 1000000000UL;
     }
+    // OSX can't deal with large timeouts. Also handles tv_sec/time_t overflows.
+    diff_secs = MPMIN(diff_secs, 10000000);
     ts.tv_sec += diff_secs;
     ts.tv_nsec += diff_nsecs;
     return ts;
