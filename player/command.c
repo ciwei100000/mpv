@@ -206,12 +206,12 @@ static int mp_property_file_size(m_option_t *prop, int action, void *arg,
     if (!mpctx->stream)
         return M_PROPERTY_UNAVAILABLE;
 
-    int64_t size = mpctx->stream->end_pos - mpctx->stream->start_pos;
+    int64_t size;
+    if (stream_control(mpctx->stream, STREAM_CTRL_GET_SIZE, &size) != STREAM_OK)
+        return M_PROPERTY_UNAVAILABLE;
 
     switch (action) {
     case M_PROPERTY_GET: {
-        if (size <= 0)
-            break;
         *(int64_t *)arg = size;
         return M_PROPERTY_OK;
     }
@@ -297,24 +297,11 @@ static int mp_property_stream_pos(m_option_t *prop, int action, void *arg,
     return M_PROPERTY_NOT_IMPLEMENTED;
 }
 
-/// Stream start offset (RO)
-static int mp_property_stream_start(m_option_t *prop, int action,
-                                    void *arg, MPContext *mpctx)
-{
-    struct stream *stream = mpctx->stream;
-    if (!stream)
-        return M_PROPERTY_UNAVAILABLE;
-    return m_property_int64_ro(prop, action, arg, stream->start_pos);
-}
-
 /// Stream end offset (RO)
 static int mp_property_stream_end(m_option_t *prop, int action, void *arg,
                                   MPContext *mpctx)
 {
-    struct stream *stream = mpctx->stream;
-    if (!stream)
-        return M_PROPERTY_UNAVAILABLE;
-    return m_property_int64_ro(prop, action, arg, stream->end_pos);
+    return mp_property_file_size(prop, action, arg, mpctx);
 }
 
 // Does some magic to handle "<name>/full" as time formatted with milliseconds.
@@ -2345,8 +2332,6 @@ static const m_option_t mp_properties[] = {
       0, 0, 0, NULL },
     { "stream-pos", mp_property_stream_pos, CONF_TYPE_INT64,
       M_OPT_MIN, 0, 0, NULL },
-    { "stream-start", mp_property_stream_start, CONF_TYPE_INT64,
-      M_OPT_MIN, 0, 0, NULL },
     { "stream-end", mp_property_stream_end, CONF_TYPE_INT64,
       M_OPT_MIN, 0, 0, NULL },
     { "stream-time-pos", mp_property_stream_time_pos, CONF_TYPE_TIME,
@@ -3242,15 +3227,12 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
         break;
 
     case MP_CMD_QUIT:
+    case MP_CMD_QUIT_WATCH_LATER:
+        if (cmd->id == MP_CMD_QUIT_WATCH_LATER)
+            mp_write_watch_later_conf(mpctx);
         mpctx->stop_play = PT_QUIT;
         mpctx->quit_custom_rc = cmd->args[0].v.i;
         mpctx->has_quit_custom_rc = true;
-        break;
-
-    case MP_CMD_QUIT_WATCH_LATER:
-        mp_write_watch_later_conf(mpctx);
-        mpctx->stop_play = PT_QUIT;
-        mpctx->quit_player_rc = 0;
         break;
 
     case MP_CMD_PLAYLIST_NEXT:

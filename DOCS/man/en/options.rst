@@ -39,7 +39,7 @@ OPTIONS
 ``--ad-lavc-downmix=<yes|no>``
     Whether to request audio channel downmixing from the decoder (default: yes).
     Some decoders, like AC-3, AAC and DTS, can remix audio on decoding. The
-    requested number of output channels is set with the ``--channels`` option.
+    requested number of output channels is set with the ``--audio-channels`` option.
     Useful for playing surround audio on a stereo system.
 
 ``--ad-lavc-threads=<0-16>``
@@ -1832,10 +1832,6 @@ OPTIONS
     This behavior is disabled by default, but is always available when quitting
     the player with Shift+Q.
 
-``--sb=<n>``
-    Seek to byte position. Useful for playback from CD-ROM images or VOB files
-    with junk at the beginning. See also ``--start``.
-
 ``--screen=<default|0-32>``
     In multi-monitor configurations (i.e. a single desktop that spans across
     multiple displays), this option tells mpv which screen to display the
@@ -2334,7 +2330,7 @@ OPTIONS
 
 ``--term-playing-msg=<string>``
     Print out a string after starting playback. The string is expanded for
-    properties, e.g. ``--playing-msg='file: ${filename}'`` will print the string
+    properties, e.g. ``--term-playing-msg='file: ${filename}'`` will print the string
     ``file:`` followed by a space and the currently played filename.
 
     See `Property Expansion`_.
@@ -2701,6 +2697,13 @@ OPTIONS
     (making 128 pixels of the source video invisible).
 
     This option is disabled if the ``--no-keepaspect`` option is used.
+
+``--video-rotate=<0-359|no>``
+    Rotate the video clockwise, in degrees. Currently supports 90° steps only.
+    If ``no`` is given, the video is never rotated, even if the file has
+    rotation metadata. (The rotation value is added to the rotation metadata,
+    which means the value ``0`` would rotate the video according to the
+    rotation metadata.)
 
 ``--video-unscaled``
     Disable scaling of the video. If the window is larger than the video,

@@ -425,7 +425,11 @@ check_compile() {
     echocheck "$1"
     if test $_res = auto ; then
         _res=no
-        shift 4
+        if test $# -gt 4 ; then
+            shift 4
+        else
+            shift $#
+        fi
         while true ; do
             compile_check "$_code" "$1" && libs_mplayer="$libs_mplayer $1" && _res=yes && break
             test -z "$1" && break
@@ -448,7 +452,11 @@ check_statement_libs() {
     echocheck "$1"
     if test $_res = auto ; then
         _res=no
-        shift 5
+        if test $# -gt 5 ; then
+            shift 5
+        else
+            shift $#
+        fi
         while true ; do
             statement_check "$_inc" "$_st" "$1" && libs_mplayer="$libs_mplayer $1" && _res=yes && break
             test -z "$1" && break
@@ -462,7 +470,7 @@ check_statement_libs() {
 
 # Print "yes" if previous command succeeded, else "no"
 defretval() { # shell is retarded?
-    if test $? == 0 ; then
+    if test $? = 0 ; then
         echo "yes"
     else
         echo "no"
@@ -581,7 +589,7 @@ check_pkg_config "libquvi 0.9.x support" $_libquvi9 LIBQUVI9 'libquvi-0.9 >= 0.9
 _libquvi9=$(defretval)
 
 _libquvi=no
-test "$_libquvi9" = yes || test "$_libquvi4" = yes && _libquvi=yes
+(test "$_libquvi9" = yes || test "$_libquvi4" = yes) && _libquvi=yes
 define_yes_no $_libquvi HAVE_LIBQUVI
 
 _wlver="1.2.0"
@@ -939,7 +947,6 @@ cat > $TMPC << EOF
 #define HAVE_DOS_PATHS 0
 #define HAVE_PRIORITY 0
 #define HAVE_GLOB 1
-#define HAVE_SETMODE 0
 #define HAVE_POSIX_SELECT 1
 #define HAVE_SYS_MMAN_H 1
 #define HAVE_NANOSLEEP 1

@@ -198,10 +198,6 @@ iconv support use --disable-iconv.",
         'deps_any': [ 'os-win32', 'os-cygwin' ],
         'func': check_true
     }, {
-        'name': 'setmode',
-        'desc': 'setmode()',
-        'func': check_statement('io.h', 'setmode(0, 0)')
-    }, {
         'name': 'bsd-fstatfs',
         'desc': "BSD's fstatfs()",
         'func': check_statement(['sys/param.h', 'sys/mount.h'],
@@ -289,7 +285,8 @@ If you really mean to compile without libass support use --disable-libass."
             'os-win32': {
                 'func': check_cc(fragment=load_fragment('vcd_windows.c'))
             }
-        }
+        },
+        'default': 'disable',
     }, {
         'name': '--libbluray',
         'desc': 'Bluray support',
@@ -307,6 +304,7 @@ If you really mean to compile without libass support use --disable-libass."
         'name': '--cdda',
         'desc': 'cdda support (libcdio)',
         'func': check_pkg_config('libcdio_paranoia'),
+        'default': 'disable',
     }, {
         'name': '--enca',
         'desc': 'ENCA support',
@@ -711,6 +709,7 @@ radio_and_tv_features = [
     }, {
         'name': '--tv-v4l2',
         'desc': 'Video4Linux2 TV interface',
+        'deps': [ 'tv' ],
         'func': check_cc(header_name=['sys/time.h', 'linux/videodev2.h'])
     }, {
         'name': '--libv4l2',

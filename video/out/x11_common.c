@@ -79,14 +79,12 @@
 #define vo_wm_STAYS_ON_TOP 4
 #define vo_wm_ABOVE 8
 #define vo_wm_BELOW 16
-#define vo_wm_NETWM (vo_wm_FULLSCREEN | vo_wm_STAYS_ON_TOP | vo_wm_ABOVE | \
-                     vo_wm_BELOW)
 
 /* EWMH state actions, see
          http://freedesktop.org/Standards/wm-spec/index.html#id2768769 */
-#define _NET_WM_STATE_REMOVE        0    /* remove/unset property */
-#define _NET_WM_STATE_ADD           1    /* add/set property */
-#define _NET_WM_STATE_TOGGLE        2    /* toggle property  */
+#define NET_WM_STATE_REMOVE        0    /* remove/unset property */
+#define NET_WM_STATE_ADD           1    /* add/set property */
+#define NET_WM_STATE_TOGGLE        2    /* toggle property  */
 
 #define WIN_LAYER_ONBOTTOM               2
 #define WIN_LAYER_NORMAL                 4
@@ -129,7 +127,7 @@ static void xscreensaver_heartbeat(struct vo_x11_state *x11);
 static void set_screensaver(struct vo_x11_state *x11, bool enabled);
 static void vo_x11_selectinput_witherr(struct vo *vo, Display *display,
                                        Window w, long event_mask);
-static void vo_x11_setlayer(struct vo *vo, Window vo_window, int layer);
+static void vo_x11_setlayer(struct vo *vo, bool ontop);
 
 #define XA(x11, s) (XInternAtom((x11)->display, # s, False))
 
@@ -206,22 +204,14 @@ static void x11_send_ewmh_msg(struct vo_x11_state *x11, char *message_type,
         MP_ERR(x11, "Couldn't send EWMH %s message!\n", message_type);
 }
 
-/*
- * Sends the EWMH fullscreen state event.
- *
- * action: could be one of _NET_WM_STATE_REMOVE -- remove state
- *                         _NET_WM_STATE_ADD    -- add state
- *                         _NET_WM_STATE_TOGGLE -- toggle
- */
-static void vo_x11_ewmh_fullscreen(struct vo_x11_state *x11, int action)
+// change the _NET_WM_STATE hint. Remove or add the state according to "set".
+static void x11_set_ewmh_state(struct vo_x11_state *x11, char *state, bool set)
 {
-    assert(action == _NET_WM_STATE_REMOVE || action == _NET_WM_STATE_ADD ||
-           action == _NET_WM_STATE_TOGGLE);
-
-    if (x11->wm_type & vo_wm_FULLSCREEN) {
-        long params[5] = {action, XA(x11, _NET_WM_STATE_FULLSCREEN)};
-        x11_send_ewmh_msg(x11, "_NET_WM_STATE", params);
-    }
+    long params[5] = {
+        set ? NET_WM_STATE_ADD : NET_WM_STATE_REMOVE,
+        XInternAtom(x11->display, state, False),
+    };
+    x11_send_ewmh_msg(x11, "_NET_WM_STATE", params);
 }
 
 static void vo_set_cursor_hidden(struct vo *vo, bool cursor_hidden)
@@ -977,15 +967,6 @@ static void vo_x11_move_resize(struct vo *vo, bool move, bool resize,
     vo_x11_sizehint(vo, rc, false);
 }
 
-static int vo_x11_get_gnome_layer(struct vo_x11_state *x11, Window win)
-{
-    long layer = WIN_LAYER_NORMAL;
-    if (x11_get_property_copy(x11, win, XA(x11, _WIN_LAYER), XA_CARDINAL,
-                              32, &layer, sizeof(layer)))
-        MP_VERBOSE(x11, "original window layer is %ld.\n", layer);
-    return layer;
-}
-
 // set a X text property that expects a UTF8_STRING type
 static void vo_x11_set_property_utf8(struct vo *vo, Atom name, const char *t)
 {
@@ -1307,7 +1288,7 @@ void vo_x11_config_vo_window(struct vo *vo, XVisualInfo *vis, int flags,
     }
 
     if (opts->ontop)
-        vo_x11_setlayer(vo, x11->window, opts->ontop);
+        vo_x11_setlayer(vo, opts->ontop);
 
     vo_x11_fullscreen(vo);
 
@@ -1356,43 +1337,37 @@ void vo_x11_clearwindow(struct vo *vo, Window vo_window)
     XFlush(x11->display);
 }
 
-static void vo_x11_setlayer(struct vo *vo, Window vo_window, int layer)
+static void vo_x11_setlayer(struct vo *vo, bool ontop)
 {
     struct vo_x11_state *x11 = vo->x11;
     if (vo->opts->WinID >= 0 || !x11->window)
         return;
 
-    if (x11->wm_type & vo_wm_LAYER) {
-        if (!x11->orig_layer)
-            x11->orig_layer = vo_x11_get_gnome_layer(x11, vo_window);
+    if (x11->wm_type & (vo_wm_STAYS_ON_TOP | vo_wm_ABOVE)) {
+        char *state = "_NET_WM_STATE_ABOVE";
+
+        // Not in EWMH - but the old code preferred this (maybe it is "better")
+        if (x11->wm_type & vo_wm_STAYS_ON_TOP)
+            state = "_NET_WM_STATE_STAYS_ON_TOP";
+
+        x11_set_ewmh_state(x11, state, ontop);
+
+        MP_VERBOSE(x11, "NET style stay on top (%d). Using state %s.\n",
+                   ontop, state);
+    } else if (x11->wm_type & vo_wm_LAYER) {
+        if (!x11->orig_layer) {
+            x11->orig_layer = WIN_LAYER_NORMAL;
+            x11_get_property_copy(x11, x11->window, XA(x11, _WIN_LAYER),
+                                  XA_CARDINAL, 32, &x11->orig_layer, sizeof(long));
+            MP_VERBOSE(x11, "original window layer is %ld.\n", x11->orig_layer);
+        }
 
         long params[5] = {0};
         // if not fullscreen, stay on default layer
-        params[0] = layer ? WIN_LAYER_ABOVE_DOCK : x11->orig_layer;
+        params[0] = ontop ? WIN_LAYER_ABOVE_DOCK : x11->orig_layer;
         params[1] = CurrentTime;
         MP_VERBOSE(x11, "Layered style stay on top (layer %ld).\n", params[0]);
         x11_send_ewmh_msg(x11, "_WIN_LAYER", params);
-    } else if (x11->wm_type & vo_wm_NETWM) {
-        long params[5] = {layer};
-
-        if (x11->wm_type & vo_wm_STAYS_ON_TOP) {
-            params[1] = XA(x11, _NET_WM_STATE_STAYS_ON_TOP);
-        } else if (x11->wm_type & vo_wm_ABOVE) {
-            params[1] = XA(x11, _NET_WM_STATE_ABOVE);
-        } else if (x11->wm_type & vo_wm_FULLSCREEN) {
-            params[1] = XA(x11, _NET_WM_STATE_FULLSCREEN);
-        } else if (x11->wm_type & vo_wm_BELOW) {
-            // This is not fallback. We can safely assume that the situation
-            // where only NETWM_STATE_BELOW is supported doesn't exist.
-            params[1] = XA(x11, _NET_WM_STATE_BELOW);
-        }
-        x11_send_ewmh_msg(x11, "_WIN_LAYER", params);
-
-        char *state = XGetAtomName(x11->display, params[1]);
-        MP_VERBOSE(x11, "NET style stay on top (layer %d). Using state %s.\n",
-                   layer, state ? state : "?");
-        XFree(state);
-        MP_VERBOSE(x11, "Layered style stay on top (layer %ld).\n", params[0]);
     }
 }
 
@@ -1436,16 +1411,12 @@ static void vo_x11_fullscreen(struct vo *vo)
     }
 
     if (x11->wm_type & vo_wm_FULLSCREEN) {
-        if (x11->fs) {
-            vo_x11_ewmh_fullscreen(x11, _NET_WM_STATE_ADD);
-        } else {
-            vo_x11_ewmh_fullscreen(x11, _NET_WM_STATE_REMOVE);
-            if (x11->pos_changed_during_fs || x11->size_changed_during_fs) {
-                vo_x11_move_resize(vo,
-                                   x11->pos_changed_during_fs,
+        x11_set_ewmh_state(x11, "_NET_WM_STATE_FULLSCREEN", x11->fs);
+        if (x11->fs && (x11->pos_changed_during_fs || x11->size_changed_during_fs))
+        {
+            vo_x11_move_resize(vo, x11->pos_changed_during_fs,
                                    x11->size_changed_during_fs,
                                    x11->nofsrc);
-            }
         }
     } else {
         struct mp_rect rc = x11->nofsrc;
@@ -1460,7 +1431,7 @@ static void vo_x11_fullscreen(struct vo *vo)
         XMoveResizeWindow(x11->display, x11->window, rc.x0, rc.y0,
                           RC_W(rc), RC_H(rc));
 
-        vo_x11_setlayer(vo, x11->window, x11->fs || opts->ontop);
+        vo_x11_setlayer(vo, x11->fs || opts->ontop);
 
         XRaiseWindow(x11->display, x11->window);
         XFlush(x11->display);
@@ -1475,7 +1446,7 @@ static void vo_x11_ontop(struct vo *vo)
     struct mp_vo_opts *opts = vo->opts;
     opts->ontop = !opts->ontop;
 
-    vo_x11_setlayer(vo, vo->x11->window, opts->ontop);
+    vo_x11_setlayer(vo, opts->ontop);
 }
 
 static void vo_x11_border(struct vo *vo)
@@ -1653,6 +1624,6 @@ bool vo_x11_screen_is_composited(struct vo *vo)
     struct vo_x11_state *x11 = vo->x11;
     char buf[50];
     sprintf(buf, "_NET_WM_CM_S%d", x11->screen);
-    Atom _NET_WM_CM = XInternAtom(x11->display, buf, False);
-    return XGetSelectionOwner(x11->display, _NET_WM_CM) != None;
+    Atom NET_WM_CM = XInternAtom(x11->display, buf, False);
+    return XGetSelectionOwner(x11->display, NET_WM_CM) != None;
 }

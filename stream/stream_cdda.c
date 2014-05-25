@@ -202,6 +202,8 @@ static int seek(stream_t *s, int64_t newpos)
     int seek_to_track = 0;
     int i;
 
+    newpos += p->start_sector * CDIO_CD_FRAMESIZE_RAW;
+
     sec = newpos / CDIO_CD_FRAMESIZE_RAW;
     if (newpos < 0 || sec > p->end_sector) {
         p->sector = p->end_sector + 1;
@@ -281,7 +283,7 @@ static int control(stream_t *stream, int cmd, void *arg)
     return STREAM_UNSUPPORTED;
 }
 
-static int open_cdda(stream_t *st, int m)
+static int open_cdda(stream_t *st)
 {
     cdda_priv *priv = st->priv;
     cdda_priv *p = priv;
@@ -289,10 +291,6 @@ static int open_cdda(stream_t *st, int m)
     int offset = p->toc_offset;
     cdrom_drive_t *cdd = NULL;
     int last_track;
-
-    if (m != STREAM_READ) {
-        return STREAM_UNSUPPORTED;
-    }
 
     if (!p->device) {
         if (cdrom_device)
@@ -388,12 +386,13 @@ static int open_cdda(stream_t *st, int m)
     priv->sector = priv->start_sector;
 
     st->priv = priv;
-    st->start_pos = priv->start_sector * CDIO_CD_FRAMESIZE_RAW;
-    st->end_pos = (priv->end_sector + 1) * CDIO_CD_FRAMESIZE_RAW;
+    st->end_pos =
+        (priv->end_sector + 1 - priv->start_sector) * CDIO_CD_FRAMESIZE_RAW;
     st->sector_size = CDIO_CD_FRAMESIZE_RAW;
 
     st->fill_buffer = fill_buffer;
     st->seek = seek;
+    st->seekable = true;
     st->control = control;
     st->close = close_cdda;
 
