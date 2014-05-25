@@ -1,8 +1,11 @@
-mpv (0.4.0~git20140525-1) UNRELEASED; urgency=medium
+mpv (0.4.0~git20140525-1) experimental; urgency=medium
 
   * New upstream git snapshot
+  * Enable support for libavdevice
+  * Disable cdda support (upstream disables it by default now, and libavdevice
+    should support it just fine anyway)
 
- -- Alessandro Ghedini <ghedo@debian.org>  Sun, 25 May 2014 15:12:29 +0200
+ -- Alessandro Ghedini <ghedo@debian.org>  Sun, 25 May 2014 22:57:13 +0200
 
 mpv (0.4.0~git20140521-1) experimental; urgency=medium
 
