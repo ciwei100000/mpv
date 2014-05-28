@@ -1,3 +1,9 @@
+mpv (0.4.0~git20140525-2) experimental; urgency=medium
+
+  * Switch to Lua 5.2
+
+ -- Alessandro Ghedini <ghedo@debian.org>  Wed, 28 May 2014 21:58:47 +0200
+
 mpv (0.4.0~git20140525-1) experimental; urgency=medium
 
   * New upstream git snapshot
