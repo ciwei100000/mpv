@@ -94,7 +94,7 @@ static int demux_rawaudio_open(demuxer_t *demuxer, enum demux_check check)
     sh_audio->channels = channels;
     w->nChannels = sh_audio->channels.num;
     w->nSamplesPerSec = sh_audio->samplerate = samplerate;
-    int samplesize = (af_fmt2bits(aformat) + 7) / 8;
+    int samplesize = af_fmt2bps(aformat);
     w->nAvgBytesPerSec = samplerate * samplesize * w->nChannels;
     w->nBlockAlign = w->nChannels * samplesize;
     w->wBitsPerSample = 8 * samplesize;
@@ -179,7 +179,7 @@ static int demux_rawvideo_open(demuxer_t *demuxer, enum demux_check check)
     sh_video->fps = fps;
     sh_video->disp_w = width;
     sh_video->disp_h = height;
-    sh_video->i_bps = fps * imgsize;
+    sh_video->bitrate = fps * imgsize * 8;
 
     struct priv *p = talloc_ptrtype(demuxer, p);
     demuxer->priv = p;

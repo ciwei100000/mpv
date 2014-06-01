@@ -36,6 +36,9 @@
 #if HAVE_AVCODEC_REPLAYGAIN_SIDE_DATA
 # include <libavutil/replaygain.h>
 #endif
+#if HAVE_AV_DISPLAYMATRIX
+# include <libavutil/display.h>
+#endif
 #include <libavutil/opt.h>
 #include "compat/libav.h"
 
@@ -433,7 +436,7 @@ static void handle_stream(demuxer_t *demuxer, int i)
         if (codec->channel_layout)
             mp_chmap_from_lavc(&sh_audio->channels, codec->channel_layout);
         sh_audio->samplerate = codec->sample_rate;
-        sh_audio->i_bps = codec->bit_rate / 8;
+        sh_audio->bitrate = codec->bit_rate;
 
         export_replaygain(demuxer, st);
 
@@ -477,15 +480,25 @@ static void handle_stream(demuxer_t *demuxer, int i)
         else
             sh_video->aspect = codec->width  * codec->sample_aspect_ratio.num
                     / (float)(codec->height * codec->sample_aspect_ratio.den);
-        sh_video->i_bps = codec->bit_rate / 8;
 
+        sh_video->bitrate = codec->bit_rate;
+        if (sh_video->bitrate == 0)
+            sh_video->bitrate = avfc->bit_rate;
+
+#if HAVE_AV_DISPLAYMATRIX
+        uint8_t *sd = av_stream_get_side_data(st, AV_PKT_DATA_DISPLAYMATRIX, NULL);
+        if (sd)
+            sh_video->rotate = av_display_rotation_get((uint32_t *)sd);
+#else
         AVDictionaryEntry *rot = av_dict_get(st->metadata, "rotate", NULL, 0);
         if (rot && rot->value) {
             char *end = NULL;
             long int r = strtol(rot->value, &end, 10);
             if (end && !end[0])
-                sh_video->rotate = ((r % 360) + 360) % 360;
+                sh_video->rotate = r;
         }
+#endif
+        sh_video->rotate = ((sh_video->rotate % 360) + 360) % 360;
 
         // This also applies to vfw-muxed mkv, but we can't detect these easily.
         sh_video->avi_dts = matches_avinputformat_name(priv, "avi");

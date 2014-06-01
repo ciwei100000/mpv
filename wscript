@@ -209,11 +209,6 @@ iconv support use --disable-iconv.",
         'func': check_statement('sys/vfs.h',
                                 'struct statfs fs; fstatfs(0, &fs); fs.f_namelen')
     }, {
-        'name': 'sys-sysinfo-h',
-        'desc': 'sys/sysinfo.h',
-        'func': check_statement('sys/sysinfo.h',
-            'struct sysinfo s_info; s_info.mem_unit=0; sysinfo(&s_info)')
-    }, {
         'name': '--libguess',
         'desc': 'libguess support',
         'func': check_pkg_config('libguess', '>= 1.0'),
@@ -276,17 +271,6 @@ If you really mean to compile without libass support use --disable-libass."
         'name' : '--lirc',
         'desc' : 'lirc',
         'func': check_cc(header_name='lirc/lirc_client.h', lib='lirc_client'),
-    }, {
-        'name' : '--vcd',
-        'desc' : 'VCD support',
-        'deps_any': [ 'os-linux', 'os-freebsd', 'os-netbsd', 'os-openbsd', 'os-darwin' ],
-        'func': check_true,
-        'os_specific_checks': {
-            'os-win32': {
-                'func': check_cc(fragment=load_fragment('vcd_windows.c'))
-            }
-        },
-        'default': 'disable',
     }, {
         'name': '--libbluray',
         'desc': 'Bluray support',
@@ -399,6 +383,12 @@ Libav libraries ({0}). Aborting.".format(" ".join(libav_pkg_config_checks))
         'func': check_statement('libavcodec/avcodec.h',
                                 'enum AVPacketSideDataType type = AV_PKT_DATA_REPLAYGAIN',
                                 use='libav')
+    }, {
+        'name': 'av-displaymatrix',
+        'desc': 'libavutil/libavcodec display matrix side data',
+        'func': check_statement('libavutil/frame.h',
+                                'enum AVFrameSideDataType type = AV_FRAME_DATA_DISPLAYMATRIX',
+                                use='libav')
     },{
         'name': 'avframe-metadata',
         'desc': 'libavutil AVFrame metadata',
@@ -473,6 +463,7 @@ audio_output_features = [
         'desc': 'PortAudio audio output',
         'deps': [ 'pthreads' ],
         'func': check_pkg_config('portaudio-2.0', '>= 19'),
+        'default': 'disable',
     }, {
         'name': '--jack',
         'desc': 'JACK audio output',

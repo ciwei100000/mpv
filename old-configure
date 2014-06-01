@@ -179,7 +179,6 @@ options_state_machine() {
     opt_yes_no _libquvi4    "libquvi 0.4.x"
     opt_yes_no _libquvi9    "libquvi 0.9.x"
     opt_yes_no _lcms2       "LCMS2 support"
-    opt_yes_no _vcd         "VCD support" yes
     opt_yes_no _bluray      "Blu-ray support"
     opt_yes_no _dvdread     "libdvdread"
     opt_yes_no _dvdnav      "libdvdnav"
@@ -545,9 +544,6 @@ check_statement_libs "shm" $_shm SHM "sys/types.h sys/ipc.h sys/shm.h" \
 
 check_trivial "audio select()" $_select AUDIO_SELECT
 
-check_statement_libs "sys/sysinfo.h" auto SYS_SYSINFO_H \
-    sys/sysinfo.h 'struct sysinfo s_info; s_info.mem_unit=0; sysinfo(&s_info)'
-
 echocheck "pkg-config"
 if $($_pkg_config --version > /dev/null 2>&1); then
   if test "$_ld_static"; then
@@ -733,8 +729,6 @@ check_pkg_config "OpenAL" $_openal OPENAL 'openal >= 1.13'
 
 check_pkg_config "ALSA audio" $_alsa ALSA 'alsa >= 1.0.9'
 
-check_trivial "VCD support" $_vcd VCD
-
 check_pkg_config "Blu-ray support" $_bluray LIBBLURAY 'libbluray >= 0.2.1'
 
 check_pkg_config "dvdread" $_dvdread DVDREAD 'dvdread >= 4.1.0'
@@ -813,6 +807,12 @@ api_statement_check \
     HAVE_AVCODEC_REPLAYGAIN_SIDE_DATA \
     libavcodec/avcodec.h \
     'enum AVPacketSideDataType type = AV_PKT_DATA_REPLAYGAIN'
+
+api_statement_check \
+    "libavutil/libavcodec display matrix side data" \
+    HAVE_AV_DISPLAYMATRIX \
+    libavutil/frame.h \
+    'enum AVFrameSideDataType type = AV_FRAME_DATA_DISPLAYMATRIX'
 
 api_statement_check \
     "libavutil AVFrame metadata" \

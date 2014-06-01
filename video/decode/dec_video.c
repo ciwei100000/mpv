@@ -195,8 +195,7 @@ bool video_init_best_codec(struct dec_video *d_video, char* video_decoders)
         d_video->decoder_desc =
             talloc_asprintf(d_video, "%s [%s:%s]", decoder->desc, decoder->family,
                             decoder->decoder);
-        MP_INFO(d_video, "Selected video codec: %s\n",
-                d_video->decoder_desc);
+        MP_VERBOSE(d_video, "Selected video codec: %s\n", d_video->decoder_desc);
     } else {
         MP_ERR(d_video, "Failed to initialize a video decoder for codec '%s'.\n",
                d_video->header->codec ? d_video->header->codec : "<unknown>");
@@ -290,6 +289,14 @@ struct mp_image *video_decode(struct dec_video *d_video,
     bool sort_pts =
         (opts->user_pts_assoc_mode != 1 || d_video->header->video->avi_dts)
         && opts->correct_pts;
+
+    struct demux_packet packet_copy;
+    if (packet && packet->dts == MP_NOPTS_VALUE) {
+        packet_copy = *packet;
+        packet = &packet_copy;
+        packet->dts = packet->pts;
+    }
+
     double pkt_pts = packet ? packet->pts : MP_NOPTS_VALUE;
     double pkt_dts = packet ? packet->dts : MP_NOPTS_VALUE;
 
@@ -325,7 +332,7 @@ struct mp_image *video_decode(struct dec_video *d_video,
 
     if (pts == MP_NOPTS_VALUE) {
         d_video->codec_pts = prev_codec_pts;
-    } else if (pts <= prev_codec_pts) {
+    } else if (pts < prev_codec_pts) {
         d_video->num_codec_pts_problems++;
     }
 
@@ -380,8 +387,8 @@ int video_reconfig_filters(struct dec_video *d_video,
     struct sh_video *sh = d_video->header->video;
 
     MP_VERBOSE(d_video, "VIDEO:  %dx%d  %5.3f fps  %5.1f kbps (%4.1f kB/s)\n",
-               p.w, p.h, sh->fps, sh->i_bps * 0.008,
-               sh->i_bps / 1000.0);
+               p.w, p.h, sh->fps, sh->bitrate / 1000.0,
+               sh->bitrate / 8000.0);
 
     MP_VERBOSE(d_video, "VDec: vo config request - %d x %d (%s)\n",
                p.w, p.h, vo_format_name(p.imgfmt));

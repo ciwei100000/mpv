@@ -26,7 +26,7 @@ struct mp_log;
 void command_init(struct MPContext *mpctx);
 void command_uninit(struct MPContext *mpctx);
 
-void run_command(struct MPContext *mpctx, struct mp_cmd *cmd);
+int run_command(struct MPContext *mpctx, struct mp_cmd *cmd);
 char *mp_property_expand_string(struct MPContext *mpctx, const char *str);
 char *mp_property_expand_escaped_string(struct MPContext *mpctx, const char *str);
 void property_print_help(struct mp_log *log);
@@ -37,6 +37,6 @@ const struct m_option *mp_get_property_list(void);
 int mp_find_property_index(const char *property);
 
 void mp_notify(struct MPContext *mpctx, int event, void *arg);
-void mp_notify_property(struct MPContext *mpctx, char *property);
+void mp_notify_property(struct MPContext *mpctx, const char *property);
 
 #endif /* MPLAYER_COMMAND_H */
