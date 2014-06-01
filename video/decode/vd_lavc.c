@@ -200,19 +200,24 @@ static struct vd_lavc_hwdec *probe_hwdec(struct dec_video *vd, bool autoprobe,
 {
     struct vd_lavc_hwdec *hwdec = find_hwcodec(api);
     if (!hwdec) {
-        MP_VERBOSE(vd, "Requested hardware decoder not "
-                   "compiled.\n");
+        MP_VERBOSE(vd, "Requested hardware decoder not compiled.\n");
         return NULL;
     }
     int r = hwdec_probe(hwdec, &vd->hwdec_info, decoder);
+    if (r == HWDEC_ERR_EMULATED) {
+        if (autoprobe)
+            return NULL;
+        // User requested this explicitly.
+        MP_WARN(vd, "Using emulated hardware decoding API.\n");
+        r = 0;
+    }
     if (r >= 0) {
         return hwdec;
     } else if (r == HWDEC_ERR_NO_CODEC) {
         MP_VERBOSE(vd, "Hardware decoder '%s' not found in "
                    "libavcodec.\n", decoder);
     } else if (r == HWDEC_ERR_NO_CTX && !autoprobe) {
-        MP_WARN(vd, "VO does not support requested "
-                "hardware decoder.\n");
+        MP_WARN(vd, "VO does not support requested hardware decoder.\n");
     }
     return NULL;
 }
@@ -276,6 +281,10 @@ static int init(struct dec_video *vd, const char *decoder)
             return 0;
         }
     }
+
+    if (ctx->avctx->bit_rate != 0)
+        vd->bitrate = ctx->avctx->bit_rate;
+
     return 1;
 }
 
@@ -316,6 +325,7 @@ static void init_avctx(struct dec_video *vd, const char *decoder,
     ctx->hwdec_fmt = 0;
     ctx->avctx = avcodec_alloc_context3(lavc_codec);
     AVCodecContext *avctx = ctx->avctx;
+    avctx->bit_rate = 0;
     avctx->opaque = vd;
     avctx->codec_type = AVMEDIA_TYPE_VIDEO;
     avctx->codec_id = lavc_codec->id;

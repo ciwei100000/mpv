@@ -177,6 +177,8 @@ const struct mp_cmd_def mp_cmds[] = {
         ARG_INT, ARG_INT }},
   { MP_CMD_OVERLAY_REMOVE, "overlay_remove", { ARG_INT } },
 
+  { MP_CMD_WRITE_WATCH_LATER_CONFIG, "write_watch_later_config", },
+
   {0}
 };
 
@@ -281,6 +283,12 @@ bool mp_input_is_abort_cmd(struct mp_cmd *cmd)
         }
     }
     return false;
+}
+
+bool mp_input_is_repeatable_cmd(struct mp_cmd *cmd)
+{
+    return (cmd->def && cmd->def->allow_auto_repeat) ||
+           cmd->id == MP_CMD_COMMAND_LIST;
 }
 
 void mp_print_cmd_list(struct mp_log *out)

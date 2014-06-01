@@ -204,7 +204,7 @@ static int init(struct ao *ao)
 
     ao->format = fmt->mp_format;
     sp.sampleFormat = fmt->pa_format;
-    int framelen = ao->channels.num * (af_fmt2bits(ao->format) / 8);
+    int framelen = ao->channels.num * af_fmt2bps(ao->format);
     ao->bps = ao->samplerate * framelen;
 
     if (!CHECK_PA_RET(Pa_IsFormatSupported(NULL, &sp, ao->samplerate)))
@@ -245,7 +245,6 @@ const struct ao_driver audio_out_portaudio = {
     .init      = init,
     .uninit    = uninit,
     .reset     = reset,
-    .pause     = reset,
     .resume    = resume,
     .priv_size = sizeof(struct priv),
     .options = (const struct m_option[]) {

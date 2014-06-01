@@ -698,6 +698,40 @@ static float get_delay(struct ao *ao)
     return (float)delay / (float)ao->samplerate;
 }
 
+#define MAX_POLL_FDS 20
+static int audio_wait(struct ao *ao, pthread_mutex_t *lock)
+{
+    struct priv *p = ao->priv;
+    int err;
+
+    int num_fds = snd_pcm_poll_descriptors_count(p->alsa);
+    if (num_fds <= 0 || num_fds >= MAX_POLL_FDS)
+        goto alsa_error;
+
+    struct pollfd fds[MAX_POLL_FDS];
+    err = snd_pcm_poll_descriptors(p->alsa, fds, num_fds);
+    CHECK_ALSA_ERROR("cannot get pollfds");
+
+    while (1) {
+        int r = ao_wait_poll(ao, fds, num_fds, lock);
+        if (r)
+            return r;
+
+        unsigned short revents;
+        snd_pcm_poll_descriptors_revents(p->alsa, fds, num_fds, &revents);
+        CHECK_ALSA_ERROR("cannot read poll events");
+
+        if (revents & POLLERR)
+            return -1;
+        if (revents & POLLOUT)
+            return 0;
+    }
+    return 0;
+
+alsa_error:
+    return -1;
+}
+
 #define OPT_BASE_STRUCT struct priv
 
 const struct ao_driver audio_out_alsa = {
@@ -713,6 +747,8 @@ const struct ao_driver audio_out_alsa = {
     .resume    = audio_resume,
     .reset     = reset,
     .drain     = drain,
+    .wait      = audio_wait,
+    .wakeup    = ao_wakeup_poll,
     .priv_size = sizeof(struct priv),
     .priv_defaults = &(const struct priv) {
         .cfg_block = 1,
@@ -721,8 +757,8 @@ const struct ao_driver audio_out_alsa = {
         .cfg_mixer_index = 0,
     },
     .options = (const struct m_option[]) {
-        OPT_FLAG("resample", cfg_resample, 0),
         OPT_STRING("device", cfg_device, 0),
+        OPT_FLAG("resample", cfg_resample, 0),
         OPT_FLAG("block", cfg_block, 0),
         OPT_STRING("mixer-device", cfg_mixer_device, 0),
         OPT_STRING("mixer-name", cfg_mixer_name, 0),

@@ -105,7 +105,10 @@ static void mark_seek(struct MPContext *mpctx)
 
 static char *format_bitrate(int rate)
 {
-    return talloc_asprintf(NULL, "%d kbps", rate * 8 / 1000);
+    if (rate < 1024 * 1024)
+        return talloc_asprintf(NULL, "%.3f kbps", rate * 8.0 / 1000.0);
+
+    return talloc_asprintf(NULL, "%.3f mbps", rate * 8.0 / 1000000.0);
 }
 
 static char *format_file_size(int64_t size)
@@ -1198,10 +1201,10 @@ static int mp_property_audio_bitrate(m_option_t *prop, int action,
         return M_PROPERTY_UNAVAILABLE;
     switch (action) {
     case M_PROPERTY_PRINT:
-        *(char **)arg = format_bitrate(mpctx->d_audio->i_bps);
+        *(char **)arg = format_bitrate(mpctx->d_audio->bitrate);
         return M_PROPERTY_OK;
     case M_PROPERTY_GET:
-        *(int *)arg = mpctx->d_audio->i_bps;
+        *(int *)arg = mpctx->d_audio->bitrate;
         return M_PROPERTY_OK;
     }
     return M_PROPERTY_NOT_IMPLEMENTED;
@@ -1848,10 +1851,10 @@ static int mp_property_video_bitrate(m_option_t *prop, int action,
     if (!mpctx->d_video)
         return M_PROPERTY_UNAVAILABLE;
     if (action == M_PROPERTY_PRINT) {
-        *(char **)arg = format_bitrate(mpctx->d_video->i_bps);
+        *(char **)arg = format_bitrate(mpctx->d_video->bitrate);
         return M_PROPERTY_OK;
     }
-    return m_property_int_ro(prop, action, arg, mpctx->d_video->i_bps);
+    return m_property_int_ro(prop, action, arg, mpctx->d_video->bitrate);
 }
 
 static int property_imgparams(struct mp_image_params p, int action, void *arg)
@@ -2798,6 +2801,7 @@ static int set_filters(struct MPContext *mpctx, enum stream_type mediatype,
 
     if (success) {
         m_option_free(co->opt, &old_settings);
+        mp_notify_property(mpctx, filter_opt[mediatype]);
     } else {
         m_option_free(co->opt, list);
         *list = old_settings;
@@ -3044,7 +3048,7 @@ static bool check_property_autorepeat(char *property,  struct MPContext *mpctx)
     return true;
 }
 
-void run_command(MPContext *mpctx, mp_cmd_t *cmd)
+int run_command(MPContext *mpctx, mp_cmd_t *cmd)
 {
     struct command_ctx *cmdctx = mpctx->command_ctx;
     struct MPOpts *opts = mpctx->opts;
@@ -3061,7 +3065,7 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
             if (cmd->args[n].type->type == CONF_TYPE_STRING) {
                 char *s = mp_property_expand_string(mpctx, cmd->args[n].v.s);
                 if (!s)
-                    return;
+                    return -1;
                 talloc_free(cmd->args[n].v.s);
                 cmd->args[n].v.s = s;
             }
@@ -3102,6 +3106,8 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
                 mpctx->add_osd_seek_info |= OSD_SEEK_INFO_BAR;
             if (msg_or_nobar_osd)
                 mpctx->add_osd_seek_info |= OSD_SEEK_INFO_TEXT;
+        } else {
+            return -1;
         }
         break;
     }
@@ -3114,10 +3120,12 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
         } else if (r == M_PROPERTY_UNKNOWN) {
             set_osd_msg(mpctx, osdl, osd_duration,
                         "Unknown property: '%s'", cmd->args[0].v.s);
+            return -1;
         } else if (r <= 0) {
             set_osd_msg(mpctx, osdl, osd_duration,
                         "Failed to set property '%s' to '%s'",
                         cmd->args[0].v.s, cmd->args[1].v.s);
+            return -1;
         }
         break;
     }
@@ -3143,10 +3151,12 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
         } else if (r == M_PROPERTY_UNKNOWN) {
             set_osd_msg(mpctx, osdl, osd_duration,
                         "Unknown property: '%s'", property);
+            return -1;
         } else if (r <= 0) {
             set_osd_msg(mpctx, osdl, osd_duration,
                         "Failed to increment property '%s' by %g",
                         property, s.inc);
+            return -1;
         }
         break;
     }
@@ -3161,9 +3171,11 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
         } else if (r == M_PROPERTY_UNKNOWN) {
             set_osd_msg(mpctx, osdl, osd_duration,
                         "Unknown property: '%s'", property);
+            return -1;
         } else if (r <= 0) {
             set_osd_msg(mpctx, osdl, osd_duration,
                         "Failed to multiply property '%s' by %g", property, f);
+            return -1;
         }
         break;
     }
@@ -3194,10 +3206,12 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
             } else if (r == M_PROPERTY_UNKNOWN) {
                 set_osd_msg(mpctx, osdl, osd_duration,
                             "Unknown property: '%s'", property);
+                return -1;
             } else if (r <= 0) {
                 set_osd_msg(mpctx, osdl, osd_duration,
                             "Failed to set property '%s' to '%s'",
                             property, value);
+                return -1;
             }
         }
         break;
@@ -3211,7 +3225,7 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
             MP_WARN(mpctx, "Failed to get value of property '%s'.\n",
                     cmd->args[0].v.s);
             MP_INFO(mpctx, "ANS_ERROR=%s\n", property_error_string(r));
-            break;
+            return -1;
         }
         MP_INFO(mpctx, "ANS_%s=%s\n", cmd->args[0].v.s, tmp);
         talloc_free(tmp);
@@ -3243,7 +3257,7 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
 
         struct playlist_entry *e = mp_next_file(mpctx, dir, force);
         if (!e && !force)
-            break;
+            return -1;
         mpctx->playlist->current = e;
         mpctx->playlist->current_was_replaced = false;
         mpctx->stop_play = PT_CURRENT_ENTRY;
@@ -3351,6 +3365,7 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
             }
         } else {
             MP_ERR(mpctx, "Unable to load playlist %s.\n", filename);
+            return -1;
         }
         break;
     }
@@ -3376,12 +3391,12 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
                                                              cmd->args[0].v.i);
         if (cmd->args[0].v.i < 0)
             e = mpctx->playlist->current;
-        if (e) {
-            // Can't play a removed entry
-            if (mpctx->playlist->current == e)
-                mpctx->stop_play = PT_CURRENT_ENTRY;
-            playlist_remove(mpctx->playlist, e);
-        }
+        if (!e)
+            return -1;
+        // Can't play a removed entry
+        if (mpctx->playlist->current == e)
+            mpctx->stop_play = PT_CURRENT_ENTRY;
+        playlist_remove(mpctx->playlist, e);
         break;
     }
 
@@ -3390,9 +3405,9 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
                                                               cmd->args[0].v.i);
         struct playlist_entry *e2 = playlist_entry_from_index(mpctx->playlist,
                                                               cmd->args[1].v.i);
-        if (e1) {
-            playlist_move(mpctx->playlist, e1, e2);
-        }
+        if (!e1)
+            return -1;
+        playlist_move(mpctx->playlist, e1, e2);
         break;
     }
 
@@ -3546,17 +3561,18 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
 
     case MP_CMD_SUB_ADD: {
         struct track *sub = mp_add_subtitles(mpctx, cmd->args[0].v.s);
-        if (sub) {
-            mp_switch_track(mpctx, sub->type, sub);
-            mp_mark_user_track_selection(mpctx, 0, sub->type);
-        }
+        if (!sub)
+            return -1;
+        mp_switch_track(mpctx, sub->type, sub);
+        mp_mark_user_track_selection(mpctx, 0, sub->type);
         break;
     }
 
     case MP_CMD_SUB_REMOVE: {
         struct track *sub = mp_track_by_tid(mpctx, STREAM_SUB, cmd->args[0].v.i);
-        if (sub)
-            mp_remove_track(mpctx, sub);
+        if (!sub)
+            return -1;
+        mp_remove_track(mpctx, sub);
         break;
     }
 
@@ -3567,9 +3583,10 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
             if (nsub) {
                 mp_remove_track(mpctx, sub);
                 mp_switch_track(mpctx, nsub->type, nsub);
+                return 0;
             }
         }
-        break;
+        return -1;
     }
 
     case MP_CMD_SCREENSHOT:
@@ -3627,19 +3644,18 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
                 set_osd_msg(mpctx, osdl, osd_duration, "vo='%s'", s);
             } else {
                 set_osd_msg(mpctx, osdl, osd_duration, "Failed!");
+                return -1;
             }
         }
         break;
 
     case MP_CMD_AF:
-        edit_filters_osd(mpctx, STREAM_AUDIO, cmd->args[0].v.s,
-                         cmd->args[1].v.s, msg_osd);
-        break;
+        return edit_filters_osd(mpctx, STREAM_AUDIO, cmd->args[0].v.s,
+                                cmd->args[1].v.s, msg_osd);
 
     case MP_CMD_VF:
-        edit_filters_osd(mpctx, STREAM_VIDEO, cmd->args[0].v.s,
-                         cmd->args[1].v.s, msg_osd);
-        break;
+        return edit_filters_osd(mpctx, STREAM_VIDEO, cmd->args[0].v.s,
+                                cmd->args[1].v.s, msg_osd);
 
     case MP_CMD_SCRIPT_DISPATCH: {
         mpv_event_script_input_dispatch *event = talloc_ptrtype(NULL, event);
@@ -3652,6 +3668,7 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
         {
             MP_VERBOSE(mpctx, "Can't find script '%s' when handling input.\n",
                        cmd->args[0].v.s);
+            return -1;
         }
         break;
     }
@@ -3668,6 +3685,7 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
         {
             MP_VERBOSE(mpctx, "Can't find script '%s' for %s.\n",
                        cmd->args[0].v.s, cmd->name);
+            return -1;
         }
         break;
     }
@@ -3702,9 +3720,16 @@ void run_command(MPContext *mpctx, mp_cmd_t *cmd)
     case MP_CMD_IGNORE:
         break;
 
+    case MP_CMD_WRITE_WATCH_LATER_CONFIG: {
+        mp_write_watch_later_conf(mpctx);
+        break;
+    }
+
     default:
         MP_VERBOSE(mpctx, "Received unknown cmd %s\n", cmd->name);
+        return -1;
     }
+    return 0;
 }
 
 void command_uninit(struct MPContext *mpctx)
@@ -3733,7 +3758,7 @@ void mp_notify(struct MPContext *mpctx, int event, void *arg)
         mp_client_property_change(mpctx, mp_event_property_change[event]);
 }
 
-void mp_notify_property(struct MPContext *mpctx, char *property)
+void mp_notify_property(struct MPContext *mpctx, const char *property)
 {
     mp_client_property_change(mpctx, (const char*[]){property, NULL});
 }

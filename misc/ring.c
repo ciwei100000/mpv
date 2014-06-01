@@ -30,15 +30,15 @@ struct mp_ring {
     /* Positions of the first readable/writeable chunks. Do not read this
      * fields but use the atomic private accessors `mp_ring_get_wpos`
      * and `mp_ring_get_rpos`. */
-    atomic_uint_least32_t rpos, wpos;
+    atomic_ulong rpos, wpos;
 };
 
-static uint32_t mp_ring_get_wpos(struct mp_ring *buffer)
+static unsigned long mp_ring_get_wpos(struct mp_ring *buffer)
 {
     return atomic_load(&buffer->wpos);
 }
 
-static uint32_t mp_ring_get_rpos(struct mp_ring *buffer)
+static unsigned long mp_ring_get_rpos(struct mp_ring *buffer)
 {
     return atomic_load(&buffer->rpos);
 }
@@ -55,18 +55,8 @@ struct mp_ring *mp_ring_new(void *talloc_ctx, int size)
     return ringbuffer;
 }
 
-int mp_ring_drain(struct mp_ring *buffer, int len)
-{
-    int buffered  = mp_ring_buffered(buffer);
-    int drain_len = FFMIN(len, buffered);
-    atomic_fetch_add(&buffer->rpos, drain_len);
-    return drain_len;
-}
-
 int mp_ring_read(struct mp_ring *buffer, unsigned char *dest, int len)
 {
-    if (!dest) return mp_ring_drain(buffer, len);
-
     int size     = mp_ring_size(buffer);
     int buffered = mp_ring_buffered(buffer);
     int read_len = FFMIN(len, buffered);
@@ -75,12 +65,19 @@ int mp_ring_read(struct mp_ring *buffer, unsigned char *dest, int len)
     int len1 = FFMIN(size - read_ptr, read_len);
     int len2 = read_len - len1;
 
-    memcpy(dest, buffer->buffer + read_ptr, len1);
-    memcpy(dest + len1, buffer->buffer, len2);
+    if (dest) {
+        memcpy(dest, buffer->buffer + read_ptr, len1);
+        memcpy(dest + len1, buffer->buffer, len2);
+    }
 
     atomic_fetch_add(&buffer->rpos, read_len);
 
     return read_len;
+}
+
+int mp_ring_drain(struct mp_ring *buffer, int len)
+{
+    return mp_ring_read(buffer, NULL, len);
 }
 
 int mp_ring_write(struct mp_ring *buffer, unsigned char *src, int len)

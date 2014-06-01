@@ -66,14 +66,14 @@ static const struct ao_driver * const audio_out_drivers[] = {
 #if HAVE_ALSA
     &audio_out_alsa,
 #endif
+#if HAVE_DSOUND
+    &audio_out_dsound,
+#endif
 #if HAVE_WASAPI
     &audio_out_wasapi,
 #endif
 #if HAVE_OSS_AUDIO
     &audio_out_oss,
-#endif
-#if HAVE_DSOUND
-    &audio_out_dsound,
 #endif
 #if HAVE_PORTAUDIO
     &audio_out_portaudio,
@@ -171,7 +171,7 @@ static struct ao *ao_create(bool probing, struct mpv_global *global,
     if (ao->driver->init(ao) < 0)
         goto error;
 
-    ao->sstride = af_fmt2bits(ao->format) / 8;
+    ao->sstride = af_fmt2bps(ao->format);
     ao->num_planes = 1;
     if (af_fmt_is_planar(ao->format)) {
         ao->num_planes = ao->channels.num;
