@@ -110,6 +110,10 @@ OPTIONS
         rendering of ASS/SSA subtitles. It can sometimes be useful to forcibly
         override the styling of ASS subtitles, but should be avoided in general.
 
+    .. note::
+
+        Try using ``--ass-style-override=force`` instead.
+
 ``--ass-force-style=<[Style.]Param=Value[,...]>``
     Override some style or script info parameters.
 
@@ -165,11 +169,9 @@ OPTIONS
             for any of these options can lead to incorrect subtitle rendering
             (default).
     :no:    Render subtitles as forced by subtitle scripts.
-    :force: Like ``yes``, but also override the style named ``Default`` to
-            make it look like the like text subtitle style implied by the
-            ``--sub-text-...`` option. This won't always work, because the
-            dialogue style doesn't necessary use this name, and it might break
-            other advanced uses of the ASS format.
+    :force: Try to force the font style as defined by the ``--sub-text-*``
+            options. Requires a modified libass, can break rendering easily.
+            Probably more reliable than ``force``.
 
 ``--ass-use-margins``
     Enables placing toptitles and subtitles in black borders when they are
@@ -2144,9 +2146,17 @@ OPTIONS
     implemented, but does not work (happens often on GNOME). You might be able
     to to work this around using ``--heartbeat-cmd`` instead.
 
-``--sub-file=<subtitlefile1,subtitlefile2,...>``
-    Use/display these subtitle files. Only one file can be displayed at the
-    same time.
+``--sub-file=subtitlefile``
+    Add a subtitle file to the list of external subtitles.
+
+    If you use ``--sub-file`` only once, this subtitle file is displayed by
+    default.
+
+    If ``--sub-file`` is used multiple times, the subtitle to use can be
+    switched at runtime by cycling subtitle tracks. It's possible to show
+    two subtitles at once: use ``--sid`` to select the first subtitle index,
+    and ``--secondary-sid`` to select the second index. (The index is printed
+    on the terminal output after the ``--sid=`` in the list of streams.)
 
 ``--sub-auto=<no|exact|fuzzy|all>``, ``--no-sub-auto``
     Load additional subtitle files matching the video filename. The parameter
