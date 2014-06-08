@@ -5,7 +5,7 @@ libmpv.so.0 libmpv0 #MINVER#
  mpv_command_async@Base 0.4.0~git20140514
  mpv_command_string@Base 0.4.0~git20140514
  mpv_create@Base 0.4.0~git20140514
- mpv_destroy@Base 0.4.0~git20140514
+ mpv_detach_destroy@Base 0.4.0~git20140608
  mpv_error_string@Base 0.4.0~git20140514
  mpv_event_name@Base 0.4.0~git20140514
  mpv_free@Base 0.4.0~git20140514
@@ -30,6 +30,7 @@ libmpv.so.0 libmpv0 #MINVER#
  mpv_set_property_string@Base 0.4.0~git20140514
  mpv_set_wakeup_callback@Base 0.4.0~git20140514
  mpv_suspend@Base 0.4.0~git20140514
+ mpv_terminate_destroy@Base 0.4.0~git20140608
  mpv_unobserve_property@Base 0.4.0~git20140514
  mpv_wait_event@Base 0.4.0~git20140514
  mpv_wakeup@Base 0.4.0~git20140514
