@@ -396,7 +396,7 @@ const m_option_t mp_opts[] = {
 
 // ------------------------- subtitles options --------------------
 
-    OPT_STRINGLIST("sub-file", sub_name, 0),
+    OPT_STRING_APPEND_LIST("sub-file", sub_name, 0),
     OPT_PATHLIST("sub-paths", sub_paths, 0),
     OPT_STRING("sub-codepage", sub_cp, 0),
     OPT_FLOAT("sub-delay", sub_delay, 0),
@@ -427,7 +427,7 @@ const m_option_t mp_opts[] = {
     OPT_CHOICE("ass-shaper", ass_shaper, 0,
                ({"simple", 0}, {"complex", 1})),
     OPT_CHOICE("ass-style-override", ass_style_override, 0,
-               ({"no", 0}, {"yes", 1}, {"force", 2})),
+               ({"no", 0}, {"yes", 1}, {"force", 3})),
     OPT_FLAG("osd-bar", osd_bar_visible, 0),
     OPT_FLOATRANGE("osd-bar-align-x", osd_bar_align_x, 0, -1.0, +1.0),
     OPT_FLOATRANGE("osd-bar-align-y", osd_bar_align_y, 0, -1.0, +1.0),

@@ -23,6 +23,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "config.h"
 #include "talloc.h"
@@ -142,9 +143,14 @@ void mp_destroy(struct MPContext *mpctx)
         ass_library_done(mpctx->ass_library);
 #endif
 
-    if (mpctx->opts->use_terminal)
+    if (mpctx->opts->use_terminal) {
         getch2_disable();
+        terminal_initialized = false;
+    }
     uninit_libav(mpctx->global);
+
+    if (mpctx->autodetach)
+        pthread_detach(pthread_self());
 
     mp_msg_uninit(mpctx->global);
     talloc_free(mpctx);
@@ -368,6 +374,7 @@ int mp_initialize(struct MPContext *mpctx)
     if (mpctx->opts->use_terminal && !terminal_initialized) {
         terminal_initialized = true;
         terminal_init();
+        mp_msg_update_msglevels(mpctx->global);
     }
 
     mpctx->input = mp_input_init(mpctx->global);

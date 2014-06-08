@@ -84,7 +84,7 @@ static void *script_thread(void *p)
 
     mp_verbose(log, "Exiting...\n");
 
-    mpv_destroy(arg->client);
+    mpv_detach_destroy(arg->client);
     talloc_free(arg);
     return NULL;
 }
@@ -102,7 +102,7 @@ static void mp_load_script(struct MPContext *mpctx, const char *fname)
     }
 
     if (!backend) {
-        MP_WARN(mpctx, "Can't load unknown script: %s\n", fname);
+        MP_VERBOSE(mpctx, "Can't load unknown script: %s\n", fname);
         return;
     }
 
