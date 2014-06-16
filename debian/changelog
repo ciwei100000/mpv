@@ -1,9 +1,11 @@
-mpv (0.4.0~git20140616-1) UNRELEASED; urgency=medium
+mpv (0.4.0~git20140616-1) experimental; urgency=medium
 
   * New upstream git snapshot
   * Drop gcc-4.8 Build-Depends for sparc (Closes: #751321)
+  * Bump lcms2 versioned Build-Depends
+  * Build and install zsh completion script
 
- -- Alessandro Ghedini <ghedo@debian.org>  Mon, 16 Jun 2014 20:07:17 +0200
+ -- Alessandro Ghedini <ghedo@debian.org>  Mon, 16 Jun 2014 20:20:09 +0200
 
 mpv (0.4.0~git20140608-1) experimental; urgency=medium
 
