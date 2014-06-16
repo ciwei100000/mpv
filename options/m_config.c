@@ -38,7 +38,7 @@
 
 static const union m_option_value default_value;
 
-static const char *replaced_opts;
+static const char *const replaced_opts;
 
 // Profiles allow to predefine some sets of options that can then
 // be applied later on with the internal -profile option.
@@ -302,7 +302,7 @@ static void add_negation_option(struct m_config *config,
     const struct m_option *opt = orig->opt;
     int value;
     if (opt->type == CONF_TYPE_FLAG) {
-        value = opt->min;
+        value = 0;
     } else if (opt->type == CONF_TYPE_CHOICE) {
         // Find out whether there's a "no" choice.
         // m_option_parse() should be used for this, but it prints
@@ -323,8 +323,6 @@ static void add_negation_option(struct m_config *config,
         .name = opt->name,
         .type = CONF_TYPE_STORE,
         .flags = opt->flags & (M_OPT_NOCFG | M_OPT_GLOBAL | M_OPT_PRE_PARSE),
-        .is_new_option = opt->is_new_option,
-        .p = opt->p,
         .offset = opt->offset,
         .max = value,
     };
@@ -371,14 +369,11 @@ static void m_config_add_option(struct m_config *config,
         .name = arg->name,
     };
 
-    if (arg->is_new_option) {
+    if (arg->offset >= 0) {
         if (optstruct)
             co.data = (char *)optstruct + arg->offset;
         if (optstruct_def)
             co.default_data = (char *)optstruct_def + arg->offset;
-    } else {
-        co.data = arg->p;
-        co.default_data = arg->p;
     }
 
     if (arg->defval)
@@ -396,25 +391,20 @@ static void m_config_add_option(struct m_config *config,
 
     // Option with children -> add them
     if (arg->type->flags & M_OPT_TYPE_HAS_CHILD) {
-        if (arg->type->flags & M_OPT_TYPE_USE_SUBSTRUCT) {
-            const struct m_sub_options *subopts = arg->priv;
+        const struct m_sub_options *subopts = arg->priv;
 
-            void *new_optstruct = NULL;
-            if (co.data) {
-                new_optstruct = m_config_alloc_struct(config, subopts);
-                substruct_write_ptr(co.data, new_optstruct);
-            }
-
-            const void *new_optstruct_def = substruct_read_ptr(co.default_data);
-            if (!new_optstruct_def)
-                new_optstruct_def = subopts->defaults;
-
-            add_options(config, co.name, new_optstruct,
-                        new_optstruct_def, subopts->opts);
-        } else {
-            const struct m_option *sub = arg->p;
-            add_options(config, co.name, optstruct, optstruct_def, sub);
+        void *new_optstruct = NULL;
+        if (co.data) {
+            new_optstruct = m_config_alloc_struct(config, subopts);
+            substruct_write_ptr(co.data, new_optstruct);
         }
+
+        const void *new_optstruct_def = substruct_read_ptr(co.default_data);
+        if (!new_optstruct_def)
+            new_optstruct_def = subopts->defaults;
+
+        add_options(config, co.name, new_optstruct,
+                    new_optstruct_def, subopts->opts);
     } else {
         // Initialize options
         if (co.data && co.default_data) {
@@ -874,8 +864,45 @@ void *m_config_alloc_struct(void *talloc_ctx,
     return substruct;
 }
 
+struct dtor_info {
+    const struct m_sub_options *opts;
+    void *ptr;
+};
+
+static void free_substruct(void *ptr)
+{
+    struct dtor_info *d = ptr;
+    for (int n = 0; d->opts->opts && d->opts->opts[n].type; n++) {
+        const struct m_option *opt = &d->opts->opts[n];
+        void *dst = (char *)d->ptr + opt->offset;
+        m_option_free(opt, dst);
+    }
+}
+
+void *m_sub_options_copy(void *talloc_ctx, const struct m_sub_options *opts,
+                         const void *ptr)
+{
+    void *new = talloc_zero_size(talloc_ctx, opts->size);
+    struct dtor_info *dtor = talloc_ptrtype(new, dtor);
+    *dtor = (struct dtor_info){opts, new};
+    talloc_set_destructor(dtor, free_substruct);
+    // also fill/initialize members not described by opts
+    if (opts->defaults)
+        memcpy(new, opts->defaults, opts->size);
+    for (int n = 0; opts->opts && opts->opts[n].type; n++) {
+        const struct m_option *opt = &opts->opts[n];
+        // not implemented, because it adds lots of complexity
+        assert(!(opt->type->flags  & M_OPT_TYPE_HAS_CHILD));
+        void *src = (char *)ptr + opt->offset;
+        void *dst = (char *)new + opt->offset;
+        memset(dst, 0, opt->type->size);
+        m_option_copy(opt, dst, src);
+    }
+    return new;
+}
+
 // This is used for printing error messages on unknown options.
-static const char *replaced_opts =
+static const char *const replaced_opts =
     "|a52drc#--ad-lavc-ac3drc=level"
     "|afm#--ad"
     "|aspect#--video-aspect"
@@ -944,5 +971,7 @@ static const char *replaced_opts =
     "|autosub#--sub-auto"
     "|native-fs#--fs-missioncontrol"
     "|status-msg#--term-status-msg"
+    "|idx#--index"
+    "|forceidx#--index"
     "|"
 ;

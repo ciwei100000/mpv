@@ -49,7 +49,7 @@
 
 // List of builtin modules and their contents as strings.
 // All these are generated from player/lua/*.lua
-static const char *builtin_lua_scripts[][2] = {
+static const char * const builtin_lua_scripts[][2] = {
     {"mp.defaults",
 #   include "player/lua/defaults.inc"
     },
@@ -692,7 +692,7 @@ static int script_set_property_native(lua_State *L)
 
 static int script_property_list(lua_State *L)
 {
-    const struct m_option *props = mp_get_property_list();
+    const struct m_property *props = mp_get_property_list();
     lua_newtable(L);
     for (int i = 0; props[i].name; i++) {
         lua_pushinteger(L, i + 1);
@@ -1106,7 +1106,7 @@ static const struct fn_entry main_fns[] = {
     {0}
 };
 
-static struct fn_entry utils_fns[] = {
+static const struct fn_entry utils_fns[] = {
     FN_ENTRY(readdir),
     FN_ENTRY(split_path),
     FN_ENTRY(join_path),

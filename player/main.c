@@ -30,7 +30,6 @@
 
 #include "misc/dispatch.h"
 #include "osdep/io.h"
-#include "osdep/priority.h"
 #include "osdep/terminal.h"
 #include "osdep/timer.h"
 
@@ -236,7 +235,7 @@ static bool handle_help_options(struct MPContext *mpctx)
         opt_exit = 1;
     }
 #if HAVE_ENCODING
-    if (encode_lavc_showhelp(log, &opts->encode_output))
+    if (encode_lavc_showhelp(log, opts->encode_opts))
         opt_exit = 1;
 #endif
     return opt_exit;
@@ -303,7 +302,6 @@ struct MPContext *mp_create(void)
 
     struct MPContext *mpctx = talloc(NULL, MPContext);
     *mpctx = (struct MPContext){
-        .last_dvb_step = 1,
         .last_chapter = -2,
         .term_osd_contents = talloc_strdup(mpctx, ""),
         .osd_progbar = { .type = -1 },
@@ -384,8 +382,8 @@ int mp_initialize(struct MPContext *mpctx)
     mp_dispatch_set_wakeup_fn(mpctx->dispatch, wakeup_playloop, mpctx);
 
 #if HAVE_ENCODING
-    if (opts->encode_output.file && *opts->encode_output.file) {
-        mpctx->encode_lavc_ctx = encode_lavc_init(&opts->encode_output,
+    if (opts->encode_opts->file && opts->encode_opts->file[0]) {
+        mpctx->encode_lavc_ctx = encode_lavc_init(opts->encode_opts,
                                                   mpctx->global);
         if(!mpctx->encode_lavc_ctx) {
             MP_INFO(mpctx, "Encoding initialization failed.");
@@ -398,6 +396,8 @@ int mp_initialize(struct MPContext *mpctx)
         m_config_set_option0(mpctx->mconfig, "force-window", "no");
         m_config_set_option0(mpctx->mconfig, "gapless-audio", "yes");
         m_config_set_option0(mpctx->mconfig, "resume-playback", "no");
+        m_config_set_option0(mpctx->mconfig, "load-scripts", "no");
+        m_config_set_option0(mpctx->mconfig, "osc", "no");
         mp_input_enable_section(mpctx->input, "encode", MP_INPUT_EXCLUSIVE);
     }
 #endif
@@ -435,6 +435,7 @@ int mp_initialize(struct MPContext *mpctx)
     if (opts->force_vo) {
         opts->fixed_vo = 1;
         mpctx->video_out = init_best_video_out(mpctx->global, mpctx->input,
+                                               mpctx->osd,
                                                mpctx->encode_lavc_ctx);
         if (!mpctx->video_out) {
             MP_FATAL(mpctx, "Error opening/initializing "
@@ -520,7 +521,8 @@ int mpv_main(int argc, char *argv[])
     }
 
 #if HAVE_PRIORITY
-    set_priority();
+    if (opts->w32_priority > 0)
+        SetPriorityClass(GetCurrentProcess(), opts->w32_priority);
 #endif
 
     if (mp_initialize(mpctx) < 0)

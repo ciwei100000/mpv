@@ -427,42 +427,37 @@ OPTIONS
     on the situation, either of these might be slower than the other method.
     This option allows control over this.
 
-``--cdda=<option1:option2>``
-    This option can be used to tune the CD Audio reading feature of mpv.
+``--cdda-...``
+    These options can be used to tune the CD Audio reading feature of mpv.
 
-    Available options are:
+``--cdda-speed=<value>``
+    Set CD spin speed.
 
-    ``speed=<value>``
-        Set CD spin speed.
+``--cdda-paranoia=<0-2>``
+    Set paranoia level. Values other than 0 seem to break playback of
+    anything but the first track.
 
-    ``paranoia=<0-2>``
-        Set paranoia level. Values other than 0 seem to break playback of
-        anything but the first track.
+    :0: disable checking (default)
+    :1: overlap checking only
+    :2: full data correction and verification
 
-        :0: disable checking (default)
-        :1: overlap checking only
-        :2: full data correction and verification
+``--cdda-sector-size=<value>``
+    Set atomic read size.
 
-    ``generic-dev=<value>``
-        Use specified generic SCSI device.
+``--cdda-overlap=<value>``
+    Force minimum overlap search during verification to <value> sectors.
 
-    ``sector-size=<value>``
-        Set atomic read size.
+``--cdda-toc-bias``
+    Assume that the beginning offset of track 1 as reported in the TOC
+    will be addressed as LBA 0. Some discs need this for getting track
+    boundaries correctly.
 
-    ``overlap=<value>``
-        Force minimum overlap search during verification to <value> sectors.
+``--cdda-toc-offset=<value>``
+    Add ``<value>`` sectors to the values reported when addressing tracks.
+    May be negative.
 
-    ``toc-bias``
-        Assume that the beginning offset of track 1 as reported in the TOC
-        will be addressed as LBA 0. Some discs need this for getting track
-        boundaries correctly.
-
-    ``toc-offset=<value>``
-        Add ``<value>`` sectors to the values reported when addressing tracks.
-        May be negative.
-
-    ``(no-)skip``
-        (Never) accept imperfect data reconstruction.
+``--cdda-skip=<es|no``
+    (Never) accept imperfect data reconstruction.
 
 ``--cdrom-device=<path>``
     Specify the CD-ROM device (default: ``/dev/cdrom``).
@@ -728,10 +723,6 @@ OPTIONS
 ``--demuxer-rawvideo-size=<value>``
     Frame size in bytes when using ``--demuxer=rawvideo``.
 
-``--doubleclick-time=<milliseconds>``
-    Time in milliseconds to recognize two consecutive button presses as a
-    double-click (default: 300).
-
 ``--dump-stats=<filename>``
     Write certain statistics to the given file. The file is truncated on
     opening. The file will contain raw samples, each with a timestamp. To
@@ -740,18 +731,17 @@ OPTIONS
 
     This option is useful for debugging only.
 
-``--dvbin=<options>``
-    Pass the following parameters to the DVB input module, in order to
-    override the default ones:
+``--dvbin-card=<1-4>``
+    Specifies using card number 1-4 (default: 1).
 
-    :card=<1-4>:      Specifies using card number 1-4 (default: 1).
-    :file=<filename>: Instructs mpv to read the channels list from
-                      ``<filename>``. Default is
-                      ``~/.mpv/channels.conf.{sat,ter,cbl,atsc}`` (based
-                      on your card type) or ``~/.mpv/channels.conf`` as a
-                      last resort.
-    :timeout=<1-30>:  Maximum number of seconds to wait when trying to tune a
-                      frequency before giving up (default: 30).
+``--dvbin-file=<filename>``
+    Instructs mpv to read the channels list from ``<filename>``. Default is
+    ``~/.mpv/channels.conf.{sat,ter,cbl,atsc}`` (based on your card type) or
+    ``~/.mpv/channels.conf`` as a last resort.
+
+``--dvbin-timeout=<1-30>``
+    Maximum number of seconds to wait when trying to tune a frequency before
+    giving up (default: 30).
 
 ``--dvd-device=<path>``
     Specify the DVD device or .iso filename (default: ``/dev/dvd``). You can
@@ -836,15 +826,6 @@ OPTIONS
     Display only forced subtitles for the DVD subtitle stream selected by e.g.
     ``--slang``.
 
-``--forceidx``
-    Force index rebuilding. Useful for files with broken index (A/V desync,
-    etc). This will enable seeking in files where seeking was not possible.
-
-    .. note::
-
-        This option only works if the underlying media supports seeking
-        (i.e. not with stdin, pipe, etc).
-
 ``--fps=<float>``
     Override video framerate. Useful if the original value is wrong or missing.
 
@@ -901,26 +882,37 @@ OPTIONS
     Adjust the gamma of the video signal (default: 0). Not supported by all
     video output drivers.
 
-``--gapless-audio``
+``--gapless-audio=<no|yes|weak``
     Try to play consecutive audio files with no silence or disruption at the
-    point of file change. This feature is implemented in a simple manner and
-    relies on audio output device buffering to continue playback while moving
-    from one file to another. If playback of the new file starts slowly, for
-    example because it is played from a remote network location or because you
-    have specified cache settings that require time for the initial cache
-    fill, then the buffered audio may run out before playback of the new file
-    can start.
+    point of file change. Default: ``weak``.
+
+    :no:    Disable gapless audio.
+    :yes:   The audio device is opened using parameters chosen according to the
+            first file played and is then kept open for gapless playback. This
+            means that if the first file for example has a low sample rate, then
+            the following files may get resampled to the same low sample rate,
+            resulting in reduced sound quality. If you play files with different
+            parameters, consider using options such as ``--audio-samplerate``
+            and ``--audio-format`` to explicitly select what the shared output
+            format will be.
+    :weak:  Normally, the audio device is kept open (using the format it was
+            first initialized with). If the audio format the decoder output
+            changes, the audio device is closed and reopened. This means that
+            you will normally get gapless audio with files that were encoded
+            using the same settings, but might not be gapless in other cases.
+            (Unlike with ``yes``, you don't have to worry about corner cases
+            like the first file setting a very low quality output format, and
+            ruining the playback of higher quality files that follow.)
 
     .. note::
 
-        The audio device is opened using parameters chosen according to the
-        first file played and is then kept open for gapless playback. This means
-        that if the first file for example has a low sample rate, then the
-        following files may get resampled to the same low sample rate, resulting
-        in reduced sound quality. If you play files with different parameters,
-        consider using options such as ``--audio-samplerate`` and
-        ``--audio-format`` to explicitly select what the shared output format
-        will be.
+        This feature is implemented in a simple manner and relies on audio
+        output device buffering to continue playback while moving from one file
+        to another. If playback of the new file starts slowly, for example
+        because it is played from a remote network location or because you have
+        specified cache settings that require time for the initial cache fill,
+        then the buffered audio may run out before playback of the new file
+        can start.
 
 ``--geometry=<[W[xH]][+-x+-y]>``, ``--geometry=<x:y>``
     Adjust the initial window position or size. ``W`` and ``H`` set the window
@@ -1128,11 +1120,13 @@ OPTIONS
     Mostly useful in slave mode, where mpv can be controlled through input
     commands (see also ``--slave-broken``).
 
-``--idx``
-    Rebuilds index of files if no index was found, allowing seeking. Useful
-    with broken/incomplete downloads or badly created files. Now this is done
-    automatically by the demuxers used for most video formats, meaning that
-    this switch has no effect in the typical case. See also ``--forceidx``.
+``--index=<mode>``
+    Controls how to seek in files. Note that if the index is missing from a
+    file, it will be built on the fly by default, so you don't need to change
+    this. But it might help with some broken files.
+
+    :default:   use an index if the file has one, or build it if missing
+    :recreate:  don't read or use the file's index
 
     .. note::
 
@@ -1161,8 +1155,19 @@ OPTIONS
 ``--input-cmdlist``
     Prints all commands that can be bound to keys.
 
+``--input-doubleclick-time=<milliseconds>``
+    Time in milliseconds to recognize two consecutive button presses as a
+    double-click (default: 300).
+
 ``--input-keylist``
     Prints all keys that can be bound to commands.
+
+``--input-key-fifo-size=<2-65000>``
+    Specify the size of the FIFO that buffers key events (default: 7). If it
+    is too small some events may be lost. The main disadvantage of setting it
+    to a very large value is that if you hold down a key triggering some
+    particularly slow command then the player may be unresponsive while it
+    processes all the queued commands.
 
 ``--input-test``
     Input test mode. Instead of executing commands on key presses, mpv
@@ -1242,13 +1247,6 @@ OPTIONS
         Explicitly skipping to the next file or skipping beyond the last
         chapter will terminate playback as well, even if ``--keep-open`` is
         given.
-
-``--key-fifo-size=<2-65000>``
-    Specify the size of the FIFO that buffers key events (default: 7). If it
-    is too small some events may be lost. The main disadvantage of setting it
-    to a very large value is that if you hold down a key triggering some
-    particularly slow command then the player may be unresponsive while it
-    processes all the queued commands.
 
 ``--length=<relative time>``
     Stop after a given time relative to the start time.
@@ -1680,8 +1678,8 @@ OPTIONS
     You can also try to use ``--no-correct-pts`` for files with completely
     broken timestamps.
 
-``--pvr=<option1:option2:...>``
-    This option tunes various encoding properties of the PVR capture module.
+``--pvr-...``
+    These options tune various encoding properties of the PVR capture module.
     It has to be used with any hardware MPEG encoder based card supported by
     the V4L2 driver. The Hauppauge WinTV PVR-150/250/350/500 and all IVTV
     based cards are known as PVR capture cards. Be aware that only Linux
@@ -1689,52 +1687,51 @@ OPTIONS
     For hardware capture of an MPEG stream and watching it with mpv, use
     ``pvr://`` as a movie URL.
 
-    Available options are:
 
-    ``aspect=<0-3>``
-        Specify input aspect ratio:
+``--pvr-aspect=<0-3>``
+    Specify input aspect ratio:
 
-        :0: 1:1
-        :1: 4:3 (default)
-        :2: 16:9
-        :3: 2.21:1
+    :0: 1:1
+    :1: 4:3 (default)
+    :2: 16:9
+    :3: 2.21:1
 
-    ``arate=<32000-48000>``
-        Specify encoding audio rate (default: 48000 Hz, available: 32000,
-        44100 and 48000 Hz).
+``--pvr-arate=<32000-48000>``
+    Specify encoding audio rate (default: 48000 Hz, available: 32000,
+    44100 and 48000 Hz).
 
-    ``alayer=<1-3>``
-        Specify MPEG audio layer encoding (default: 2).
+``--pvr-alayer=<1-3>``
+    Specify MPEG audio layer encoding (default: 2).
 
-    ``abitrate=<32-448>``
-        Specify audio encoding bitrate in kbps (default: 384).
+``--pvr-abitrate=<32-448>``
+    Specify audio encoding bitrate in kbps (default: 384).
 
-    ``amode=<value>``
-        Specify audio encoding mode. Available preset values are 'stereo',
-        'joint_stereo', 'dual' and 'mono' (default: stereo).
+``--pvr-amode=<value>``
+    Specify audio encoding mode. Available preset values are 'stereo',
+    'joint_stereo', 'dual' and 'mono' (default: stereo).
 
-    ``vbitrate=<value>``
-        Specify average video bitrate encoding in Mbps (default: 6).
+``--pvr-vbitrate=<value>``
+    Specify average video bitrate encoding in Mbps (default: 6).
 
-    ``vmode=<value>``
-        Specify video encoding mode:
+``--pvr-vmode=<value>``
+    Specify video encoding mode:
 
-        :vbr: Variable BitRate (default)
-        :cbr: Constant BitRate
+    :vbr: Variable BitRate (default)
+    :cbr: Constant BitRate
 
-    ``vpeak=<value>``
-        Specify peak video bitrate encoding in Mbps (only useful for VBR
-        encoding, default: 9.6).
+``--pvr-vpeak=<value>``
+    Specify peak video bitrate encoding in Mbps (only useful for VBR
+    encoding, default: 9.6).
 
-    ``fmt=<value>``
-        Choose an MPEG format for encoding:
+``--pvr-fmt=<value>``
+    Choose an MPEG format for encoding:
 
-        :ps:    MPEG-2 Program Stream (default)
-        :ts:    MPEG-2 Transport Stream
-        :mpeg1: MPEG-1 System Stream
-        :vcd:   Video CD compatible stream
-        :svcd:  Super Video CD compatible stream
-        :dvd:   DVD compatible stream
+    :ps:    MPEG-2 Program Stream (default)
+    :ts:    MPEG-2 Transport Stream
+    :mpeg1: MPEG-1 System Stream
+    :vcd:   Video CD compatible stream
+    :svcd:  Super Video CD compatible stream
+    :dvd:   DVD compatible stream
 
 ``--quiet``
     Make console output less verbose; in particular, prevents the status line
@@ -2116,20 +2113,6 @@ OPTIONS
 
     Disabled by default.
 
-``--ssf=<mode>``
-    Specifies software scaler parameters.
-
-    :lgb=<0-100>:   gaussian blur filter (luma)
-    :cgb=<0-100>:   gaussian blur filter (chroma)
-    :ls=<-100-100>: sharpen filter (luma)
-    :cs=<-100-100>: sharpen filter (chroma)
-    :chs=<h>:       chroma horizontal shifting
-    :cvs=<v>:       chroma vertical shifting
-
-    .. admonition:: Example
-
-        ``--vf=scale --ssf=lgb=3.0``
-
 ``--sstep=<sec>``
     Skip <sec> seconds after every frame.
 
@@ -2295,6 +2278,14 @@ OPTIONS
         This affects ASS subtitles as well, and may lead to incorrect subtitle
         rendering. Use with care, or use ``--sub-text-font-size`` instead.
 
+``--sub-scale-with-window=yes|no``
+    Make the subtitle font size relative to the window, instead of the video.
+    This is useful if you always want the same font size, even if the video
+    doesn't covert the window fully, e.g. because screen aspect and window
+    aspect mismatch (and the player adds black bars).
+
+    Like ``--sub-scale``, this can break ASS subtitles.
+
 ``--sub-speed=<0.1-10.0>``
     Multiply the subtitle event timestamps with the given value. Can be used
     to fix the playback speed for frame-based subtitle formats. Works for
@@ -2305,29 +2296,32 @@ OPTIONS
         `--sub-speed=25/23.976`` plays frame based subtitles which have been
         loaded assuming a framerate of 23.976 at 25 FPS.
 
-``--sws=<n>``
+``--sws-scaler=<name>``
     Specify the software scaler algorithm to be used with ``--vf=scale``. This
     also affects video output drivers which lack hardware acceleration,
     e.g. ``x11``. See also ``--vf=scale``.
 
-    Available types are:
+    To get a list of available scalers, run ``--sws-scaler=help``.
 
-    :0:  fast bilinear
-    :1:  bilinear
-    :2:  bicubic (good quality) (default)
-    :3:  experimental
-    :4:  nearest neighbor (bad quality)
-    :5:  area
-    :6:  luma bicubic / chroma bilinear
-    :7:  gauss
-    :8:  sincR
-    :9:  lanczos
-    :10: natural bicubic spline
+    Default: ``bicubic``.
 
-    .. note::
+``--sws-lgb=<0-100>``
+    Software scaler gaussian blur filter (luma). See ``--sws-scaler``.
 
-        Some ``--sws`` options are tunable. The description of the ``scale``
-        video filter has further information.
+``--sws-cgb=<0-100>``
+    Software scaler gaussian blur filter (chroma). See ``--sws-scaler``.
+
+``--sws-ls=<-100-100>``
+    Software scaler sharpen filter (luma). See ``--sws-scaler``.
+
+``--sws-cs=<-100-100>``
+    Software scaler sharpen filter (chroma). See ``--sws-scaler``.
+
+``--sws-chs=<h>``
+    Software scaler chroma horizontal shifting. See ``--sws-scaler``.
+
+``--sws-cvs=<v>``
+    Software scaler chroma vertical shifting. See ``--sws-scaler``.
 
 ``--term-osd, --no-term-osd``, ``--term-osd=force``
     Display OSD messages on the console when no video output is available.
@@ -2384,192 +2378,184 @@ OPTIONS
     Verify peer certificates when using TLS (e.g. with ``https://...``).
      (Silently fails with older ffmpeg or libav versions.)
 
-``--tv=<option1:option2:...>``
-    This option tunes various properties of the TV capture module. For
+``--tv-...``
+    These options tune various properties of the TV capture module. For
     watching TV with mpv, use ``tv://`` or ``tv://<channel_number>`` or
-    even ``tv://<channel_name>`` (see option ``channels`` for ``channel_name``
+    even ``tv://<channel_name>`` (see option ``tv-channels`` for ``channel_name``
     below) as a movie URL. You can also use ``tv:///<input_id>`` to start
     watching a movie from a composite or S-Video input (see option ``input`` for
     details).
 
-    Available options are:
+``--no-tv-audio``
+    no sound
 
-    ``noaudio``
-        no sound
+``--tv-automute=<0-255> (v4l and v4l2 only)``
+    If signal strength reported by device is less than this value, audio
+    and video will be muted. In most cases automute=100 will be enough.
+    Default is 0 (automute disabled).
 
-    ``automute=<0-255> (v4l and v4l2 only)``
-        If signal strength reported by device is less than this value, audio
-        and video will be muted. In most cases automute=100 will be enough.
-        Default is 0 (automute disabled).
+``--tv-driver=<value>``
+    See ``--tv=driver=help`` for a list of compiled-in TV input drivers.
+    available: dummy, v4l2 (default: autodetect)
 
-    ``driver=<value>``
-        See ``--tv=driver=help`` for a list of compiled-in TV input drivers.
-        available: dummy, v4l2 (default: autodetect)
+``--tv-device=<value>``
+    Specify TV device (default: ``/dev/video0``).
 
-    ``device=<value>``
-        Specify TV device (default: ``/dev/video0``).
+``--tv-input=<value>``
+    Specify input (default: 0 (TV), see console output for available
+    inputs).
 
-    ``input=<value>``
-        Specify input (default: 0 (TV), see console output for available
-        inputs).
+``--tv-freq=<value>``
+    Specify the frequency to set the tuner to (e.g. 511.250). Not
+    compatible with the channels parameter.
 
-    ``freq=<value>``
-        Specify the frequency to set the tuner to (e.g. 511.250). Not
-        compatible with the channels parameter.
+``--tv-outfmt=<value>``
+    Specify the output format of the tuner with a preset value supported
+    by the V4L driver (YV12, UYVY, YUY2, I420) or an arbitrary format given
+    as hex value.
 
-    ``outfmt=<value>``
-        Specify the output format of the tuner with a preset value supported
-        by the V4L driver (YV12, UYVY, YUY2, I420) or an arbitrary format given
-        as hex value.
+``--tv-width=<value>``
+    output window width
 
-    ``width=<value>``
-        output window width
+``--tv-height=<value>``
+    output window height
 
-    ``height=<value>``
-        output window height
+``--tv-fps=<value>``
+    framerate at which to capture video (frames per second)
 
-    ``fps=<value>``
-        framerate at which to capture video (frames per second)
+``--tv-buffersize=<value>``
+    maximum size of the capture buffer in megabytes (default: dynamical)
 
-    ``buffersize=<value>``
-        maximum size of the capture buffer in megabytes (default: dynamical)
+``--tv-norm=<value>``
+    See the console output for a list of all available norms, also see the
+    ``normid`` option below.
 
-    ``norm=<value>``
-        See the console output for a list of all available norms, also see the
-        ``normid`` option below.
+``--tv-normid=<value> (v4l2 only)``
+    Sets the TV norm to the given numeric ID. The TV norm depends on the
+    capture card. See the console output for a list of available TV norms.
 
-    ``normid=<value> (v4l2 only)``
-        Sets the TV norm to the given numeric ID. The TV norm depends on the
-        capture card. See the console output for a list of available TV norms.
+``--tv-channel=<value>``
+    Set tuner to <value> channel.
 
-    ``channel=<value>``
-        Set tuner to <value> channel.
+``--tv-chanlist=<value>``
+    available: argentina, australia, china-bcast, europe-east,
+    europe-west, france, ireland, italy, japan-bcast, japan-cable,
+    newzealand, russia, southafrica, us-bcast, us-cable, us-cable-hrc
 
-    ``chanlist=<value>``
-        available: argentina, australia, china-bcast, europe-east,
-        europe-west, france, ireland, italy, japan-bcast, japan-cable,
-        newzealand, russia, southafrica, us-bcast, us-cable, us-cable-hrc
+``--tv-channels=<chan>-<name>[=<norm>],<chan>-<name>[=<norm>],...``
+    Set names for channels.
 
-    ``channels=<chan>-<name>[=<norm>],<chan>-<name>[=<norm>],...``
-        Set names for channels.
+    .. note::
 
-        .. note::
+        If <chan> is an integer greater than 1000, it will be treated as
+        frequency (in kHz) rather than channel name from frequency table.
+        Use _ for spaces in names (or play with quoting ;-) ). The channel
+        names will then be written using OSD, and the slave commands
+        ``tv_step_channel``, ``tv_set_channel`` and ``tv_last_channel``
+        will be usable for a remote control (see LIRC). Not compatible with
+        the ``frequency`` parameter.
 
-            If <chan> is an integer greater than 1000, it will be treated as
-            frequency (in kHz) rather than channel name from frequency table.
-            Use _ for spaces in names (or play with quoting ;-) ). The channel
-            names will then be written using OSD, and the slave commands
-            ``tv_step_channel``, ``tv_set_channel`` and ``tv_last_channel``
-            will be usable for a remote control (see LIRC). Not compatible with
-            the ``frequency`` parameter.
+    .. note::
 
-        .. note::
+        The channel number will then be the position in the 'channels'
+        list, beginning with 1.
 
-            The channel number will then be the position in the 'channels'
-            list, beginning with 1.
+    .. admonition:: Examples
 
-        .. admonition:: Examples
+        ``tv://1``, ``tv://TV1``, ``tv_set_channel 1``,
+        ``tv_set_channel TV1``
 
-            ``tv://1``, ``tv://TV1``, ``tv_set_channel 1``,
-            ``tv_set_channel TV1``
+``--tv-[brightness|contrast|hue|saturation]=<-100-100>``
+    Set the image equalizer on the card.
 
-    ``[brightness|contrast|hue|saturation]=<-100-100>``
-        Set the image equalizer on the card.
+``--tv-audiorate=<value>``
+    Set input audio sample rate.
 
-    ``audiorate=<value>``
-        Set input audio sample rate.
+``--tv-forceaudio``
+    Capture audio even if there are no audio sources reported by v4l.
 
-    ``forceaudio``
-        Capture audio even if there are no audio sources reported by v4l.
+``--tv-alsa``
+    Capture from ALSA.
 
-    ``alsa``
-        Capture from ALSA.
+``--tv-amode=<0-3>``
+    Choose an audio mode:
 
-    ``amode=<0-3>``
-        Choose an audio mode:
+    :0: mono
+    :1: stereo
+    :2: language 1
+    :3: language 2
 
-        :0: mono
-        :1: stereo
-        :2: language 1
-        :3: language 2
+``--tv-forcechan=<1-2>``
+    By default, the count of recorded audio channels is determined
+    automatically by querying the audio mode from the TV card. This option
+    allows forcing stereo/mono recording regardless of the amode option
+    and the values returned by v4l. This can be used for troubleshooting
+    when the TV card is unable to report the current audio mode.
 
-    ``forcechan=<1-2>``
-        By default, the count of recorded audio channels is determined
-        automatically by querying the audio mode from the TV card. This option
-        allows forcing stereo/mono recording regardless of the amode option
-        and the values returned by v4l. This can be used for troubleshooting
-        when the TV card is unable to report the current audio mode.
+``--tv-adevice=<value>``
+    Set an audio device. <value> should be ``/dev/xxx`` for OSS and a
+    hardware ID for ALSA. You must replace any ':' by a '.' in the
+    hardware ID for ALSA.
 
-    ``adevice=<value>``
-        Set an audio device. <value> should be ``/dev/xxx`` for OSS and a
-        hardware ID for ALSA. You must replace any ':' by a '.' in the
-        hardware ID for ALSA.
+``--tv-audioid=<value>``
+    Choose an audio output of the capture card, if it has more than one.
 
-    ``audioid=<value>``
-        Choose an audio output of the capture card, if it has more than one.
+``--tv-[volume|bass|treble|balance]=<0-100>``
+    These options set parameters of the mixer on the video capture card.
+    They will have no effect, if your card does not have one. For v4l2 50
+    maps to the default value of the control, as reported by the driver.
 
-    ``[volume|bass|treble|balance]=<0-100>``
-        These options set parameters of the mixer on the video capture card.
-        They will have no effect, if your card does not have one. For v4l2 50
-        maps to the default value of the control, as reported by the driver.
+``--tv-gain=<0-100>``
+    Set gain control for video devices (usually webcams) to the desired
+    value and switch off automatic control. A value of 0 enables automatic
+    control. If this option is omitted, gain control will not be modified.
 
-    ``gain=<0-100>``
-        Set gain control for video devices (usually webcams) to the desired
-        value and switch off automatic control. A value of 0 enables automatic
-        control. If this option is omitted, gain control will not be modified.
+``--tv-immediatemode=<bool>``
+    A value of 0 means capture and buffer audio and video together. A
+    value of 1 (default) means to do video capture only and let the audio
+    go through a loopback cable from the TV card to the sound card.
 
-    ``immediatemode=<bool>``
-        A value of 0 means capture and buffer audio and video together. A
-        value of 1 (default) means to do video capture only and let the audio
-        go through a loopback cable from the TV card to the sound card.
+``--tv-mjpeg``
+    Use hardware MJPEG compression (if the card supports it). When using
+    this option, you do not need to specify the width and height of the
+    output window, because mpv will determine it automatically from
+    the decimation value (see below).
 
-    ``mjpeg``
-        Use hardware MJPEG compression (if the card supports it). When using
-        this option, you do not need to specify the width and height of the
-        output window, because mpv will determine it automatically from
-        the decimation value (see below).
+``--tv-decimation=<1|2|4>``
+    choose the size of the picture that will be compressed by hardware
+    MJPEG compression:
 
-    ``decimation=<1|2|4>``
-        choose the size of the picture that will be compressed by hardware
-        MJPEG compression:
+    :1: full size
 
-        :1: full size
+        - 704x576 PAL
+        - 704x480 NTSC
 
-            - 704x576 PAL
-            - 704x480 NTSC
+    :2: medium size
 
-        :2: medium size
+        - 352x288 PAL
+        - 352x240 NTSC
 
-            - 352x288 PAL
-            - 352x240 NTSC
+    :4: small size
 
-        :4: small size
+        - 176x144 PAL
+        - 176x120 NTSC
 
-            - 176x144 PAL
-            - 176x120 NTSC
+``--tv-quality=<0-100>``
+    Choose the quality of the JPEG compression (< 60 recommended for full
+    size).
 
-    ``quality=<0-100>``
-        Choose the quality of the JPEG compression (< 60 recommended for full
-        size).
+``--tv-scan-autostart``
+    Begin channel scanning immediately after startup (default: disabled).
 
-``--tv-scan=<option1:option2:...>``
-    Tune the TV channel scanner. mpv will also print value for
-    ``--tv=channels=`` option, including existing and just found channels.
+``--tv-scan-period=<0.1-2.0>``
+    Specify delay in seconds before switching to next channel (default:
+    0.5). Lower values will cause faster scanning, but can detect inactive
+    TV channels as active.
 
-    Available suboptions are:
-
-    ``autostart``
-        Begin channel scanning immediately after startup (default: disabled).
-
-    ``period=<0.1-2.0>``
-        Specify delay in seconds before switching to next channel (default:
-        0.5). Lower values will cause faster scanning, but can detect inactive
-        TV channels as active.
-
-    ``threshold=<1-100>``
-        Threshold value for the signal strength (in percent), as reported by
-        the device (default: 50). A signal strength higher than this value will
-        indicate that the currently scanning channel is active.
+``--tv-scan-threshold=<1-100>``
+    Threshold value for the signal strength (in percent), as reported by
+    the device (default: 50). A signal strength higher than this value will
+    indicate that the currently scanning channel is active.
 
 ``--use-filedir-conf``
     Look for a file-specific configuration file in the same directory as the

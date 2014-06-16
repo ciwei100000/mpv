@@ -47,7 +47,9 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 #include "osdep/io.h"
 
 #include "stream.h"
+#include "options/m_config.h"
 #include "options/m_option.h"
+#include "options/options.h"
 #include "options/path.h"
 
 #include "dvbin.h"
@@ -61,14 +63,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 //TODO: CAMBIARE list_ptr e da globale a per_priv
 
-
-static dvb_priv_t stream_defaults = {
-        .cfg_prog = "",
-        .cfg_card = 1,
-        .cfg_timeout = 30,
-};
-
-#define OPT_BASE_STRUCT dvb_priv_t
+#define OPT_BASE_STRUCT struct dvb_params
 
 /// URL definition
 static const m_option_t stream_params[] = {
@@ -77,16 +72,20 @@ static const m_option_t stream_params[] = {
     {0}
 };
 
-const m_option_t dvbin_opts_conf[] = {
-        {"prog", &stream_defaults.cfg_prog, CONF_TYPE_STRING, 0, 0 ,0, NULL},
-        {"card", &stream_defaults.cfg_card, CONF_TYPE_INT, M_OPT_RANGE, 1, 4, NULL},
-        {"timeout",  &stream_defaults.cfg_timeout,  CONF_TYPE_INT, M_OPT_RANGE, 1, 30, NULL},
-
-        {NULL, NULL, 0, 0, 0, 0, NULL}
+const struct m_sub_options stream_dvb_conf = {
+    .opts = (const m_option_t[]) {
+        OPT_STRING("prog", cfg_prog, 0),
+        OPT_INTRANGE("card", cfg_card, 0, 1, 4),
+        OPT_INTRANGE("timeout",  cfg_timeout, 0, 1, 30),
+        {0}
+    },
+    .size = sizeof(struct dvb_params),
+    .defaults = &(const struct dvb_params){
+        .cfg_prog = "",
+        .cfg_card = 1,
+        .cfg_timeout = 30,
+    },
 };
-
-
-
 
 static dvb_channels_list *dvb_get_channels(struct mp_log *log, char *filename, int type)
 {
@@ -550,13 +549,26 @@ int dvb_step_channel(stream_t *stream, int dir)
                 return 0;
         }
 
-        new_current = (list->NUM_CHANNELS + list->current + (dir == DVB_CHANNEL_HIGHER ? 1 : -1)) % list->NUM_CHANNELS;
+        new_current = (list->NUM_CHANNELS + list->current + (dir >= 0 ? 1 : -1)) % list->NUM_CHANNELS;
 
         return dvb_set_channel(stream, priv->card, new_current);
 }
 
-
-
+static int dvbin_stream_control(struct stream *s, int cmd, void *arg)
+{
+    int r;
+    switch (cmd) {
+    case STREAM_CTRL_DVB_SET_CHANNEL: {
+        int *iarg = arg;
+        r = dvb_set_channel(s, iarg[1], iarg[0]);
+        return r ? STREAM_OK : STREAM_ERROR;
+    }
+    case STREAM_CTRL_DVB_STEP_CHANNEL:
+        r = dvb_step_channel(s, *(int *)arg);
+        return r ? STREAM_OK : STREAM_ERROR;
+    }
+    return STREAM_UNSUPPORTED;
+}
 
 static void dvbin_close(stream_t *stream)
 {
@@ -692,6 +704,7 @@ static int dvb_open(stream_t *stream)
         stream->type = STREAMTYPE_DVB;
         stream->fill_buffer = dvb_streaming_read;
         stream->close = dvbin_close;
+        stream->control = dvbin_stream_control;
 
         stream->demuxer = "lavf";
         stream->lavf_type = "mpegts";
@@ -802,16 +815,19 @@ dvb_config_t *dvb_get_config(stream_t *stream)
         return conf;
 }
 
-
+static void *get_defaults(stream_t *st)
+{
+    return m_sub_options_copy(st, &stream_dvb_conf, st->opts->stream_dvb_opts);
+}
 
 const stream_info_t stream_info_dvb = {
     .name = "dvbin",
     .open = dvb_open,
-    .protocols = (const char*[]){ "dvb", NULL },
+    .protocols = (const char*const[]){ "dvb", NULL },
     .priv_size = sizeof(dvb_priv_t),
-    .priv_defaults = &stream_defaults,
+    .get_defaults = get_defaults,
     .options = stream_params,
-    .url_options = (const char*[]){
+    .url_options = (const char*const[]){
         "hostname=prog",
         "username=card",
         NULL

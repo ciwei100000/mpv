@@ -218,6 +218,7 @@ typedef struct MPContext {
     struct mixer *mixer;
     struct ao *ao;
     double ao_pts;
+    struct mp_audio *ao_decoder_fmt; // for weak gapless audio check
     struct mp_audio_buffer *ao_buffer;  // queued audio; passed to ao_play() later
 
     struct vo *video_out;
@@ -423,7 +424,7 @@ void stream_dump(struct MPContext *mpctx);
 // osd.c
 void print_status(struct MPContext *mpctx);
 void set_osd_bar(struct MPContext *mpctx, int type, const char* name,
-                 double min, double max, double val);
+                 double min, double max, double neutral, double val);
 void set_osd_msg(struct MPContext *mpctx, int level, int time,
                  const char* fmt, ...) PRINTF_ATTRIBUTE(4,5);
 void set_osd_function(struct MPContext *mpctx, int osd_function);

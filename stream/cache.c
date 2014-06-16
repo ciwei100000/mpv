@@ -567,6 +567,7 @@ static int cache_fill_buffer(struct stream *cache, char *buffer, int max_len)
                 break;
             if (s->eof && s->read_filepos >= s->max_filepos && s->reads >= retry)
                 break;
+            s->idle = false;
             if (cache_wakeup_and_wait(s, &retry_time) == CACHE_INTERRUPTED)
                 break;
         }
@@ -681,8 +682,8 @@ int stream_cache_init(stream_t *cache, stream_t *stream,
         return -1;
     }
 
-    MP_INFO(cache, "Cache size set to %" PRId64 " KiB\n",
-            s->buffer_size / 1024);
+    MP_VERBOSE(cache, "Cache size set to %" PRId64 " KiB\n",
+               s->buffer_size / 1024);
 
     pthread_mutex_init(&s->mutex, NULL);
     pthread_cond_init(&s->wakeup, NULL);

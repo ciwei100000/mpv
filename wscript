@@ -15,9 +15,15 @@ build_options = [
         'default': 'disable',
         'func': check_true
     }, {
+        'name': '--libmpv-static',
+        'desc': 'static library',
+        'default': 'disable',
+        'deps_neg': [ 'libmpv-shared' ],
+        'func': check_true
+    }, {
         'name': '--client-api-examples',
         'desc': 'build client API examples',
-        'deps': ['libmpv-shared'],
+        'deps_any': [ 'libmpv-shared', 'libmpv-static' ],
         'func': check_true
     }, {
         'name': '--static-build',
@@ -57,6 +63,11 @@ build_options = [
         'deps': [ 'dlopen' ],
         'default': 'disable',
         'func': check_true
+    }, {
+        'name': '--zsh-comp',
+        'desc': 'zsh completion',
+        'func': check_true,
+        'default': 'disable',
     }, {
         'name': '--macosx-bundle',
         'desc': 'compilation of a Mac OS X Application bundle',
@@ -308,7 +319,7 @@ If you really mean to compile without libass support use --disable-libass."
     }, {
         'name': '--lcms2',
         'desc': 'LCMS2 support',
-        'func': check_pkg_config('lcms2'),
+        'func': check_pkg_config('lcms2', '>= 2.6'),
     }, {
         'name': '--vapoursynth',
         'desc': 'VapourSynth filter bridge',

@@ -41,16 +41,16 @@ extern const struct sd_functions sd_microdvd;
 extern const struct sd_functions sd_lavf_srt;
 extern const struct sd_functions sd_lavc_conv;
 
-static const struct sd_functions *sd_list[] = {
+static const struct sd_functions *const sd_list[] = {
 #if HAVE_LIBASS
     &sd_ass,
 #endif
     &sd_lavc,
     &sd_movtext,
     &sd_srt,
-    &sd_microdvd,
     &sd_lavf_srt,
     &sd_lavc_conv,
+    &sd_microdvd,
     NULL
 };
 
@@ -474,7 +474,7 @@ bool sub_read_all_packets(struct dec_sub *sub, struct sh_stream *sh)
     if (sub_speed != 1.0)
         multiply_timings(subs, sub_speed);
 
-    if (!opts->suboverlap_enabled)
+    if (opts->sub_fix_timing)
         fix_overlaps_and_gaps(subs);
 
     if (sh->codec && strcmp(sh->codec, "microdvd") == 0) {

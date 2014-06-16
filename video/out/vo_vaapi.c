@@ -111,6 +111,8 @@ static const bool osd_formats[SUBBITMAP_COUNT] = {
     [SUBBITMAP_RGBA] = true,
 };
 
+static void draw_osd(struct vo *vo);
+
 static void flush_output_surfaces(struct priv *p)
 {
     for (int n = 0; n < MAX_OUTPUT_SURFACES; n++)
@@ -129,7 +131,8 @@ static void free_video_specific(struct priv *p)
     for (int n = 0; n < MAX_OUTPUT_SURFACES; n++)
         mp_image_unrefp(&p->swdec_surfaces[n]);
 
-    mp_image_pool_clear(p->pool);
+    if (p->pool)
+        mp_image_pool_clear(p->pool);
 }
 
 static bool alloc_swdec_surfaces(struct priv *p, int w, int h, int imgfmt)
@@ -282,6 +285,8 @@ static void draw_image(struct vo *vo, struct mp_image *mpi)
     }
 
     mp_image_setrefp(&p->output_surfaces[p->output_surface], mpi);
+
+    draw_osd(vo);
 }
 
 static struct mp_image *get_screenshot(struct priv *p)
@@ -406,9 +411,12 @@ error:
     ;
 }
 
-static void draw_osd(struct vo *vo, struct osd_state *osd)
+static void draw_osd(struct vo *vo)
 {
     struct priv *p = vo->priv;
+
+    struct mp_image *cur = p->output_surfaces[p->output_surface];
+    double pts = cur ? cur->pts : 0;
 
     if (!p->osd_format.fourcc)
         return;
@@ -424,7 +432,7 @@ static void draw_osd(struct vo *vo, struct osd_state *osd)
 
     for (int n = 0; n < MAX_OSD_PARTS; n++)
         p->osd_parts[n].active = false;
-    osd_draw(osd, *res, osd_get_vo_pts(osd), 0, osd_formats, draw_osd_cb, p);
+    osd_draw(vo->osd, *res, pts, 0, osd_formats, draw_osd_cb, p);
 }
 
 static int get_displayattribtype(const char *name)
@@ -523,6 +531,7 @@ static int control(struct vo *vo, uint32_t request, void *data)
     }
     case VOCTRL_REDRAW_FRAME:
         p->output_surface = p->visible_surface;
+        draw_osd(vo);
         return true;
     case VOCTRL_SCREENSHOT: {
         struct voctrl_screenshot_args *args = data;
@@ -653,7 +662,6 @@ const struct vo_driver video_out_vaapi = {
     .reconfig = reconfig,
     .control = control,
     .draw_image = draw_image,
-    .draw_osd = draw_osd,
     .flip_page = flip_page,
     .uninit = uninit,
     .priv_size = sizeof(struct priv),

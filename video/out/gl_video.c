@@ -55,7 +55,7 @@ static const char vo_opengl_shaders[] =
 
 // lscale/cscale arguments that map directly to shader filter routines.
 // Note that the convolution filters are not included in this list.
-static const char *fixed_scale_filters[] = {
+static const char *const fixed_scale_filters[] = {
     "bilinear",
     "bicubic_fast",
     "sharpen3",
@@ -73,7 +73,7 @@ struct lut_tex_format {
 // This must match the weightsN functions in the shader.
 // Each entry uses (size+3)/4 pixels per LUT entry, and size/pixels components
 // per pixel.
-struct lut_tex_format lut_tex_formats[] = {
+const struct lut_tex_format lut_tex_formats[] = {
     [2] =  {1, GL_RG16F,   GL_RG},
     [4] =  {1, GL_RGBA16F, GL_RGBA},
     [6] =  {2, GL_RGB16F,  GL_RGB},
@@ -153,7 +153,9 @@ struct gl_video {
     GLuint osd_programs[SUBBITMAP_COUNT];
     GLuint indirect_program, scale_sep_program, final_program;
 
+    struct osd_state *osd_state;
     struct mpgl_osd *osd;
+    double osd_pts;
 
     GLuint lut_3d_texture;
     bool use_lut_3d;
@@ -220,10 +222,10 @@ struct fmt_entry {
 
 // Very special formats, for which OpenGL happens to have direct support
 static const struct fmt_entry mp_to_gl_formats[] = {
-    {IMGFMT_RGB15,   GL_RGBA,  GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV},
-    {IMGFMT_RGB16,   GL_RGB,   GL_RGB,  GL_UNSIGNED_SHORT_5_6_5_REV},
-    {IMGFMT_BGR15,   GL_RGBA,  GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV},
-    {IMGFMT_BGR16,   GL_RGB,   GL_RGB,  GL_UNSIGNED_SHORT_5_6_5},
+    {IMGFMT_BGR555,  GL_RGBA,  GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV},
+    {IMGFMT_BGR565,  GL_RGB,   GL_RGB,  GL_UNSIGNED_SHORT_5_6_5_REV},
+    {IMGFMT_RGB555,  GL_RGBA,  GL_BGRA, GL_UNSIGNED_SHORT_1_5_5_5_REV},
+    {IMGFMT_RGB565,  GL_RGB,   GL_RGB,  GL_UNSIGNED_SHORT_5_6_5},
     {0},
 };
 
@@ -271,7 +273,7 @@ static const struct packed_fmt_entry mp_packed_formats[] = {
     {0},
 };
 
-static const char *osd_shaders[SUBBITMAP_COUNT] = {
+static const char *const osd_shaders[SUBBITMAP_COUNT] = {
     [SUBBITMAP_LIBASS] = "frag_osd_libass",
     [SUBBITMAP_RGBA] =   "frag_osd_rgba",
 };
@@ -300,10 +302,11 @@ const struct gl_video_opts gl_video_opts_hq_def = {
 
 static int validate_scaler_opt(struct mp_log *log, const m_option_t *opt,
                                struct bstr name, struct bstr param);
+static void draw_osd_cb(void *ctx, struct sub_bitmaps *imgs);
 
 #define OPT_BASE_STRUCT struct gl_video_opts
 const struct m_sub_options gl_video_conf = {
-    .opts = (m_option_t[]) {
+    .opts = (const m_option_t[]) {
         OPT_FLOATRANGE("gamma", gamma, 0, 0.0, 10.0),
         OPT_FLAG("srgb", srgb, 0),
         OPT_FLAG("approx-gamma", approx_gamma, 0),
@@ -1046,7 +1049,7 @@ static void init_scaler(struct gl_video *p, struct scaler *scaler)
 
     int size = scaler->kernel->size;
     assert(size < FF_ARRAY_ELEMS(lut_tex_formats));
-    struct lut_tex_format *fmt = &lut_tex_formats[size];
+    const struct lut_tex_format *fmt = &lut_tex_formats[size];
     bool use_2d = fmt->pixels > 1;
     bool is_luma = scaler->index == 0;
     scaler->lut_name = use_2d
@@ -1157,7 +1160,7 @@ static void recreate_osd(struct gl_video *p)
 {
     if (p->osd)
         mpgl_osd_destroy(p->osd);
-    p->osd = mpgl_osd_init(p->gl, p->log, false);
+    p->osd = mpgl_osd_init(p->gl, p->log, p->osd_state);
     p->osd->use_pbo = p->opts.pbo;
 }
 
@@ -1590,6 +1593,16 @@ void gl_video_render_frame(struct gl_video *p)
     p->frames_rendered++;
 
     debug_check_gl(p, "after video rendering");
+
+    assert(p->osd);
+
+    osd_draw(p->osd_state, p->osd_rect, p->osd_pts, 0, p->osd->formats,
+             draw_osd_cb, p);
+
+    // The playloop calls this last before waiting some time until it decides
+    // to call flip_page(). Tell OpenGL to start execution of the GPU commands
+    // while we sleep (this happens asynchronously).
+    gl->Flush();
 }
 
 static void update_window_sized_objects(struct gl_video *p)
@@ -1710,6 +1723,8 @@ void gl_video_upload_image(struct gl_video *p, struct mp_image *mpi)
 
     struct video_image *vimg = &p->image;
 
+    p->osd_pts = mpi->pts;
+
     if (p->hwdec_active) {
         mp_image_setrefp(&vimg->hwimage, mpi);
         p->have_image = true;
@@ -1790,15 +1805,18 @@ struct mp_image *gl_video_download_image(struct gl_video *p)
     return image;
 }
 
-static void draw_osd_cb(void *ctx, struct mpgl_osd_part *osd,
-                        struct sub_bitmaps *imgs)
+static void draw_osd_cb(void *ctx, struct sub_bitmaps *imgs)
 {
     struct gl_video *p = ctx;
     GL *gl = p->gl;
 
+    struct mpgl_osd_part *osd = mpgl_osd_generate(p->osd, imgs);
+    if (!osd)
+        return;
+
     assert(osd->format != SUBBITMAP_EMPTY);
 
-    if (!osd->num_vertices && imgs) {
+    if (!osd->num_vertices) {
         osd->vertices = talloc_realloc(osd, osd->vertices, struct vertex,
                                        osd->packer->count * VERTICES_PER_QUAD);
 
@@ -1833,19 +1851,6 @@ static void draw_osd_cb(void *ctx, struct mpgl_osd_part *osd,
     debug_check_gl(p, "after drawing osd");
 }
 
-void gl_video_draw_osd(struct gl_video *p, struct osd_state *osd)
-{
-    GL *gl = p->gl;
-    assert(p->osd);
-
-    mpgl_osd_draw_cb(p->osd, osd, p->osd_rect, draw_osd_cb, p);
-
-    // The playloop calls this last before waiting some time until it decides
-    // to call flip_page(). Tell OpenGL to start execution of the GPU commands
-    // while we sleep (this happens asynchronously).
-    gl->Flush();
-}
-
 static bool test_fbo(struct gl_video *p, GLenum format)
 {
     static const float vals[] = {
@@ -1854,7 +1859,7 @@ static bool test_fbo(struct gl_video *p, GLenum format)
         0xFFFFFF / (float)(1 << 25),    // float mantissa
         2,                              // out of range value
     };
-    static const char *val_names[] = {
+    static const char *const val_names[] = {
         "8-bit precision",
         "16-bit precision",
         "full float",
@@ -2201,12 +2206,13 @@ void gl_video_set_output_depth(struct gl_video *p, int r, int g, int b)
     p->depth_g = g;
 }
 
-struct gl_video *gl_video_init(GL *gl, struct mp_log *log)
+struct gl_video *gl_video_init(GL *gl, struct mp_log *log, struct osd_state *osd)
 {
     struct gl_video *p = talloc_ptrtype(NULL, p);
     *p = (struct gl_video) {
         .gl = gl,
         .log = log,
+        .osd_state = osd,
         .opts = gl_video_opts_def,
         .gl_target = GL_TEXTURE_2D,
         .gl_debug = true,
@@ -2237,7 +2243,7 @@ static const char* handle_scaler_opt(const char *name)
         if (can_use_filter_kernel(kernel))
             return kernel->name;
 
-        for (const char **filter = fixed_scale_filters; *filter; filter++) {
+        for (const char *const *filter = fixed_scale_filters; *filter; filter++) {
             if (strcmp(*filter, name) == 0)
                 return *filter;
         }
@@ -2289,7 +2295,7 @@ static int validate_scaler_opt(struct mp_log *log, const m_option_t *opt,
 {
     if (bstr_equals0(param, "help")) {
         mp_info(log, "Available scalers:\n");
-        for (const char **filter = fixed_scale_filters; *filter; filter++)
+        for (const char *const *filter = fixed_scale_filters; *filter; filter++)
             mp_info(log, "    %s\n", *filter);
         for (int n = 0; mp_filter_kernels[n].name; n++)
             mp_info(log, "    %s\n", mp_filter_kernels[n].name);
@@ -2310,7 +2316,6 @@ void gl_video_resize_redraw(struct gl_video *p, int w, int h)
     p->vp_w = w;
     p->vp_h = h;
     gl_video_render_frame(p);
-    mpgl_osd_redraw_cb(p->osd, draw_osd_cb, p);
 }
 
 void gl_video_set_hwdec(struct gl_video *p, struct gl_hwdec *hwdec)

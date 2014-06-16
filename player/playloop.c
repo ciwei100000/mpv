@@ -132,26 +132,6 @@ end:
     mp_notify(mpctx, mpctx->opts->pause ? MPV_EVENT_PAUSE : MPV_EVENT_UNPAUSE, 0);
 }
 
-static void draw_osd(struct MPContext *mpctx)
-{
-    struct vo *vo = mpctx->video_out;
-
-    osd_set_vo_pts(mpctx->osd, mpctx->video_pts);
-    vo_draw_osd(vo, mpctx->osd);
-}
-
-static bool redraw_osd(struct MPContext *mpctx)
-{
-    struct vo *vo = mpctx->video_out;
-    if (vo_redraw_frame(vo) < 0)
-        return false;
-
-    draw_osd(mpctx);
-
-    vo_flip_page(vo, 0, -1);
-    return true;
-}
-
 void add_step_frame(struct MPContext *mpctx, int dir)
 {
     if (!mpctx->d_video)
@@ -630,13 +610,11 @@ static bool handle_osd_redraw(struct MPContext *mpctx)
     if (!mpctx->video_out || !mpctx->video_out->config_ok)
         return false;
     bool want_redraw = vo_get_want_redraw(mpctx->video_out) |
-                        (osd_query_and_reset_want_redraw(mpctx->osd) &&
-                         mpctx->video_out->driver->draw_osd);
-    if (want_redraw) {
-        if (redraw_osd(mpctx))
-            return true;
-    }
-    return false;
+                       osd_query_and_reset_want_redraw(mpctx->osd);
+    if (!want_redraw)
+        return false;
+    vo_redraw(mpctx->video_out);
+    return true;
 }
 
 static void handle_metadata_update(struct MPContext *mpctx)
@@ -890,7 +868,7 @@ void handle_force_window(struct MPContext *mpctx, bool reconfig)
             .d_w = w, .d_h = h,
         };
         vo_reconfig(vo, &p, 0);
-        redraw_osd(mpctx);
+        vo_redraw(vo);
         mp_notify(mpctx, MPV_EVENT_VIDEO_RECONFIG, NULL);
     }
 }
@@ -1000,7 +978,7 @@ void run_playloop(struct MPContext *mpctx)
         double frame_time = 0;
         int r = update_video(mpctx, endpts, !still_playing, &frame_time);
 
-        MP_VERBOSE(mpctx, "update_video: %d\n", r);
+        MP_TRACE(mpctx, "update_video: %d\n", r);
         if (r < 0) {
             MP_FATAL(mpctx, "Could not initialize video chain.\n");
             int uninit = INITIALIZED_VCODEC;
@@ -1023,14 +1001,14 @@ void run_playloop(struct MPContext *mpctx)
             }
             if (mpctx->playing_last_frame) {
                 r = 1; // don't stop playback yet
-                MP_VERBOSE(mpctx, "still showing last frame\n");
+                MP_TRACE(mpctx, "still showing last frame\n");
             }
         }
 
         video_left = r > 0;
 
         if (r == 2)
-            MP_VERBOSE(mpctx, "frametime=%5.3f\n", frame_time);
+            MP_TRACE(mpctx, "frametime=%5.3f\n", frame_time);
 
         if (r == 2 && !mpctx->restart_playback) {
             mpctx->time_frame += frame_time / opts->playback_speed;
@@ -1103,9 +1081,7 @@ void run_playloop(struct MPContext *mpctx)
 
         //=================== FLIP PAGE (VIDEO BLT): ======================
 
-        MP_STATS(mpctx, "vo draw frame");
 
-        vo_new_frame_imminent(vo);
         mpctx->video_pts = mpctx->video_next_pts;
         mpctx->last_vo_pts = mpctx->video_pts;
         mpctx->playback_pts = mpctx->video_pts;
@@ -1113,8 +1089,9 @@ void run_playloop(struct MPContext *mpctx)
         update_subtitles(mpctx);
         update_osd_msg(mpctx);
 
-        MP_STATS(mpctx, "draw OSD");
-        draw_osd(mpctx);
+        MP_STATS(mpctx, "vo draw frame");
+
+        vo_new_frame_imminent(vo);
 
         MP_STATS(mpctx, "vo sleep");
 

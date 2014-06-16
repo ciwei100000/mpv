@@ -55,7 +55,7 @@ static const struct osd_style_opts osd_style_opts_def = {
 
 #define OPT_BASE_STRUCT struct osd_style_opts
 const struct m_sub_options osd_style_conf = {
-    .opts = (m_option_t[]) {
+    .opts = (const m_option_t[]) {
         OPT_STRING("font", font, 0),
         OPT_FLOATRANGE("font-size", font_size, 0, 1, 9000),
         OPT_COLOR("color", color, 0),
@@ -421,21 +421,6 @@ bool osd_query_and_reset_want_redraw(struct osd_state *osd)
     osd->want_redraw = false;
     pthread_mutex_unlock(&osd->lock);
     return r;
-}
-
-double osd_get_vo_pts(struct osd_state *osd)
-{
-    pthread_mutex_lock(&osd->lock);
-    double r = osd->vo_pts;
-    pthread_mutex_unlock(&osd->lock);
-    return r;
-}
-
-void osd_set_vo_pts(struct osd_state *osd, double vo_pts)
-{
-    pthread_mutex_lock(&osd->lock);
-    osd->vo_pts = vo_pts;
-    pthread_mutex_unlock(&osd->lock);
 }
 
 // Scale factor to translate OSD coordinates to what the obj uses internally.
