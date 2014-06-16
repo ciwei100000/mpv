@@ -52,11 +52,6 @@
 // Includes additional padding in case sizes get rounded up by sector size.
 #define TOTAL_BUFFER_SIZE (STREAM_MAX_BUFFER_SIZE + STREAM_MAX_SECTOR_SIZE)
 
-/// We keep these 2 for the gui atm, but they will be removed.
-char *cdrom_device = NULL;
-char *dvd_device = NULL;
-int dvd_title = 0;
-
 extern const stream_info_t stream_info_cdda;
 extern const stream_info_t stream_info_dvb;
 extern const stream_info_t stream_info_tv;
@@ -300,6 +295,8 @@ static int open_internal(const stream_info_t *sinfo, struct stream *underlying,
             .priv_defaults = sinfo->priv_defaults,
             .options = sinfo->options,
         };
+        if (sinfo->get_defaults)
+            desc.priv_defaults = sinfo->get_defaults(s);
         struct m_config *config = m_config_from_obj_desc(s, s->log, &desc);
         s->priv = config->optstruct;
         if (s->info->url_options && !parse_url(s, config)) {
@@ -896,7 +893,7 @@ unsigned char *stream_read_line(stream_t *s, unsigned char *mem, int max,
     return mem;
 }
 
-static const char *bom[3] = {"\xEF\xBB\xBF", "\xFF\xFE", "\xFE\xFF"};
+static const char *const bom[3] = {"\xEF\xBB\xBF", "\xFF\xFE", "\xFE\xFF"};
 
 // Return utf16 argument for stream_read_line
 int stream_skip_bom(struct stream *s)

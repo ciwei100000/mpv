@@ -31,6 +31,8 @@
 
 #include "osdep/io.h"
 
+#include "common/global.h"
+#include "common/encode.h"
 #include "common/msg.h"
 #include "options/path.h"
 #include "options/m_config.h"
@@ -57,7 +59,8 @@ bool mp_parse_cfgfiles(struct MPContext *mpctx)
     bool r = true;
     char *conffile;
     char *section = NULL;
-    bool encoding = opts->encode_output.file && *opts->encode_output.file;
+    bool encoding = opts->encode_opts &&
+        opts->encode_opts->file && opts->encode_opts->file[0];
     // In encoding mode, we don't want to apply normal config options.
     // So we "divert" normal options into a separate section, and the diverted
     // section is never used - unless maybe it's explicitly referenced from an
@@ -175,6 +178,7 @@ void mp_load_auto_profiles(struct MPContext *mpctx)
 static char *mp_get_playback_resume_config_filename(struct mpv_global *global,
                                                     const char *fname)
 {
+    struct MPOpts *opts = global->opts;
     char *res = NULL;
     void *tmp = talloc_new(NULL);
     const char *realpath = fname;
@@ -185,15 +189,11 @@ static char *mp_get_playback_resume_config_filename(struct mpv_global *global,
             goto exit;
         realpath = mp_path_join(tmp, bstr0(cwd), bstr0(fname));
     }
-#if HAVE_DVDREAD || HAVE_DVDNAV
     if (bstr_startswith0(bfname, "dvd://"))
-        realpath = talloc_asprintf(tmp, "%s - %s", realpath, dvd_device);
-#endif
-#if HAVE_LIBBLURAY
+        realpath = talloc_asprintf(tmp, "%s - %s", realpath, opts->dvd_device);
     if (bstr_startswith0(bfname, "br://") || bstr_startswith0(bfname, "bd://") ||
         bstr_startswith0(bfname, "bluray://"))
-        realpath = talloc_asprintf(tmp, "%s - %s", realpath, bluray_device);
-#endif
+        realpath = talloc_asprintf(tmp, "%s - %s", realpath, opts->bluray_device);
     uint8_t md5[16];
     av_md5_sum(md5, realpath, strlen(realpath));
     char *conf = talloc_strdup(tmp, "");
@@ -209,7 +209,7 @@ exit:
     return res;
 }
 
-static const char *backup_properties[] = {
+static const char *const backup_properties[] = {
     "options/osd-level",
     //"loop",
     "options/speed",

@@ -57,6 +57,8 @@ struct priv {
     bool nav_enabled;
     bool had_initial_vts;
 
+    int dvd_speed;
+
     int track;
     char *device;
 };
@@ -75,7 +77,7 @@ static const m_option_t stream_opts_fields[] = {
 };
 
 #define DNE(e) [e] = # e
-static char *mp_dvdnav_events[] = {
+static const char *const mp_dvdnav_events[] = {
     DNE(DVDNAV_BLOCK_OK),
     DNE(DVDNAV_NOP),
     DNE(DVDNAV_STILL_FRAME),
@@ -91,7 +93,7 @@ static char *mp_dvdnav_events[] = {
     DNE(DVDNAV_WAIT),
 };
 
-static char *mp_nav_cmd_types[] = {
+static const char *const mp_nav_cmd_types[] = {
     DNE(MP_NAV_CMD_NONE),
     DNE(MP_NAV_CMD_ENABLE),
     DNE(MP_NAV_CMD_DRAIN_OK),
@@ -101,7 +103,7 @@ static char *mp_nav_cmd_types[] = {
     DNE(MP_NAV_CMD_MOUSE_POS),
 };
 
-static char *mp_nav_event_types[] = {
+static const char *const mp_nav_event_types[] = {
     DNE(MP_NAV_EVENT_NONE),
     DNE(MP_NAV_EVENT_RESET),
     DNE(MP_NAV_EVENT_RESET_CLUT),
@@ -630,7 +632,8 @@ static void stream_dvdnav_close(stream_t *s)
     struct priv *priv = s->priv;
     dvdnav_close(priv->dvdnav);
     priv->dvdnav = NULL;
-    dvd_set_speed(s, priv->filename, -1);
+    if (priv->dvd_speed)
+        dvd_set_speed(s, priv->filename, -1);
 }
 
 static struct priv *new_dvdnav_stream(stream_t *stream, char *filename)
@@ -644,7 +647,8 @@ static struct priv *new_dvdnav_stream(stream_t *stream, char *filename)
     if (!(priv->filename = strdup(filename)))
         return NULL;
 
-    dvd_set_speed(stream, priv->filename, dvd_speed);
+    priv->dvd_speed = stream->opts->dvd_speed;
+    dvd_set_speed(stream, priv->filename, priv->dvd_speed);
 
     if (dvdnav_open(&(priv->dvdnav), priv->filename) != DVDNAV_STATUS_OK) {
         free(priv->filename);
@@ -670,10 +674,10 @@ static int open_s(stream_t *stream)
     priv = p = stream->priv;
     char *filename;
 
-    if (p->device)
+    if (p->device && p->device[0])
         filename = p->device;
-    else if (dvd_device)
-        filename = dvd_device;
+    else if (stream->opts->dvd_device && stream->opts->dvd_device[0])
+        filename = stream->opts->dvd_device;
     else
         filename = DEFAULT_DVD_DEVICE;
     if (!new_dvdnav_stream(stream, filename)) {
@@ -715,8 +719,8 @@ static int open_s(stream_t *stream)
         if (dvdnav_menu_call(priv->dvdnav, DVD_MENU_Root) != DVDNAV_STATUS_OK)
             dvdnav_menu_call(priv->dvdnav, DVD_MENU_Title);
     }
-    if (dvd_angle > 1)
-        dvdnav_angle_change(priv->dvdnav, dvd_angle);
+    if (stream->opts->dvd_angle > 1)
+        dvdnav_angle_change(priv->dvdnav, stream->opts->dvd_angle);
 
     stream->sector_size = 2048;
     stream->fill_buffer = fill_buffer;
@@ -733,11 +737,11 @@ static int open_s(stream_t *stream)
 const stream_info_t stream_info_dvdnav = {
     .name = "dvdnav",
     .open = open_s,
-    .protocols = (const char*[]){ "dvdnav", NULL },
+    .protocols = (const char*const[]){ "dvdnav", NULL },
     .priv_size = sizeof(struct priv),
     .priv_defaults = &stream_priv_dflts,
     .options = stream_opts_fields,
-    .url_options = (const char*[]){
+    .url_options = (const char*const[]){
         "hostname=title",
         "filename=device",
         NULL

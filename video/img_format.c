@@ -28,14 +28,6 @@
 #include "video/mp_image.h"
 #include "video/fmt-conversion.h"
 
-#define FMT(string, id)                                 \
-    {string,            id},
-
-#define FMT_ENDIAN(string, id)                          \
-    {string,            id},                            \
-    {string "le",       MP_CONCAT(id, _LE)},            \
-    {string "be",       MP_CONCAT(id, _BE)},            \
-
 struct mp_imgfmt_entry {
     const char *name;
     int fmt;
@@ -43,45 +35,28 @@ struct mp_imgfmt_entry {
 
 static const struct mp_imgfmt_entry mp_imgfmt_list[] = {
     // not in ffmpeg
-    FMT("vdpau_output",         IMGFMT_VDPAU_OUTPUT)
-    // these formats are pretty common, and the "le"/"be" suffixes enforced
-    // by FFmpeg are annoying
-    FMT("yuv420p10",            IMGFMT_420P10)
-    FMT("yuv420p16",            IMGFMT_420P16)
-    // these names are weirdly different from FFmpeg's
-    FMT_ENDIAN("rgb12",         IMGFMT_RGB12)
-    FMT_ENDIAN("rgb15",         IMGFMT_RGB15)
-    FMT_ENDIAN("rgb16",         IMGFMT_RGB16)
-    FMT_ENDIAN("bgr12",         IMGFMT_BGR12)
-    FMT_ENDIAN("bgr15",         IMGFMT_BGR15)
-    FMT_ENDIAN("bgr16",         IMGFMT_BGR16)
-    // the MPlayer derived names have components in reverse order
-    FMT("rgb8",                 IMGFMT_RGB8)
-    FMT("bgr8",                 IMGFMT_BGR8)
-    FMT("rgb4_byte",            IMGFMT_RGB4_BYTE)
-    FMT("bgr4_byte",            IMGFMT_BGR4_BYTE)
-    FMT("rgb4",                 IMGFMT_RGB4)
-    FMT("bgr4",                 IMGFMT_BGR4)
+    {"vdpau_output",    IMGFMT_VDPAU_OUTPUT},
     // FFmpeg names have an annoying "_vld" suffix
-    FMT("vda",                  IMGFMT_VDA)
-    FMT("vaapi",                IMGFMT_VAAPI)
+    {"vda",             IMGFMT_VDA},
+    {"vaapi",           IMGFMT_VAAPI},
     // names below this are not preferred over the FFmpeg names
-    FMT("none",                 0)
+    // the "none" entry makes mp_imgfmt_to_name prefer FFmpeg names
+    {"none",            0},
     // endian-specific aliases (not in FFmpeg)
-    FMT("rgb32",                IMGFMT_RGB32)
-    FMT("bgr32",                IMGFMT_BGR32)
+    {"rgb32",           IMGFMT_RGB32},
+    {"bgr32",           IMGFMT_BGR32},
     // old names we keep around
-    FMT("y8",                   IMGFMT_Y8)
-    FMT("420p",                 IMGFMT_420P)
-    FMT("yv12",                 IMGFMT_420P)
-    FMT_ENDIAN("420p16",        IMGFMT_420P16)
-    FMT_ENDIAN("420p10",        IMGFMT_420P10)
-    FMT("444p",                 IMGFMT_444P)
-    FMT("444p9",                IMGFMT_444P9)
-    FMT("444p10",               IMGFMT_444P10)
-    FMT("422p",                 IMGFMT_422P)
-    FMT("422p9",                IMGFMT_422P9)
-    FMT("422p10",               IMGFMT_422P10)
+    {"y8",              IMGFMT_Y8},
+    {"420p",            IMGFMT_420P},
+    {"yv12",            IMGFMT_420P},
+    {"420p16",          IMGFMT_420P16},
+    {"420p10",          IMGFMT_420P10},
+    {"444p",            IMGFMT_444P},
+    {"444p9",           IMGFMT_444P9},
+    {"444p10",          IMGFMT_444P10},
+    {"422p",            IMGFMT_422P},
+    {"422p9",           IMGFMT_422P9},
+    {"422p10",          IMGFMT_422P10},
     {0}
 };
 
@@ -93,7 +68,7 @@ char **mp_imgfmt_name_list(void)
     for (int n = IMGFMT_START; n < IMGFMT_END; n++) {
         const char *name = mp_imgfmt_to_name(n);
         if (strcmp(name, "none") != 0 && strcmp(name, "unknown") != 0)
-            list[num++] = (char *)name;
+            list[num++] = talloc_strdup(list, name);
     }
     return list;
 }
@@ -117,17 +92,28 @@ int mp_imgfmt_from_name(bstr name, bool allow_hwaccel)
     return img_fmt;
 }
 
-const char *mp_imgfmt_to_name(int fmt)
+char *mp_imgfmt_to_name_buf(char *buf, size_t buf_size, int fmt)
 {
+    const char *name = NULL;
     const struct mp_imgfmt_entry *p = mp_imgfmt_list;
     for (; p->fmt; p++) {
-        if (p->name && p->fmt == fmt)
-            return p->name;
+        if (p->name && p->fmt == fmt) {
+            name = p->name;
+            break;
+        }
     }
-    const AVPixFmtDescriptor *pixdesc = av_pix_fmt_desc_get(imgfmt2pixfmt(fmt));
-    if (pixdesc && pixdesc->name)
-        return pixdesc->name;
-    return "unknown";
+    if (!name) {
+        const AVPixFmtDescriptor *pixdesc = av_pix_fmt_desc_get(imgfmt2pixfmt(fmt));
+        if (pixdesc)
+            name = pixdesc->name;
+    }
+    if (!name)
+        name = "unknown";
+    snprintf(buf, buf_size, "%s", name);
+    int len = strlen(buf);
+    if (len > 2 && buf[len - 2] == MP_SELECT_LE_BE('l', 'b') && buf[len - 1] == 'e')
+        buf[len - 2] = '\0';
+    return buf;
 }
 
 static struct mp_imgfmt_desc mp_only_imgfmt_desc(int mpfmt)
@@ -137,7 +123,6 @@ static struct mp_imgfmt_desc mp_only_imgfmt_desc(int mpfmt)
         return (struct mp_imgfmt_desc) {
             .id = mpfmt,
             .avformat = AV_PIX_FMT_NONE,
-            .name = mp_imgfmt_to_name(mpfmt),
             .flags = MP_IMGFLAG_BE | MP_IMGFLAG_LE | MP_IMGFLAG_RGB,
         };
     }
@@ -154,7 +139,6 @@ struct mp_imgfmt_desc mp_imgfmt_get_desc(int mpfmt)
     struct mp_imgfmt_desc desc = {
         .id = mpfmt,
         .avformat = fmt,
-        .name = mp_imgfmt_to_name(mpfmt),
         .chroma_xs = pd->log2_chroma_w,
         .chroma_ys = pd->log2_chroma_h,
     };
@@ -177,7 +161,7 @@ struct mp_imgfmt_desc mp_imgfmt_get_desc(int mpfmt)
     // Packed RGB formats are the only formats that have less than 8 bits per
     // component, and still require endian dependent access.
     if (pd->comp[0].depth_minus1 + 1 <= 8 &&
-        !(mpfmt >= IMGFMT_RGB12_LE && mpfmt <= IMGFMT_BGR16_BE))
+        !(mpfmt >= IMGFMT_RGB444_LE && mpfmt <= IMGFMT_BGR565_BE))
     {
         desc.flags |= MP_IMGFLAG_LE | MP_IMGFLAG_BE;
     } else {

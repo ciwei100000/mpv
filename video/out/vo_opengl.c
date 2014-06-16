@@ -111,17 +111,6 @@ static void flip_page(struct vo *vo)
     mpgl_unlock(p->glctx);
 }
 
-static void draw_osd(struct vo *vo, struct osd_state *osd)
-{
-    struct gl_priv *p = vo->priv;
-
-    mpgl_lock(p->glctx);
-
-    gl_video_draw_osd(p->renderer, osd);
-
-    mpgl_unlock(p->glctx);
-}
-
 static void draw_image(struct vo *vo, mp_image_t *mpi)
 {
     struct gl_priv *p = vo->priv;
@@ -434,7 +423,7 @@ static int preinit(struct vo *vo)
     if (p->gl->SwapInterval)
         p->gl->SwapInterval(p->swap_interval);
 
-    p->renderer = gl_video_init(p->gl, vo->log);
+    p->renderer = gl_video_init(p->gl, vo->log, vo->osd);
     gl_video_set_output_depth(p->renderer, p->glctx->depth_r, p->glctx->depth_g,
                               p->glctx->depth_b);
     gl_video_set_options(p->renderer, p->renderer_opts);
@@ -474,7 +463,6 @@ const struct vo_driver video_out_opengl = {
     .reconfig = reconfig,
     .control = control,
     .draw_image = draw_image,
-    .draw_osd = draw_osd,
     .flip_page = flip_page,
     .uninit = uninit,
     .priv_size = sizeof(struct gl_priv),
@@ -490,7 +478,6 @@ const struct vo_driver video_out_opengl_hq = {
     .reconfig = reconfig,
     .control = control,
     .draw_image = draw_image,
-    .draw_osd = draw_osd,
     .flip_page = flip_page,
     .uninit = uninit,
     .priv_size = sizeof(struct gl_priv),

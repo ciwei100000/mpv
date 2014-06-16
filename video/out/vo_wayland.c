@@ -56,30 +56,30 @@ struct fmtentry {
 
 // the first 2 Formats should be available on most platforms
 // all other formats are optional
-// the waylad byte order is reversed
+// the waylad byte order is sometimes reversed
 static const struct fmtentry fmttable[] = {
     {WL_SHM_FORMAT_ARGB8888, IMGFMT_BGRA}, // 8b 8g 8r 8a
     {WL_SHM_FORMAT_XRGB8888, IMGFMT_BGR0},
-    {WL_SHM_FORMAT_RGB332,   IMGFMT_BGR8}, // 3b 3g 2r
-    {WL_SHM_FORMAT_BGR233,   IMGFMT_RGB8}, // 3r 3g 3b,
-    {WL_SHM_FORMAT_XRGB4444, IMGFMT_BGR12_LE}, // 4b 4g 4r 4a
-    {WL_SHM_FORMAT_XBGR4444, IMGFMT_RGB12_LE}, // 4r 4g 4b 4a
-    {WL_SHM_FORMAT_RGBX4444, IMGFMT_RGB12_BE}, // 4a 4b 4g 4r
-    {WL_SHM_FORMAT_BGRX4444, IMGFMT_BGR12_BE}, // 4a 4r 4g 4b
-    {WL_SHM_FORMAT_ARGB4444, IMGFMT_BGR12_LE},
-    {WL_SHM_FORMAT_ABGR4444, IMGFMT_RGB12_LE},
-    {WL_SHM_FORMAT_RGBA4444, IMGFMT_RGB12_BE},
-    {WL_SHM_FORMAT_BGRA4444, IMGFMT_BGR12_BE},
-    {WL_SHM_FORMAT_XRGB1555, IMGFMT_BGR15_LE}, // 5b 5g 5r 1a
-    {WL_SHM_FORMAT_XBGR1555, IMGFMT_RGB15_LE}, // 5r 5g 5b 1a
-    {WL_SHM_FORMAT_RGBX5551, IMGFMT_RGB15_BE}, // 1a 5g 5b 5r
-    {WL_SHM_FORMAT_BGRX5551, IMGFMT_BGR15_BE}, // 1a 5r 5g 5b
-    {WL_SHM_FORMAT_ARGB1555, IMGFMT_BGR15_LE},
-    {WL_SHM_FORMAT_ABGR1555, IMGFMT_RGB15_LE},
-    {WL_SHM_FORMAT_RGBA5551, IMGFMT_RGB15_BE},
-    {WL_SHM_FORMAT_BGRA5551, IMGFMT_BGR15_BE},
-    {WL_SHM_FORMAT_RGB565,   IMGFMT_BGR16_LE}, // 5b 6g 5r
-    {WL_SHM_FORMAT_BGR565,   IMGFMT_RGB16_LE}, // 5r 6g 5b
+    {WL_SHM_FORMAT_RGB332,   IMGFMT_RGB8}, // 3b 3g 2r
+    {WL_SHM_FORMAT_BGR233,   IMGFMT_BGR8}, // 3r 3g 3b,
+    {WL_SHM_FORMAT_XRGB4444, IMGFMT_RGB444_LE}, // 4b 4g 4r 4a
+    {WL_SHM_FORMAT_XBGR4444, IMGFMT_BGR444_LE}, // 4r 4g 4b 4a
+    {WL_SHM_FORMAT_RGBX4444, IMGFMT_BGR444_BE}, // 4a 4b 4g 4r
+    {WL_SHM_FORMAT_BGRX4444, IMGFMT_RGB444_BE}, // 4a 4r 4g 4b
+    {WL_SHM_FORMAT_ARGB4444, IMGFMT_RGB444_LE},
+    {WL_SHM_FORMAT_ABGR4444, IMGFMT_BGR444_LE},
+    {WL_SHM_FORMAT_RGBA4444, IMGFMT_BGR444_BE},
+    {WL_SHM_FORMAT_BGRA4444, IMGFMT_RGB444_BE},
+    {WL_SHM_FORMAT_XRGB1555, IMGFMT_RGB555_LE}, // 5b 5g 5r 1a
+    {WL_SHM_FORMAT_XBGR1555, IMGFMT_BGR555_LE}, // 5r 5g 5b 1a
+    {WL_SHM_FORMAT_RGBX5551, IMGFMT_BGR555_BE}, // 1a 5g 5b 5r
+    {WL_SHM_FORMAT_BGRX5551, IMGFMT_RGB555_BE}, // 1a 5r 5g 5b
+    {WL_SHM_FORMAT_ARGB1555, IMGFMT_RGB555_LE},
+    {WL_SHM_FORMAT_ABGR1555, IMGFMT_BGR555_LE},
+    {WL_SHM_FORMAT_RGBA5551, IMGFMT_BGR555_BE},
+    {WL_SHM_FORMAT_BGRA5551, IMGFMT_RGB555_BE},
+    {WL_SHM_FORMAT_RGB565,   IMGFMT_RGB565_LE}, // 5b 6g 5r
+    {WL_SHM_FORMAT_BGR565,   IMGFMT_BGR565_LE}, // 5r 6g 5b
     {WL_SHM_FORMAT_RGB888,   IMGFMT_BGR24}, // 8b 8g 8r
     {WL_SHM_FORMAT_BGR888,   IMGFMT_RGB24}, // 8r 8g 8b
     {WL_SHM_FORMAT_XBGR8888, IMGFMT_RGB0},
@@ -130,6 +130,9 @@ struct priv {
     struct vo *vo;
     struct vo_wayland_state *wl;
 
+    struct wl_surface *osd_surfaces[MAX_OSD_PARTS];
+    struct wl_subsurface *osd_subsurfaces[MAX_OSD_PARTS];
+
     struct wl_list format_list;
     const struct fmtentry *video_format;
 
@@ -162,6 +165,8 @@ struct priv {
     int use_rgb565;
     int use_triplebuffering;
 };
+
+static void draw_osd(struct vo *vo);
 
 /* copied from weston clients */
 static int set_cloexec_or_close(int fd)
@@ -510,7 +515,7 @@ static bool resize(struct priv *p)
     if (y != 0)
         y = wl->window.height - p->dst_h;
 
-    mp_sws_set_from_cmdline(p->sws);
+    mp_sws_set_from_cmdline(p->sws, p->vo->opts->sws_opts);
     p->sws->src = p->in_format;
     p->sws->dst = (struct mp_image_params) {
         .imgfmt = p->video_format->mp_fmt,
@@ -536,12 +541,12 @@ static bool resize(struct priv *p)
 
     // attach NULL buffers to the surfaces to avoid artifacts
     for (int i = 0; i < MAX_OSD_PARTS; ++i) {
-        wl_subsurface_set_desync(p->wl->window.osd_subsurfaces[i]);
-        struct wl_surface *s = p->wl->window.osd_surfaces[i];
+        wl_subsurface_set_desync(p->osd_subsurfaces[i]);
+        struct wl_surface *s = p->osd_surfaces[i];
         wl_surface_attach(s, NULL, 0, 0);
         wl_surface_damage(s, 0, 0, p->dst_w, p->dst_h);
         wl_surface_commit(s);
-        wl_subsurface_set_sync(p->wl->window.osd_subsurfaces[i]);
+        wl_subsurface_set_sync(p->osd_subsurfaces[i]);
     }
 
     wl->window.width = p->dst_w;
@@ -675,6 +680,8 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
 
     mp_image_setrefp(&p->original_image, mpi);
     buffer_finalise_back(buf);
+
+    draw_osd(vo);
 }
 
 static void draw_osd_cb(void *ctx, struct sub_bitmaps *imgs)
@@ -682,7 +689,7 @@ static void draw_osd_cb(void *ctx, struct sub_bitmaps *imgs)
     struct priv *p = ctx;
     int id = imgs->render_index;
 
-    struct wl_surface *s = p->wl->window.osd_surfaces[id];
+    struct wl_surface *s = p->osd_surfaces[id];
     struct buffer * buf = buffer_pool_get_no(&p->osd_bufpool, id);
     if (!buf)
         return;
@@ -706,7 +713,7 @@ static void draw_osd_cb(void *ctx, struct sub_bitmaps *imgs)
             memcpy_pic(wlimg.planes[0] + dst, sub->bitmap, sub->w * 4, sub->h,
                        wlimg.stride[0], sub->stride);
         }
-        wl_subsurface_set_position(p->wl->window.osd_subsurfaces[id], 0, 0);
+        wl_subsurface_set_position(p->osd_subsurfaces[id], 0, 0);
         wl_surface_attach(s, buf->wlbuf, 0, 0);
         wl_surface_damage(s, bb.x0, bb.y0, bb.x1, bb.y1);
         wl_surface_commit(s);
@@ -721,20 +728,21 @@ static const bool osd_formats[SUBBITMAP_COUNT] = {
     [SUBBITMAP_RGBA] = true,
 };
 
-static void draw_osd(struct vo *vo, struct osd_state *osd)
+static void draw_osd(struct vo *vo)
 {
     struct priv *p = vo->priv;
     // deattach all buffers and attach all needed buffers in osd_draw
     // only the most recent attach & commit is applied once the parent surface
     // is committed
     for (int i = 0; i < MAX_OSD_PARTS; ++i) {
-        struct wl_surface *s = p->wl->window.osd_surfaces[i];
+        struct wl_surface *s = p->osd_surfaces[i];
         wl_surface_attach(s, NULL, 0, 0);
         wl_surface_damage(s, 0, 0, p->dst_w, p->dst_h);
         wl_surface_commit(s);
     }
 
-    osd_draw(osd, p->osd, osd_get_vo_pts(osd), 0, osd_formats, draw_osd_cb, p);
+    double pts = p->original_image ? p->original_image->pts : 0;
+    osd_draw(vo->osd, p->osd, pts, 0, osd_formats, draw_osd_cb, p);
 }
 
 static void flip_page(struct vo *vo)
@@ -823,24 +831,52 @@ static void uninit(struct vo *vo)
 
     talloc_free(p->original_image);
 
+    for (int i = 0; i < MAX_OSD_PARTS; ++i) {
+        wl_subsurface_destroy(p->osd_subsurfaces[i]);
+        wl_surface_destroy(p->osd_surfaces[i]);
+    }
+
     vo_wayland_uninit(vo);
 }
 
 static int preinit(struct vo *vo)
 {
     struct priv *p = vo->priv;
+    struct vo_wayland_state *wl = NULL;
 
     if (!vo_wayland_init(vo))
         return -1;
 
+    wl = vo->wayland;
+
     p->vo = vo;
-    p->wl = vo->wayland;
+    p->wl = wl;
     p->sws = mp_sws_alloc(vo);
 
     wl_list_init(&p->format_list);
 
-    wl_shm_add_listener(p->wl->display.shm, &shm_listener, p);
-    wl_display_dispatch(p->wl->display.display);
+    wl_shm_add_listener(wl->display.shm, &shm_listener, p);
+    wl_display_dispatch(wl->display.display);
+
+    // Commits on surfaces bound to a subsurface are cached until the parent
+    // surface is commited, in this case the video surface.
+    // Which means we can call commit anywhere.
+    struct wl_region *input =
+        wl_compositor_create_region(wl->display.compositor);
+    for (int i = 0; i < MAX_OSD_PARTS; ++i) {
+        p->osd_surfaces[i] =
+            wl_compositor_create_surface(wl->display.compositor);
+        wl_surface_attach(p->osd_surfaces[i], NULL, 0, 0);
+        wl_surface_set_input_region(p->osd_surfaces[i], input);
+        p->osd_subsurfaces[i] =
+            wl_subcompositor_get_subsurface(wl->display.subcomp,
+                                            p->osd_surfaces[i],
+                                            wl->window.video_surface); // parent
+        wl_surface_commit(p->osd_surfaces[i]);
+        wl_subsurface_set_sync(p->osd_subsurfaces[i]);
+    }
+    wl_region_destroy(input);
+
 
     return 0;
 }
@@ -892,7 +928,6 @@ const struct vo_driver video_out_wayland = {
     .reconfig = reconfig,
     .control = control,
     .draw_image = draw_image,
-    .draw_osd = draw_osd,
     .flip_page = flip_page,
     .uninit = uninit,
     .options = (const struct m_option[]) {

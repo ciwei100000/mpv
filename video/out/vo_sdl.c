@@ -69,11 +69,11 @@ const struct formatmap_entry formats[] = {
     {SDL_PIXELFORMAT_BGR24, IMGFMT_BGR24, 0},
     {SDL_PIXELFORMAT_RGB888, IMGFMT_RGB24, 0},
     {SDL_PIXELFORMAT_BGR888, IMGFMT_BGR24, 0},
-    {SDL_PIXELFORMAT_RGB565, IMGFMT_RGB16, 0},
-    {SDL_PIXELFORMAT_BGR565, IMGFMT_BGR16, 0},
-    {SDL_PIXELFORMAT_RGB555, IMGFMT_RGB15, 0},
-    {SDL_PIXELFORMAT_BGR555, IMGFMT_BGR15, 0},
-    {SDL_PIXELFORMAT_RGB444, IMGFMT_RGB12, 0}
+    {SDL_PIXELFORMAT_RGB565, IMGFMT_BGR565, 0},
+    {SDL_PIXELFORMAT_BGR565, IMGFMT_RGB565, 0},
+    {SDL_PIXELFORMAT_RGB555, IMGFMT_BGR555, 0},
+    {SDL_PIXELFORMAT_BGR555, IMGFMT_RGB555, 0},
+    {SDL_PIXELFORMAT_RGB444, IMGFMT_BGR444, 0}
 #else
     {SDL_PIXELFORMAT_RGBX8888, IMGFMT_ABGR, 0}, // has no alpha -> bad for OSD
     {SDL_PIXELFORMAT_BGRX8888, IMGFMT_ARGB, 0}, // has no alpha -> bad for OSD
@@ -85,11 +85,11 @@ const struct formatmap_entry formats[] = {
     {SDL_PIXELFORMAT_BGR24, IMGFMT_BGR24, 0},
     {SDL_PIXELFORMAT_RGB888, IMGFMT_BGR24, 0},
     {SDL_PIXELFORMAT_BGR888, IMGFMT_RGB24, 0},
-    {SDL_PIXELFORMAT_RGB565, IMGFMT_BGR16, 0},
-    {SDL_PIXELFORMAT_BGR565, IMGFMT_RGB16, 0},
-    {SDL_PIXELFORMAT_RGB555, IMGFMT_BGR15, 0},
-    {SDL_PIXELFORMAT_BGR555, IMGFMT_RGB15, 0},
-    {SDL_PIXELFORMAT_RGB444, IMGFMT_BGR12, 0}
+    {SDL_PIXELFORMAT_RGB565, IMGFMT_RGB565, 0},
+    {SDL_PIXELFORMAT_BGR565, IMGFMT_RGB565, 0},
+    {SDL_PIXELFORMAT_RGB555, IMGFMT_RGB555, 0},
+    {SDL_PIXELFORMAT_BGR555, IMGFMT_BGR555, 0},
+    {SDL_PIXELFORMAT_RGB444, IMGFMT_RGB444, 0}
 #endif
 };
 
@@ -190,6 +190,7 @@ struct priv {
         int num_targets;
         int targets_size;
     } osd_surfaces[MAX_OSD_PARTS];
+    double osd_pts;
     int mouse_hidden;
     int brightness, contrast;
 
@@ -741,7 +742,7 @@ static void draw_osd_cb(void *ctx, struct sub_bitmaps *imgs)
     draw_osd_part(vo, imgs->render_index);
 }
 
-static void draw_osd(struct vo *vo, struct osd_state *osd)
+static void draw_osd(struct vo *vo)
 {
     struct priv *vc = vo->priv;
 
@@ -749,7 +750,7 @@ static void draw_osd(struct vo *vo, struct osd_state *osd)
         [SUBBITMAP_RGBA] = true,
     };
 
-    osd_draw(osd, vc->osd_res, osd_get_vo_pts(osd), 0, osdformats, draw_osd_cb, vo);
+    osd_draw(vo->osd, vc->osd_res, vc->osd_pts, 0, osdformats, draw_osd_cb, vo);
 }
 
 static int preinit(struct vo *vo)
@@ -849,6 +850,7 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
         SDL_SetTextureBlendMode(vc->tex, SDL_BLENDMODE_NONE);
 
     if (mpi) {
+        vc->osd_pts = mpi->pts;
         if (SDL_LockTexture(vc->tex, NULL, &pixels, &pitch)) {
             MP_ERR(vo, "SDL_LockTexture failed\n");
             return;
@@ -900,6 +902,8 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
         SDL_SetTextureColorMod(vc->tex, color_mod, color_mod, color_mod);
         SDL_RenderCopy(vc->renderer, vc->tex, &src, &dst);
     }
+
+    draw_osd(vo);
 }
 
 static struct mp_image *get_screenshot(struct vo *vo)
@@ -1020,6 +1024,5 @@ const struct vo_driver video_out_sdl = {
     .control = control,
     .draw_image = draw_image,
     .uninit = uninit,
-    .draw_osd = draw_osd,
     .flip_page = flip_page,
 };

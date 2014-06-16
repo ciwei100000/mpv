@@ -54,7 +54,6 @@ struct vo_cocoa_state {
     MpvVideoWindow *window;
     MpvVideoView *view;
     NSOpenGLContext *gl_ctx;
-    NSOpenGLPixelFormat *gl_pixfmt;
 
     NSScreen *current_screen;
     NSScreen *fs_screen;
@@ -331,38 +330,62 @@ static void create_window(struct vo *vo, struct mp_rect *win, int geo_flags)
     }
 }
 
-static NSOpenGLPixelFormatAttribute get_nsopengl_profile(int gl3profile) {
+static CGLOpenGLProfile cgl_profile(int gl3profile) {
     if (gl3profile) {
-        return NSOpenGLProfileVersion3_2Core;
+        return kCGLOGLPVersion_3_2_Core;
     } else {
-        return NSOpenGLProfileVersionLegacy;
+        return kCGLOGLPVersion_Legacy;
     }
 }
 
 static int create_gl_context(struct vo *vo, int gl3profile)
 {
     struct vo_cocoa_state *s = vo->cocoa;
+    CGLError err;
 
-    NSOpenGLPixelFormatAttribute attr[] = {
-        NSOpenGLPFAOpenGLProfile,
-        get_nsopengl_profile(gl3profile),
-        NSOpenGLPFADoubleBuffer,
+    CGLPixelFormatAttribute attrs[] = {
+        kCGLPFAOpenGLProfile,
+        (CGLPixelFormatAttribute) cgl_profile(gl3profile),
+        kCGLPFADoubleBuffer,
+        kCGLPFAAccelerated,
+        #if MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_8
+        // leave this as the last entry of the array to not break the fallback
+        // code
+        kCGLPFASupportsAutomaticGraphicsSwitching,
+        #endif
         0
     };
 
-    s->gl_pixfmt =
-        [[[NSOpenGLPixelFormat alloc] initWithAttributes:attr] autorelease];
+    CGLPixelFormatObj pix;
+    GLint npix;
 
-    if (!s->gl_pixfmt) {
-        MP_ERR(s, "Trying to build invalid OpenGL pixel format\n");
+    err = CGLChoosePixelFormat(attrs, &pix, &npix);
+    if (err == kCGLBadAttribute) {
+        // kCGLPFASupportsAutomaticGraphicsSwitching is probably not supported
+        // by the current hardware. Falling back to not using it.
+        MP_ERR(vo, "error creating CGL pixel format with automatic GPU "
+                   "switching. falling back\n");
+        attrs[MP_ARRAY_SIZE(attrs) - 2] = 0;
+        err = CGLChoosePixelFormat(attrs, &pix, &npix);
+    }
+
+    if (err != kCGLNoError) {
+        MP_FATAL(s, "error creating CGL pixel format: %s (%d)\n",
+                 CGLErrorString(err), err);
+    }
+
+    CGLContextObj ctx;
+    if ((err = CGLCreateContext(pix, 0, &ctx)) != kCGLNoError) {
+        MP_FATAL(s, "error creating CGL context: %s (%d)\n",
+                 CGLErrorString(err), err);
         return -1;
     }
 
-    s->gl_ctx =
-        [[NSOpenGLContext alloc] initWithFormat:s->gl_pixfmt
-                                   shareContext:nil];
-
+    s->gl_ctx = [[NSOpenGLContext alloc] initWithCGLContextObj:ctx];
     [s->gl_ctx makeCurrentContext];
+
+    CGLReleasePixelFormat(pix);
+    CGLReleaseContext(ctx);
 
     return 0;
 }

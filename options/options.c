@@ -27,8 +27,13 @@
 #include <sys/types.h>
 #include <limits.h>
 
-#include "options.h"
 #include "config.h"
+
+#if HAVE_PRIORITY
+#include <windows.h>
+#endif
+
+#include "options.h"
 #include "m_config.h"
 #include "m_option.h"
 #include "common/common.h"
@@ -41,14 +46,6 @@
 #include "audio/decode/dec_audio.h"
 #include "player/core.h"
 #include "player/command.h"
-#include "osdep/priority.h"
-
-/* defined in demux: */
-extern const m_option_t demux_rawaudio_opts[];
-extern const m_option_t demux_rawvideo_opts[];
-extern const m_option_t cdda_opts[];
-
-extern int sws_flags;
 
 extern const char mp_help_text[];
 
@@ -62,152 +59,44 @@ static void print_help(struct mp_log *log)
     mp_info(log, "%s", mp_help_text);
 }
 
-#if HAVE_TV
-static const m_option_t tvopts_conf[]={
-    {"immediatemode", &stream_tv_defaults.immediate, CONF_TYPE_INT, CONF_RANGE, 0, 1, NULL},
-    {"audio", &stream_tv_defaults.noaudio, CONF_TYPE_FLAG, 0, 1, 0, NULL},
-    {"audiorate", &stream_tv_defaults.audiorate, CONF_TYPE_INT, 0, 0, 0, NULL},
-    {"driver", &stream_tv_defaults.driver, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"device", &stream_tv_defaults.device, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"freq", &stream_tv_defaults.freq, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"channel", &stream_tv_defaults.channel, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"chanlist", &stream_tv_defaults.chanlist, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"norm", &stream_tv_defaults.norm, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"automute", &stream_tv_defaults.automute, CONF_TYPE_INT, CONF_RANGE, 0, 255, NULL},
-#if HAVE_TV_V4L2
-    {"normid", &stream_tv_defaults.normid, CONF_TYPE_INT, 0, 0, 0, NULL},
-#endif
-    {"width", &stream_tv_defaults.width, CONF_TYPE_INT, 0, 0, 4096, NULL},
-    {"height", &stream_tv_defaults.height, CONF_TYPE_INT, 0, 0, 4096, NULL},
-    {"input", &stream_tv_defaults.input, CONF_TYPE_INT, 0, 0, 20, NULL},
-    {"outfmt", &stream_tv_defaults.outfmt, CONF_TYPE_FOURCC, 0, 0, 0, NULL},
-    {"fps", &stream_tv_defaults.fps, CONF_TYPE_FLOAT, 0, 0, 100.0, NULL},
-    {"channels", &stream_tv_defaults.channels, CONF_TYPE_STRING_LIST, 0, 0, 0, NULL},
-    {"brightness", &stream_tv_defaults.brightness, CONF_TYPE_INT, CONF_RANGE, -100, 100, NULL},
-    {"contrast", &stream_tv_defaults.contrast, CONF_TYPE_INT, CONF_RANGE, -100, 100, NULL},
-    {"hue", &stream_tv_defaults.hue, CONF_TYPE_INT, CONF_RANGE, -100, 100, NULL},
-    {"saturation", &stream_tv_defaults.saturation, CONF_TYPE_INT, CONF_RANGE, -100, 100, NULL},
-    {"gain", &stream_tv_defaults.gain, CONF_TYPE_INT, CONF_RANGE, -1, 100, NULL},
-#if HAVE_TV_V4L2
-    {"amode", &stream_tv_defaults.amode, CONF_TYPE_INT, CONF_RANGE, 0, 3, NULL},
-    {"volume", &stream_tv_defaults.volume, CONF_TYPE_INT, CONF_RANGE, 0, 65535, NULL},
-    {"bass", &stream_tv_defaults.bass, CONF_TYPE_INT, CONF_RANGE, 0, 65535, NULL},
-    {"treble", &stream_tv_defaults.treble, CONF_TYPE_INT, CONF_RANGE, 0, 65535, NULL},
-    {"balance", &stream_tv_defaults.balance, CONF_TYPE_INT, CONF_RANGE, 0, 65535, NULL},
-    {"forcechan", &stream_tv_defaults.forcechan, CONF_TYPE_INT, CONF_RANGE, 1, 2, NULL},
-    {"forceaudio", &stream_tv_defaults.force_audio, CONF_TYPE_FLAG, 0, 0, 1, NULL},
-    {"buffersize", &stream_tv_defaults.buffer_size, CONF_TYPE_INT, CONF_RANGE, 16, 1024, NULL},
-    {"mjpeg", &stream_tv_defaults.mjpeg, CONF_TYPE_FLAG, 0, 0, 1, NULL},
-    {"decimation", &stream_tv_defaults.decimation, CONF_TYPE_INT, CONF_RANGE, 1, 4, NULL},
-    {"quality", &stream_tv_defaults.quality, CONF_TYPE_INT, CONF_RANGE, 0, 100, NULL},
-#if HAVE_ALSA
-    {"alsa", &stream_tv_defaults.alsa, CONF_TYPE_FLAG, 0, 0, 1, NULL},
-#endif /* HAVE_ALSA */
-#endif /* HAVE_TV_V4L2 */
-    {"adevice", &stream_tv_defaults.adevice, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"audioid", &stream_tv_defaults.audio_id, CONF_TYPE_INT, CONF_RANGE, 0, 9, NULL},
-    {NULL, NULL, 0, 0, 0, 0, NULL}
-};
-#endif /* HAVE_TV */
+extern const struct m_sub_options tv_params_conf;
+extern const struct m_sub_options stream_pvr_conf;
+extern const struct m_sub_options stream_cdda_conf;
+extern const struct m_sub_options stream_dvb_conf;
+extern const struct m_sub_options sws_conf;
+extern const struct m_sub_options demux_rawaudio_conf;
+extern const struct m_sub_options demux_rawvideo_conf;
+extern const struct m_sub_options demux_lavf_conf;
+extern const struct m_sub_options vd_lavc_conf;
+extern const struct m_sub_options ad_lavc_conf;
+extern const struct m_sub_options input_config;
+extern const struct m_sub_options encode_config;
+extern const struct m_sub_options image_writer_conf;
 
-extern int pvr_param_aspect_ratio;
-extern int pvr_param_sample_rate;
-extern int pvr_param_audio_layer;
-extern int pvr_param_audio_bitrate;
-extern char *pvr_param_audio_mode;
-extern int pvr_param_bitrate;
-extern char *pvr_param_bitrate_mode;
-extern int pvr_param_bitrate_peak;
-extern char *pvr_param_stream_type;
-
-#if HAVE_PVR
-static const m_option_t pvropts_conf[]={
-    {"aspect", &pvr_param_aspect_ratio, CONF_TYPE_INT, 0, 1, 4, NULL},
-    {"arate", &pvr_param_sample_rate, CONF_TYPE_INT, 0, 32000, 48000, NULL},
-    {"alayer", &pvr_param_audio_layer, CONF_TYPE_INT, 0, 1, 2, NULL},
-    {"abitrate", &pvr_param_audio_bitrate, CONF_TYPE_INT, 0, 32, 448, NULL},
-    {"amode", &pvr_param_audio_mode, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"vbitrate", &pvr_param_bitrate, CONF_TYPE_INT, 0, 0, 0, NULL},
-    {"vmode", &pvr_param_bitrate_mode, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"vpeak", &pvr_param_bitrate_peak, CONF_TYPE_INT, 0, 0, 0, NULL},
-    {"fmt", &pvr_param_stream_type, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {NULL, NULL, 0, 0, 0, 0, NULL}
-};
-#endif /* HAVE_PVR */
-
-extern const m_option_t dvbin_opts_conf[];
-extern const m_option_t lavfdopts_conf[];
-
-extern int sws_chr_vshift;
-extern int sws_chr_hshift;
-extern float sws_chr_gblur;
-extern float sws_lum_gblur;
-extern float sws_chr_sharpen;
-extern float sws_lum_sharpen;
-
-static const m_option_t scaler_filter_conf[]={
-    {"lgb", &sws_lum_gblur, CONF_TYPE_FLOAT, 0, 0, 100.0, NULL},
-    {"cgb", &sws_chr_gblur, CONF_TYPE_FLOAT, 0, 0, 100.0, NULL},
-    {"cvs", &sws_chr_vshift, CONF_TYPE_INT, 0, 0, 0, NULL},
-    {"chs", &sws_chr_hshift, CONF_TYPE_INT, 0, 0, 0, NULL},
-    {"ls", &sws_lum_sharpen, CONF_TYPE_FLOAT, 0, -100.0, 100.0, NULL},
-    {"cs", &sws_chr_sharpen, CONF_TYPE_FLOAT, 0, -100.0, 100.0, NULL},
-    {NULL, NULL, 0, 0, 0, 0, NULL}
-};
-
-extern double mf_fps;
-extern char * mf_type;
 extern const struct m_obj_list vf_obj_list;
 extern const struct m_obj_list af_obj_list;
 extern const struct m_obj_list vo_obj_list;
 extern const struct m_obj_list ao_obj_list;
 
-static const m_option_t mfopts_conf[]={
-    {"fps", &mf_fps, CONF_TYPE_DOUBLE, 0, 0, 0, NULL},
-    {"type", &mf_type, CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {NULL, NULL, 0, 0, 0, 0, NULL}
-};
-
-#if HAVE_TV
-static const m_option_t tvscan_conf[]={
-    {"autostart", &stream_tv_defaults.scan, CONF_TYPE_FLAG, 0, 0, 1, NULL},
-    {"threshold", &stream_tv_defaults.scan_threshold, CONF_TYPE_INT, CONF_RANGE, 1, 100, NULL},
-    {"period", &stream_tv_defaults.scan_period, CONF_TYPE_FLOAT, CONF_RANGE, 0.1, 2.0, NULL},
-    {NULL, NULL, 0, 0, 0, 0, NULL}
-};
-#endif
-
 #define OPT_BASE_STRUCT struct MPOpts
-
-extern const struct m_sub_options image_writer_conf;
-
-static const m_option_t screenshot_conf[] = {
-    OPT_SUBSTRUCT("", screenshot_image_opts, image_writer_conf, 0),
-    OPT_STRING("template", screenshot_template, 0),
-    {0},
-};
-
-extern const m_option_t lavc_decode_opts_conf[];
-extern const m_option_t ad_lavc_decode_opts_conf[];
-
-extern const m_option_t mp_input_opts[];
 
 const m_option_t mp_opts[] = {
     // handled in command line pre-parser (parse_commandline.c)
-    {"v", NULL, CONF_TYPE_STORE, CONF_GLOBAL | CONF_NOCFG, 0, 0, NULL},
-    {"playlist", NULL, CONF_TYPE_STRING, CONF_NOCFG | M_OPT_MIN | M_OPT_FIXED,
-     1, 0, NULL},
-    {"{", NULL, CONF_TYPE_STORE, CONF_NOCFG | M_OPT_FIXED, 0, 0, NULL},
-    {"}", NULL, CONF_TYPE_STORE, CONF_NOCFG | M_OPT_FIXED, 0, 0, NULL},
+    {"v", CONF_TYPE_STORE, CONF_GLOBAL | CONF_NOCFG, .offset = -1},
+    {"playlist", CONF_TYPE_STRING, CONF_NOCFG | M_OPT_MIN | M_OPT_FIXED,
+     .min = 1, .offset = -1},
+    {"{", CONF_TYPE_STORE, CONF_NOCFG | M_OPT_FIXED, .offset = -1},
+    {"}", CONF_TYPE_STORE, CONF_NOCFG | M_OPT_FIXED, .offset = -1},
 
     // handled in m_config.c
-    { "include", NULL, CONF_TYPE_STRING, M_OPT_FIXED },
-    { "profile", NULL, CONF_TYPE_STRING_LIST, M_OPT_FIXED },
-    { "show-profile", NULL, CONF_TYPE_STRING, CONF_NOCFG | M_OPT_FIXED },
-    { "list-options", NULL, CONF_TYPE_STORE, CONF_NOCFG | M_OPT_FIXED },
+    { "include", CONF_TYPE_STRING, M_OPT_FIXED, .offset = -1},
+    { "profile", CONF_TYPE_STRING_LIST, M_OPT_FIXED, .offset = -1},
+    { "show-profile", CONF_TYPE_STRING, CONF_NOCFG | M_OPT_FIXED, .offset = -1},
+    { "list-options", CONF_TYPE_STORE, CONF_NOCFG | M_OPT_FIXED, .offset = -1},
 
     // handled in main.c (looks at the raw argv[])
-    {"leak-report", NULL, CONF_TYPE_STORE, CONF_GLOBAL | CONF_NOCFG | M_OPT_FIXED },
+    { "leak-report", CONF_TYPE_STORE, CONF_GLOBAL | CONF_NOCFG | M_OPT_FIXED,
+      .offset = -1 },
 
     OPT_FLAG("shuffle", shuffle, CONF_GLOBAL | CONF_NOCFG),
 
@@ -222,7 +111,12 @@ const m_option_t mp_opts[] = {
     OPT_FLAG("msg-module", msg_module, CONF_GLOBAL),
     OPT_FLAG("msg-time", msg_time, CONF_GLOBAL),
 #if HAVE_PRIORITY
-    {"priority", &proc_priority, CONF_TYPE_STRING, 0, 0, 0, NULL},
+    OPT_CHOICE("priority", w32_priority, 0,
+               ({"no",          0},
+                {"abovenormal", ABOVE_NORMAL_PRIORITY_CLASS},
+                {"normal",      NORMAL_PRIORITY_CLASS},
+                {"belownormal", BELOW_NORMAL_PRIORITY_CLASS},
+                {"idle",        IDLE_PRIORITY_CLASS})),
 #endif
     OPT_FLAG("config", load_config, CONF_GLOBAL | CONF_NOCFG | CONF_PRE_PARSE),
     OPT_STRING("config-dir", force_configdir,
@@ -249,18 +143,17 @@ const m_option_t mp_opts[] = {
                       ({"no", 0})),
     OPT_INTRANGE("cache-pause-restart", stream_cache_unpause, 0, 0, 0x7fffffff),
 
-    {"cdrom-device", &cdrom_device, CONF_TYPE_STRING, 0, 0, 0, NULL},
 #if HAVE_DVDREAD || HAVE_DVDNAV
-    {"dvd-device", &dvd_device,  CONF_TYPE_STRING, 0, 0, 0, NULL},
-    {"dvd-speed", &dvd_speed, CONF_TYPE_INT, 0, 0, 0, NULL},
-    {"dvd-angle", &dvd_angle, CONF_TYPE_INT, CONF_RANGE, 1, 99, NULL},
+    OPT_STRING("dvd-device", dvd_device, 0),
+    OPT_INT("dvd-speed", dvd_speed, 0),
+    OPT_INTRANGE("dvd-angle", dvd_angle, 0, 1, 99),
 #endif /* HAVE_DVDREAD */
     OPT_INTPAIR("chapter", chapterrange, 0),
     OPT_CHOICE_OR_INT("edition", edition_id, 0, 0, 8190,
                       ({"auto", -1})),
 #if HAVE_LIBBLURAY
-    {"bluray-device",  &bluray_device,  CONF_TYPE_STRING, 0,          0,  0, NULL},
-    {"bluray-angle",   &bluray_angle,   CONF_TYPE_INT,    CONF_RANGE, 0, 999, NULL},
+    OPT_STRING("bluray-device", bluray_device, 0),
+    OPT_INTRANGE("bluray-angle", bluray_angle, 0, 0, 999),
 #endif /* HAVE_LIBBLURAY */
 
     OPT_STRINGLIST("http-header-fields", network_http_header_fields, 0),
@@ -288,9 +181,7 @@ const m_option_t mp_opts[] = {
     OPT_FLAG("pause", pause, M_OPT_FIXED),
     OPT_FLAG("keep-open", keep_open, 0),
 
-    // AVI and Ogg only: (re)build index at startup
-    OPT_FLAG_CONSTANTS("idx", index_mode, 0, -1, 1),
-    OPT_FLAG_STORE("forceidx", index_mode, 0, 2),
+    OPT_CHOICE("index", index_mode, 0, ({"default", 1}, {"recreate", 0})),
 
     // select audio/video/subtitle stream
     OPT_TRACKCHOICE("aid", audio_id),
@@ -310,7 +201,8 @@ const m_option_t mp_opts[] = {
     OPT_FLAG("quvi-fetch-subtitles", quvi_fetch_subtitles, 0),
 
 #if HAVE_CDDA
-    { "cdda", (void *)&cdda_opts, CONF_TYPE_SUBCONFIG, 0, 0, 0, NULL},
+    OPT_SUBSTRUCT("cdda", stream_cdda_opts, stream_cdda_conf, 0),
+    OPT_STRING("cdrom-device", cdrom_device, 0),
 #endif
 
     // demuxer.c - select audio/sub file/demuxer
@@ -319,15 +211,16 @@ const m_option_t mp_opts[] = {
     OPT_STRING("audio-demuxer", audio_demuxer_name, 0),
     OPT_STRING("sub-demuxer", sub_demuxer_name, 0),
 
-    {"mf", (void *) mfopts_conf, CONF_TYPE_SUBCONFIG, 0,0,0, NULL},
+    OPT_DOUBLE("mf-fps", mf_fps, 0),
+    OPT_STRING("mf-type", mf_type, 0),
 #if HAVE_TV
-    {"tv", (void *) tvopts_conf, CONF_TYPE_SUBCONFIG, 0, 0, 0, NULL},
+    OPT_SUBSTRUCT("tv", tv_params, tv_params_conf, 0),
 #endif /* HAVE_TV */
 #if HAVE_PVR
-    {"pvr", (void *) pvropts_conf, CONF_TYPE_SUBCONFIG, 0, 0, 0, NULL},
+    OPT_SUBSTRUCT("pvr", stream_pvr_opts, stream_pvr_conf, 0),
 #endif /* HAVE_PVR */
 #if HAVE_DVBIN
-    {"dvbin", (void *) dvbin_opts_conf, CONF_TYPE_SUBCONFIG, 0, 0, 0, NULL},
+    OPT_SUBSTRUCT("dvbin", stream_dvb_opts, stream_dvb_conf, 0),
 #endif
 
 // ------------------------- a-v sync options --------------------
@@ -373,9 +266,8 @@ const m_option_t mp_opts[] = {
                 {"vaapi-copy", 5})),
     OPT_STRING("hwdec-codecs", hwdec_codecs, 0),
 
-    // scaling:
-    {"sws", &sws_flags, CONF_TYPE_INT, 0, 0, 2, NULL},
-    {"ssf", (void *) scaler_filter_conf, CONF_TYPE_SUBCONFIG, 0, 0, 0, NULL},
+    OPT_SUBSTRUCT("sws", vo.sws_opts, sws_conf, 0),
+
     // -1 means auto aspect (prefer container size until aspect change)
     //  0 means square pixels
     OPT_FLOATRANGE("video-aspect", movie_aspect, 0, -1.0, 10.0),
@@ -384,12 +276,12 @@ const m_option_t mp_opts[] = {
     OPT_CHOICE("field-dominance", field_dominance, 0,
                ({"auto", -1}, {"top", 0}, {"bottom", 1})),
 
-    {"vd-lavc", (void *) lavc_decode_opts_conf, CONF_TYPE_SUBCONFIG},
-    {"ad-lavc", (void *) ad_lavc_decode_opts_conf, CONF_TYPE_SUBCONFIG},
+    OPT_SUBSTRUCT("vd-lavc", vd_lavc_params, vd_lavc_conf, 0),
+    OPT_SUBSTRUCT("ad-lavc", ad_lavc_params, ad_lavc_conf, 0),
 
-    {"demuxer-lavf", (void *) lavfdopts_conf, CONF_TYPE_SUBCONFIG},
-    {"demuxer-rawaudio", (void *)&demux_rawaudio_opts, CONF_TYPE_SUBCONFIG},
-    {"demuxer-rawvideo", (void *)&demux_rawvideo_opts, CONF_TYPE_SUBCONFIG},
+    OPT_SUBSTRUCT("demuxer-lavf", demux_lavf, demux_lavf_conf, 0),
+    OPT_SUBSTRUCT("demuxer-rawaudio", demux_rawaudio, demux_rawaudio_conf, 0),
+    OPT_SUBSTRUCT("demuxer-rawvideo", demux_rawvideo, demux_rawvideo_conf, 0),
 
     OPT_FLAG("demuxer-mkv-subtitle-preroll", mkv_subtitle_preroll, 0),
     OPT_FLAG("mkv-subtitle-preroll", mkv_subtitle_preroll, 0), // old alias
@@ -405,7 +297,7 @@ const m_option_t mp_opts[] = {
     OPT_FLAG("sub-visibility", sub_visibility, 0),
     OPT_FLAG("sub-forced-only", forced_subs_only, 0),
     OPT_FLAG("stretch-dvd-subs", stretch_dvd_subs, 0),
-    OPT_FLAG_CONSTANTS("sub-fix-timing", suboverlap_enabled, 0, 1, 0),
+    OPT_FLAG("sub-fix-timing", sub_fix_timing, 0),
     OPT_CHOICE("sub-auto", sub_auto, 0,
                ({"no", -1}, {"exact", 0}, {"fuzzy", 1}, {"all", 2})),
     OPT_INTRANGE("sub-pos", sub_pos, 0, 0, 100),
@@ -428,6 +320,7 @@ const m_option_t mp_opts[] = {
                ({"simple", 0}, {"complex", 1})),
     OPT_CHOICE("ass-style-override", ass_style_override, 0,
                ({"no", 0}, {"yes", 1}, {"force", 3})),
+    OPT_FLAG("sub-scale-with-window", sub_scale_with_window, 0),
     OPT_FLAG("osd-bar", osd_bar_visible, 0),
     OPT_FLOATRANGE("osd-bar-align-x", osd_bar_align_x, 0, -1.0, +1.0),
     OPT_FLOATRANGE("osd-bar-align-y", osd_bar_align_y, 0, -1.0, +1.0),
@@ -460,7 +353,10 @@ const m_option_t mp_opts[] = {
                 {"no", 0},
                 {"yes", 1}, {"", 1})),
     OPT_STRING("volume-restore-data", mixer_restore_volume_data, 0),
-    OPT_FLAG("gapless-audio", gapless_audio, M_OPT_FIXED),
+    OPT_CHOICE("gapless-audio", gapless_audio, M_OPT_FIXED | M_OPT_OPTIONAL_PARAM,
+               ({"no", 0},
+                {"yes", 1}, {"", 1},
+                {"weak", -1})),
 
     OPT_GEOMETRY("geometry", vo.geometry, 0),
     OPT_SIZE_BOX("autofit", vo.autofit, 0),
@@ -598,16 +494,13 @@ const m_option_t mp_opts[] = {
 
     OPT_FLAG("slave-broken", slave_mode, CONF_GLOBAL),
     OPT_FLAG("idle", player_idle_mode, M_OPT_GLOBAL),
-    OPT_INTRANGE("key-fifo-size", input.key_fifo_size, CONF_GLOBAL, 2, 65000),
     OPT_FLAG("input-terminal", consolecontrols, CONF_GLOBAL),
     OPT_FLAG("input-cursor", vo.enable_mouse_movements, CONF_GLOBAL),
-#if HAVE_TV
-    {"tv-scan", (void *) tvscan_conf, CONF_TYPE_SUBCONFIG, 0, 0, 0, NULL},
-#endif /* HAVE_TV */
 
-    {"screenshot", (void *) screenshot_conf, CONF_TYPE_SUBCONFIG},
+    OPT_SUBSTRUCT("screenshot", screenshot_image_opts, image_writer_conf, 0),
+    OPT_STRING("screenshot-template", screenshot_template, 0),
 
-    {"", (void *) mp_input_opts, CONF_TYPE_SUBCONFIG},
+    OPT_SUBSTRUCT("input", input_opts, input_config, 0),
 
     OPT_PRINT("list-properties", property_print_help),
     OPT_PRINT("help", print_help),
@@ -616,28 +509,10 @@ const m_option_t mp_opts[] = {
     OPT_PRINT("V", print_version),
 
 #if HAVE_ENCODING
-    OPT_STRING("o", encode_output.file, CONF_GLOBAL | CONF_NOCFG | CONF_PRE_PARSE),
-    OPT_STRING("of", encode_output.format, CONF_GLOBAL),
-    OPT_STRINGLIST("ofopts*", encode_output.fopts, CONF_GLOBAL),
-    OPT_FLOATRANGE("ofps", encode_output.fps, CONF_GLOBAL, 0.0, 1000000.0),
-    OPT_FLOATRANGE("omaxfps", encode_output.maxfps, CONF_GLOBAL, 0.0, 1000000.0),
-    OPT_STRING("ovc", encode_output.vcodec, CONF_GLOBAL),
-    OPT_STRINGLIST("ovcopts*", encode_output.vopts, CONF_GLOBAL),
-    OPT_STRING("oac", encode_output.acodec, CONF_GLOBAL),
-    OPT_STRINGLIST("oacopts*", encode_output.aopts, CONF_GLOBAL),
-    OPT_FLAG("oharddup", encode_output.harddup, CONF_GLOBAL),
-    OPT_FLOATRANGE("ovoffset", encode_output.voffset, CONF_GLOBAL, -1000000.0, 1000000.0),
-    OPT_FLOATRANGE("oaoffset", encode_output.aoffset, CONF_GLOBAL, -1000000.0, 1000000.0),
-    OPT_FLAG("ocopyts", encode_output.copyts, CONF_GLOBAL),
-    OPT_FLAG("orawts", encode_output.rawts, CONF_GLOBAL),
-    OPT_FLAG("oautofps", encode_output.autofps, CONF_GLOBAL),
-    OPT_FLAG("oneverdrop", encode_output.neverdrop, CONF_GLOBAL),
-    OPT_FLAG("ovfirst", encode_output.video_first, CONF_GLOBAL),
-    OPT_FLAG("oafirst", encode_output.audio_first, CONF_GLOBAL),
-    OPT_FLAG("ometadata", encode_output.metadata, CONF_GLOBAL),
+    OPT_SUBSTRUCT("", encode_opts, encode_config, 0),
 #endif
 
-    {NULL, NULL, 0, 0, 0, 0, NULL}
+    {0}
 };
 
 const struct MPOpts mp_default_opts = {
@@ -739,7 +614,7 @@ const struct MPOpts mp_default_opts = {
     .ass_style_override = 1,
     .ass_shaper = 1,
     .use_embedded_fonts = 1,
-    .suboverlap_enabled = 0,
+    .sub_fix_timing = 1,
 #if HAVE_ENCA
     .sub_cp = "enca",
 #else
@@ -748,36 +623,11 @@ const struct MPOpts mp_default_opts = {
 
     .hwdec_codecs = "h264,vc1,wmv3",
 
-    .index_mode = -1,
+    .index_mode = 1,
 
-    .ad_lavc_param = {
-        .ac3drc = 1.,
-        .downmix = 1,
-        .threads = 1,
-    },
-    .lavfdopts = {
-        .allow_mimetype = 1,
-    },
-    .lavc_param = {
-        .show_all = 0,
-        .check_hw_profile = 1,
-    },
-    .input = {
-        .key_fifo_size = 7,
-        .doubleclick_time = 300,
-        .ar_delay = 200,
-        .ar_rate = 40,
-        .use_lirc = 1,
-        .use_alt_gr = 1,
-#if HAVE_COCOA
-        .use_appleremote = 1,
-        .use_media_keys = 1,
-#endif
-        .default_bindings = 1,
-    },
-    .encode_output = {
-        .metadata = 1,
-    },
+    .dvd_angle = 1,
+
+    .mf_fps = 1.0,
 };
 
 #endif /* MPLAYER_CFG_MPLAYER_H */

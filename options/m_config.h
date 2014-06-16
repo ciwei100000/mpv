@@ -67,6 +67,9 @@ typedef struct m_config {
     int (*includefunc)(void *ctx, char *filename, int flags);
     void *includefunc_ctx;
 
+    // For the command line parser
+    int recursion_depth;
+
     void *optstruct; // struct mpopts or other
 } m_config_t;
 
@@ -236,5 +239,11 @@ void m_config_set_profile(struct m_config *config, struct m_profile *p,
 
 void *m_config_alloc_struct(void *talloc_ctx,
                             const struct m_sub_options *subopts);
+
+// Create a copy of the struct ptr, described by opts.
+// "opts" must live until the struct is free'd.
+// Freeing the struct frees all members.
+void *m_sub_options_copy(void *talloc_ctx, const struct m_sub_options *opts,
+                         const void *ptr);
 
 #endif /* MPLAYER_M_CONFIG_H */

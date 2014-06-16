@@ -42,9 +42,9 @@
 /*
  * Locking hierarchy:
  *
- *  MPContext > mp_client_api.lock > mpv_handle.lock
+ *  MPContext > mp_client_api.lock > mpv_handle.lock > * > mpv_handle.wakeup_lock
  *
- * MPContext strictly speaking has no locks, and instead implicitly managed
+ * MPContext strictly speaking has no locks, and instead is implicitly managed
  * by MPContext.dispatch, which basically stops the playback thread at defined
  * points in order to let clients access it in a synchronized manner. Since
  * MPContext code accesses the client API, it's on top of the lock hierarchy.
@@ -251,6 +251,8 @@ void mpv_set_wakeup_callback(mpv_handle *ctx, void (*cb)(void *d), void *d)
     pthread_mutex_lock(&ctx->wakeup_lock);
     ctx->wakeup_cb = cb;
     ctx->wakeup_cb_ctx = d;
+    if (ctx->wakeup_cb)
+        ctx->wakeup_cb(ctx->wakeup_cb_ctx);
     pthread_mutex_unlock(&ctx->wakeup_lock);
 }
 
@@ -362,6 +364,7 @@ mpv_handle *mpv_create(void)
         mpv_set_option_string(ctx, "terminal", "no");
         mpv_set_option_string(ctx, "osc", "no");
         mpv_set_option_string(ctx, "input-default-bindings", "no");
+        mpv_set_option_string(ctx, "input-lirc", "no");
     } else {
         mp_destroy(mpctx);
     }
@@ -1166,7 +1169,7 @@ static bool match_property(const char *a, const char *b)
 }
 
 // Broadcast that properties have changed.
-void mp_client_property_change(struct MPContext *mpctx, const char **list)
+void mp_client_property_change(struct MPContext *mpctx, const char *const *list)
 {
     struct mp_client_api *clients = mpctx->clients;
 
@@ -1324,8 +1327,10 @@ int mpv_request_log_messages(mpv_handle *ctx, const char *min_level)
 int mpv_get_wakeup_pipe(mpv_handle *ctx)
 {
     pthread_mutex_lock(&ctx->wakeup_lock);
-    if (ctx->wakeup_pipe[0] == -1)
+    if (ctx->wakeup_pipe[0] == -1) {
         mp_make_wakeup_pipe(ctx->wakeup_pipe);
+        write(ctx->wakeup_pipe[1], &(char){0}, 1);
+    }
     pthread_mutex_unlock(&ctx->wakeup_lock);
     return ctx->wakeup_pipe[0];
 }
@@ -1335,7 +1340,7 @@ unsigned long mpv_client_api_version(void)
     return MPV_CLIENT_API_VERSION;
 }
 
-static const char *err_table[] = {
+static const char *const err_table[] = {
     [-MPV_ERROR_SUCCESS] = "success",
     [-MPV_ERROR_EVENT_QUEUE_FULL] = "event queue full",
     [-MPV_ERROR_NOMEM] = "memory allocation failed",
@@ -1362,7 +1367,7 @@ const char *mpv_error_string(int error)
     return name ? name : "unknown error";
 }
 
-static const char *event_table[] = {
+static const char *const event_table[] = {
     [MPV_EVENT_NONE] = "none",
     [MPV_EVENT_SHUTDOWN] = "shutdown",
     [MPV_EVENT_LOG_MESSAGE] = "log-message",

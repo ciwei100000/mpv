@@ -92,7 +92,19 @@ enum stream_ctrl {
     STREAM_CTRL_GET_BASE_FILENAME,
     STREAM_CTRL_GET_NAV_EVENT,          // struct mp_nav_event**
     STREAM_CTRL_NAV_CMD,                // struct mp_nav_cmd*
-    STREAM_CTRL_GET_DISC_NAME
+    STREAM_CTRL_GET_DISC_NAME,
+    STREAM_CTRL_TV_SET_SCAN,
+    STREAM_CTRL_SET_TV_FREQ,
+    STREAM_CTRL_GET_TV_FREQ,
+    STREAM_CTRL_SET_TV_COLORS,
+    STREAM_CTRL_GET_TV_COLORS,
+    STREAM_CTRL_TV_SET_NORM,
+    STREAM_CTRL_TV_STEP_NORM,
+    STREAM_CTRL_TV_SET_CHAN,
+    STREAM_CTRL_TV_STEP_CHAN,
+    STREAM_CTRL_TV_LAST_CHAN,
+    STREAM_CTRL_DVB_SET_CHANNEL,
+    STREAM_CTRL_DVB_STEP_CHANNEL,
 };
 
 struct stream_lang_req {
@@ -106,16 +118,23 @@ struct stream_dvd_info_req {
     int num_subs;
 };
 
+// for STREAM_CTRL_SET_TV_COLORS
+#define TV_COLOR_BRIGHTNESS     1
+#define TV_COLOR_HUE            2
+#define TV_COLOR_SATURATION     3
+#define TV_COLOR_CONTRAST       4
+
 struct stream;
 typedef struct stream_info_st {
     const char *name;
     // opts is set from ->opts
     int (*open)(struct stream *st);
-    const char **protocols;
+    const char *const *protocols;
     int priv_size;
     const void *priv_defaults;
+    void *(*get_defaults)(struct stream *st);
     const struct m_option *options;
-    const char **url_options;
+    const char *const *url_options;
     bool stream_filter;
     bool can_write;
 } stream_info_t;
@@ -225,15 +244,6 @@ stream_t *open_memory_stream(void *data, int len);
 bool stream_check_interrupt(struct stream *s);
 
 bool stream_manages_timeline(stream_t *s);
-
-/* stream/stream_dvd.c */
-extern int dvd_title;
-extern int dvd_angle;
-extern int dvd_speed;
-extern char *dvd_device, *cdrom_device;
-
-extern int bluray_angle;
-extern char *bluray_device;
 
 typedef struct {
     int id; // 0 - 31 mpeg; 128 - 159 ac3; 160 - 191 pcm

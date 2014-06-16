@@ -596,8 +596,7 @@ static const struct wl_registry_listener registry_listener = {
 
 static int lookupkey(int key)
 {
-    static const char *passthrough_keys
-        = " -+*/<>`~!@#$%^&()_{}:;\"\',.?\\|=[]";
+    const char *passthrough_keys = " -+*/<>`~!@#$%^&()_{}:;\"\',.?\\|=[]";
 
     int mpkey = 0;
     if ((key >= 'a' && key <= 'z') ||
@@ -745,6 +744,9 @@ static void destroy_display (struct vo_wayland_state *wl)
     if (wl->display.shell)
         wl_shell_destroy(wl->display.shell);
 
+    if (wl->display.subcomp)
+        wl_subcompositor_destroy(wl->display.subcomp);
+
     if (wl->display.compositor)
         wl_compositor_destroy(wl->display.compositor);
 
@@ -763,23 +765,6 @@ static bool create_window (struct vo_wayland_state *wl)
         wl_compositor_create_surface(wl->display.compositor);
     wl->window.shell_surface =
         wl_shell_get_shell_surface(wl->display.shell, wl->window.video_surface);
-
-    // Commits on surfaces bound to a subsurface are cached until the parent
-    // surface is commited, in this case the video surface.
-    // Which means we can call commit anywhere.
-    struct wl_region *input =
-        wl_compositor_create_region(wl->display.compositor);
-    for (int i = 0; i < MAX_OSD_PARTS; ++i) {
-        wl->window.osd_surfaces[i] =
-            wl_compositor_create_surface(wl->display.compositor);
-        wl_surface_set_input_region(wl->window.osd_surfaces[i], input);
-        wl->window.osd_subsurfaces[i] =
-            wl_subcompositor_get_subsurface(wl->display.subcomp,
-                                            wl->window.osd_surfaces[i],
-                                            wl->window.video_surface); // parent
-        wl_subsurface_set_sync(wl->window.osd_subsurfaces[i]);
-    }
-    wl_region_destroy(input);
 
     if (!wl->window.shell_surface) {
         MP_ERR(wl, "creating shell surface failed\n");

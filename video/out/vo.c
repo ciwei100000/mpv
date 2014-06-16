@@ -47,24 +47,24 @@
 //
 // Externally visible list of all vo drivers
 //
-extern struct vo_driver video_out_x11;
-extern struct vo_driver video_out_vdpau;
-extern struct vo_driver video_out_xv;
-extern struct vo_driver video_out_opengl;
-extern struct vo_driver video_out_opengl_hq;
-extern struct vo_driver video_out_opengl_old;
-extern struct vo_driver video_out_null;
-extern struct vo_driver video_out_image;
-extern struct vo_driver video_out_lavc;
-extern struct vo_driver video_out_caca;
-extern struct vo_driver video_out_direct3d;
-extern struct vo_driver video_out_direct3d_shaders;
-extern struct vo_driver video_out_sdl;
-extern struct vo_driver video_out_corevideo;
-extern struct vo_driver video_out_vaapi;
-extern struct vo_driver video_out_wayland;
+extern const struct vo_driver video_out_x11;
+extern const struct vo_driver video_out_vdpau;
+extern const struct vo_driver video_out_xv;
+extern const struct vo_driver video_out_opengl;
+extern const struct vo_driver video_out_opengl_hq;
+extern const struct vo_driver video_out_opengl_old;
+extern const struct vo_driver video_out_null;
+extern const struct vo_driver video_out_image;
+extern const struct vo_driver video_out_lavc;
+extern const struct vo_driver video_out_caca;
+extern const struct vo_driver video_out_direct3d;
+extern const struct vo_driver video_out_direct3d_shaders;
+extern const struct vo_driver video_out_sdl;
+extern const struct vo_driver video_out_corevideo;
+extern const struct vo_driver video_out_vaapi;
+extern const struct vo_driver video_out_wayland;
 
-const struct vo_driver *video_out_drivers[] =
+const struct vo_driver *const video_out_drivers[] =
 {
 #if HAVE_VDPAU
         &video_out_vdpau,
@@ -152,7 +152,7 @@ static int event_fd_callback(void *ctx, int fd)
 }
 
 static struct vo *vo_create(struct mpv_global *global,
-                            struct input_ctx *input_ctx,
+                            struct input_ctx *input_ctx, struct osd_state *osd,
                             struct encode_lavc_context *encode_lavc_ctx,
                             char *name, char **args)
 {
@@ -171,6 +171,7 @@ static struct vo *vo_create(struct mpv_global *global,
         .global = global,
         .encode_lavc_ctx = encode_lavc_ctx,
         .input_ctx = input_ctx,
+        .osd = osd,
         .event_fd = -1,
         .monitor_par = 1,
         .max_video_queue = 1,
@@ -198,6 +199,7 @@ error:
 
 struct vo *init_best_video_out(struct mpv_global *global,
                                struct input_ctx *input_ctx,
+                               struct osd_state *osd,
                                struct encode_lavc_context *encode_lavc_ctx)
 {
     struct m_obj_settings *vo_list = global->opts->vo.video_driver_list;
@@ -207,7 +209,7 @@ struct vo *init_best_video_out(struct mpv_global *global,
             // Something like "-vo name," allows fallback to autoprobing.
             if (strlen(vo_list[n].name) == 0)
                 goto autoprobe;
-            struct vo *vo = vo_create(global, input_ctx, encode_lavc_ctx,
+            struct vo *vo = vo_create(global, input_ctx, osd, encode_lavc_ctx,
                                       vo_list[n].name, vo_list[n].attribs);
             if (vo)
                 return vo;
@@ -217,7 +219,7 @@ struct vo *init_best_video_out(struct mpv_global *global,
 autoprobe:
     // now try the rest...
     for (int i = 0; video_out_drivers[i]; i++) {
-        struct vo *vo = vo_create(global, input_ctx, encode_lavc_ctx,
+        struct vo *vo = vo_create(global, input_ctx, osd, encode_lavc_ctx,
                                   (char *)video_out_drivers[i]->name, NULL);
         if (vo)
             return vo;
@@ -321,15 +323,6 @@ double vo_get_next_pts(struct vo *vo, int index)
     return vo->video_queue[index]->pts;
 }
 
-int vo_redraw_frame(struct vo *vo)
-{
-    if (vo->config_ok && vo_control(vo, VOCTRL_REDRAW_FRAME, NULL) == true) {
-        vo->want_redraw = false;
-        return 0;
-    }
-    return -1;
-}
-
 bool vo_get_want_redraw(struct vo *vo)
 {
     return vo->config_ok && vo->want_redraw;
@@ -351,12 +344,7 @@ void vo_new_frame_imminent(struct vo *vo)
     assert(vo->num_video_queue > 0);
     vo->driver->draw_image(vo, vo->video_queue[0]);
     shift_queue(vo);
-}
-
-void vo_draw_osd(struct vo *vo, struct osd_state *osd)
-{
-    if (vo->config_ok && vo->driver->draw_osd)
-        vo->driver->draw_osd(vo, osd);
+    vo->hasframe = true;
 }
 
 void vo_flip_page(struct vo *vo, int64_t pts_us, int duration)
@@ -368,7 +356,13 @@ void vo_flip_page(struct vo *vo, int64_t pts_us, int duration)
         vo->driver->flip_page_timed(vo, pts_us, duration);
     else
         vo->driver->flip_page(vo);
-    vo->hasframe = true;
+}
+
+void vo_redraw(struct vo *vo)
+{
+    vo->want_redraw = false;
+    if (vo->config_ok && vo_control(vo, VOCTRL_REDRAW_FRAME, NULL) == true)
+        vo_flip_page(vo, 0, -1);
 }
 
 void vo_check_events(struct vo *vo)

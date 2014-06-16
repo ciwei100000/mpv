@@ -261,6 +261,8 @@ static void ao_play_data(struct ao *ao)
     // any new data (due to rounding to period boundaries).
     p->buffers_full = max >= space && r <= 0;
     p->avoid_ao_wait = (max == 0 && space > 0) || p->paused || stuck;
+    MP_TRACE(ao, "in=%d, space=%d r=%d flags=%d aw=%d full=%d f=%d\n", max,
+             space, r, flags, p->avoid_ao_wait, p->buffers_full, p->final_chunk);
 }
 
 // Estimate when the AO needs data again.
@@ -295,7 +297,7 @@ static void *playthread(void *arg)
             p->requested_data = true;
         }
 
-        if (p->drain && p->avoid_ao_wait) {
+        if (p->drain && (p->avoid_ao_wait || p->paused)) {
             if (ao->driver->drain)
                 ao->driver->drain(ao);
             p->drain = false;

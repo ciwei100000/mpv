@@ -68,19 +68,54 @@ static enum AVPixelFormat get_format_hwdec(struct AVCodecContext *avctx,
 
 static void uninit(struct dec_video *vd);
 
-#define OPT_BASE_STRUCT struct MPOpts
+#define OPT_BASE_STRUCT struct vd_lavc_params
 
-const m_option_t lavc_decode_opts_conf[] = {
-    OPT_FLAG_CONSTANTS("fast", lavc_param.fast, 0, 0, CODEC_FLAG2_FAST),
-    OPT_FLAG("show-all", lavc_param.show_all, 0),
-    OPT_STRING("skiploopfilter", lavc_param.skip_loop_filter_str, 0),
-    OPT_STRING("skipidct", lavc_param.skip_idct_str, 0),
-    OPT_STRING("skipframe", lavc_param.skip_frame_str, 0),
-    OPT_INTRANGE("threads", lavc_param.threads, 0, 0, 16),
-    OPT_FLAG_CONSTANTS("bitexact", lavc_param.bitexact, 0, 0, CODEC_FLAG_BITEXACT),
-    OPT_FLAG("check-hw-profile", lavc_param.check_hw_profile, 0),
-    OPT_STRING("o", lavc_param.avopt, 0),
-    {NULL, NULL, 0, 0, 0, 0, NULL}
+struct vd_lavc_params {
+    int fast;
+    int show_all;
+    int skip_loop_filter;
+    int skip_idct;
+    int skip_frame;
+    int threads;
+    int bitexact;
+    int check_hw_profile;
+    char *avopt;
+};
+
+static const struct m_opt_choice_alternatives discard_names[] = {
+    {"none",        AVDISCARD_NONE},
+    {"default",     AVDISCARD_DEFAULT},
+    {"nonref",      AVDISCARD_NONREF},
+    {"bidir",       AVDISCARD_BIDIR},
+    {"nonkey",      AVDISCARD_NONKEY},
+    {"all",         AVDISCARD_ALL},
+    {0}
+};
+#define OPT_DISCARD(name, field, flags) \
+    OPT_GENERAL(int, name, field, flags, .type = CONF_TYPE_CHOICE, \
+                .priv = (void *)discard_names)
+
+const struct m_sub_options vd_lavc_conf = {
+    .opts = (const m_option_t[]){
+        OPT_FLAG("fast", fast, 0),
+        OPT_FLAG("show-all", show_all, 0),
+        OPT_DISCARD("skiploopfilter", skip_loop_filter, 0),
+        OPT_DISCARD("skipidct", skip_idct, 0),
+        OPT_DISCARD("skipframe", skip_frame, 0),
+        OPT_INTRANGE("threads", threads, 0, 0, 16),
+        OPT_FLAG("bitexact", bitexact, 0),
+        OPT_FLAG("check-hw-profile", check_hw_profile, 0),
+        OPT_STRING("o", avopt, 0),
+        {0}
+    },
+    .size = sizeof(struct vd_lavc_params),
+    .defaults = &(const struct vd_lavc_params){
+        .show_all = 0,
+        .check_hw_profile = 1,
+        .skip_loop_filter = AVDISCARD_DEFAULT,
+        .skip_idct = AVDISCARD_DEFAULT,
+        .skip_frame = AVDISCARD_DEFAULT,
+    },
 };
 
 const struct vd_lavc_hwdec mp_vd_lavc_vdpau;
@@ -88,7 +123,7 @@ const struct vd_lavc_hwdec mp_vd_lavc_vda;
 const struct vd_lavc_hwdec mp_vd_lavc_vaapi;
 const struct vd_lavc_hwdec mp_vd_lavc_vaapi_copy;
 
-static const struct vd_lavc_hwdec *hwdec_list[] = {
+static const struct vd_lavc_hwdec *const hwdec_list[] = {
 #if HAVE_VDPAU_HWACCEL
     &mp_vd_lavc_vdpau,
 #endif
@@ -123,26 +158,13 @@ static bool hwdec_codec_allowed(struct dec_video *vd, const char *codec)
     return false;
 }
 
-static enum AVDiscard str2AVDiscard(struct dec_video *vd, char *str)
-{
-    if (!str)                               return AVDISCARD_DEFAULT;
-    if (strcasecmp(str, "none"   ) == 0)    return AVDISCARD_NONE;
-    if (strcasecmp(str, "default") == 0)    return AVDISCARD_DEFAULT;
-    if (strcasecmp(str, "nonref" ) == 0)    return AVDISCARD_NONREF;
-    if (strcasecmp(str, "bidir"  ) == 0)    return AVDISCARD_BIDIR;
-    if (strcasecmp(str, "nonkey" ) == 0)    return AVDISCARD_NONKEY;
-    if (strcasecmp(str, "all"    ) == 0)    return AVDISCARD_ALL;
-    MP_ERR(vd, "Unknown discard value %s\n", str);
-    return AVDISCARD_DEFAULT;
-}
-
 // Find the correct profile entry for the current codec and profile.
 // Assumes the table has higher profiles first (for each codec).
 const struct hwdec_profile_entry *hwdec_find_profile(
     struct lavc_ctx *ctx, const struct hwdec_profile_entry *table)
 {
     assert(AV_CODEC_ID_NONE == 0);
-    struct lavc_param *lavc_param = &ctx->opts->lavc_param;
+    struct vd_lavc_params *lavc_param = ctx->opts->vd_lavc_params;
     enum AVCodecID codec = ctx->avctx->codec_id;
     int profile = ctx->avctx->profile;
     // Assume nobody cares about these aspects of the profile
@@ -303,7 +325,7 @@ static void init_avctx(struct dec_video *vd, const char *decoder,
                        struct vd_lavc_hwdec *hwdec)
 {
     vd_ffmpeg_ctx *ctx = vd->priv;
-    struct lavc_param *lavc_param = &vd->opts->lavc_param;
+    struct vd_lavc_params *lavc_param = vd->opts->vd_lavc_params;
     bool mp_rawvideo = false;
     struct sh_stream *sh = vd->header;
 
@@ -345,9 +367,9 @@ static void init_avctx(struct dec_video *vd, const char *decoder,
         mp_set_avcodec_threads(avctx, lavc_param->threads);
     }
 
-    avctx->flags |= lavc_param->bitexact;
+    avctx->flags |= lavc_param->bitexact ? CODEC_FLAG_BITEXACT : 0;
+    avctx->flags2 |= lavc_param->fast ? CODEC_FLAG2_FAST : 0;
 
-    avctx->flags2 |= lavc_param->fast;
     if (lavc_param->show_all) {
 #ifdef CODEC_FLAG2_SHOW_ALL
         avctx->flags2 |= CODEC_FLAG2_SHOW_ALL; // ffmpeg only?
@@ -357,9 +379,9 @@ static void init_avctx(struct dec_video *vd, const char *decoder,
 #endif
     }
 
-    avctx->skip_loop_filter = str2AVDiscard(vd, lavc_param->skip_loop_filter_str);
-    avctx->skip_idct = str2AVDiscard(vd, lavc_param->skip_idct_str);
-    avctx->skip_frame = str2AVDiscard(vd, lavc_param->skip_frame_str);
+    avctx->skip_loop_filter = lavc_param->skip_loop_filter;
+    avctx->skip_idct = lavc_param->skip_idct;
+    avctx->skip_frame = lavc_param->skip_frame;
 
     if (lavc_param->avopt) {
         if (parse_avopts(avctx, lavc_param->avopt) < 0) {
