@@ -1,3 +1,9 @@
+mpv (0.6.1-1+ffmpeg) experimental; urgency=medium
+
+  * Build against ffmpeg
+
+ -- Alessandro Ghedini <ghedo@debian.org>  Sun, 12 Oct 2014 14:48:59 +0200
+
 mpv (0.6.1-1) unstable; urgency=medium
 
   * New upstream release
