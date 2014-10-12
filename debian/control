@@ -28,8 +28,6 @@ Build-Depends: debhelper (>= 9),
  liblircclient-dev,
  liblua5.2-dev,
  libmpg123-dev,
- libncurses5-dev,
- libncursesw5-dev,
  libpulse-dev,
  libquvi-dev (>= 0.4.1-2.1),
  libsdl2-dev,
@@ -40,13 +38,13 @@ Build-Depends: debhelper (>= 9),
  libx11-dev,
  libxinerama-dev,
  libxkbcommon-dev [linux-any],
+ libxrandr-dev,
  libxss-dev,
  libxv-dev,
  pkg-config,
  python,
  python-docutils,
- yasm
-Standards-Version: 3.9.5
+Standards-Version: 3.9.6
 Homepage: http://mpv.io/
 Vcs-Git: git://anonscm.debian.org/pkg-multimedia/mpv.git
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-multimedia/mpv.git
