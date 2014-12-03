@@ -67,6 +67,13 @@ enum mp_csp_prim {
     MP_CSP_PRIM_COUNT
 };
 
+enum mp_csp_trc {
+    MP_CSP_TRC_NONE,
+    MP_CSP_TRC_BT_2020_APPROX,
+    MP_CSP_TRC_BT_2020_EXACT,
+    MP_CSP_TRC_SRGB
+};
+
 // Any enum mp_csp_prim value is a valid index (except MP_CSP_PRIM_COUNT)
 extern const char *const mp_csp_prim_names[MP_CSP_PRIM_COUNT];
 
@@ -82,7 +89,12 @@ enum mp_render_intent {
 // The numeric values (except -1) match the Matroska StereoMode element value.
 enum mp_stereo3d_mode {
     MP_STEREO3D_INVALID = -1,
+    /* only modes explicitly referenced in the code are listed */
     MP_STEREO3D_MONO = 0,
+    MP_STEREO3D_SBS2L = 1,
+    MP_STEREO3D_AB2R = 2,
+    MP_STEREO3D_AB2L = 3,
+    MP_STEREO3D_SBS2R = 11,
     /* no explicit enum entries for most valid values */
     MP_STEREO3D_COUNT = 13, // 12 is last valid mode
 };
@@ -91,6 +103,8 @@ extern const char *const mp_stereo3d_names[MP_STEREO3D_COUNT];
 
 #define MP_STEREO3D_NAME(x) \
     ((x) >= 0 && (x) < MP_STEREO3D_COUNT ? (char *)mp_stereo3d_names[(x)] : NULL)
+#define MP_STEREO3D_NAME_DEF(x, def) \
+    (MP_STEREO3D_NAME(x) ? MP_STEREO3D_NAME(x) : (def))
 
 struct mp_csp_details {
     enum mp_csp format;

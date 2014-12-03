@@ -156,6 +156,8 @@ struct gl_video {
     struct osd_state *osd_state;
     struct mpgl_osd *osd;
     double osd_pts;
+    float osd_offset[2];
+    bool osd_offset_set;
 
     GLuint lut_3d_texture;
     bool use_lut_3d;
@@ -307,7 +309,7 @@ const struct gl_video_opts gl_video_opts_hq_def = {
 
 static int validate_scaler_opt(struct mp_log *log, const m_option_t *opt,
                                struct bstr name, struct bstr param);
-static void draw_osd_cb(void *ctx, struct sub_bitmaps *imgs);
+static void draw_osd(struct gl_video *p);
 
 #define OPT_BASE_STRUCT struct gl_video_opts
 const struct m_sub_options gl_video_conf = {
@@ -324,6 +326,8 @@ const struct m_sub_options gl_video_conf = {
                     {"quadbuffer",      GL_3D_QUADBUFFER})),
         OPT_STRING_VALIDATE("lscale", scalers[0], 0, validate_scaler_opt),
         OPT_STRING_VALIDATE("cscale", scalers[1], 0, validate_scaler_opt),
+        OPT_STRING_VALIDATE("lscale-down", dscalers[0], 0, validate_scaler_opt),
+        OPT_STRING_VALIDATE("cscale-down", dscalers[1], 0, validate_scaler_opt),
         OPT_FLOAT("lparam1", scaler_params[0][0], 0),
         OPT_FLOAT("lparam2", scaler_params[0][1], 0),
         OPT_FLOAT("cparam1", scaler_params[1][0], 0),
@@ -686,6 +690,8 @@ static void update_uniforms(struct gl_video *p, GLuint program)
     gl->Uniform1f(gl->GetUniformLocation(program, "filter_param1_c"),
                   isnan(sparam1_c) ? 0.5f : sparam1_c);
 
+    gl->Uniform3f(gl->GetUniformLocation(program, "translation"), 0, 0, 0);
+
     gl->UseProgram(0);
 
     debug_check_gl(p, "update_uniforms()");
@@ -895,10 +901,25 @@ static void compile_shaders(struct gl_video *p)
     bool use_conv_gamma = p->conv_gamma != 1.0;
     bool use_const_luma = p->image_params.colorspace == MP_CSP_BT_2020_C;
 
+    enum mp_csp_trc gamma_fun = MP_CSP_TRC_NONE;
+
     // Linear light scaling is only enabled when either color correction
     // option (3dlut or srgb) is enabled, otherwise scaling is done in the
     // source space. We also need to linearize for constant luminance systems.
-    bool convert_to_linear_gamma = !p->is_linear_rgb && use_cms || use_const_luma;
+    if ((!p->is_linear_rgb && use_cms) || use_const_luma) {
+        // We just use the color level range to distinguish between PC
+        // content like images, which are most likely sRGB, and TV content
+        // like movies, which are most likely BT.2020
+        if (p->image_params.colorlevels == MP_CSP_LEVELS_PC && !p->hwdec_active) {
+            // FIXME: I don't know if hwdec sets the color levels to PC or not,
+            // but let's avoid the bug just in case.
+            gamma_fun = MP_CSP_TRC_SRGB;
+        } else if (p->opts.approx_gamma) {
+            gamma_fun = MP_CSP_TRC_BT_2020_APPROX;
+        } else {
+            gamma_fun = MP_CSP_TRC_BT_2020_EXACT;
+        }
+    }
 
     // Figure out the right color spaces we need to convert, if any
     enum mp_csp_prim prim_src = p->image_params.primaries, prim_dest;
@@ -937,9 +958,11 @@ static void compile_shaders(struct gl_video *p)
 
     char *header_osd = talloc_strdup(tmp, header);
     shader_def_opt(&header_osd, "USE_OSD_LINEAR_CONV_APPROX",
-                   use_cms && p->opts.approx_gamma);
+                   use_cms && gamma_fun == MP_CSP_TRC_BT_2020_APPROX);
     shader_def_opt(&header_osd, "USE_OSD_LINEAR_CONV_BT2020",
-                   use_cms && !p->opts.approx_gamma);
+                   use_cms && gamma_fun == MP_CSP_TRC_BT_2020_EXACT);
+    shader_def_opt(&header_osd, "USE_OSD_LINEAR_CONV_SRGB",
+                   use_cms && gamma_fun == MP_CSP_TRC_SRGB);
     shader_def_opt(&header_osd, "USE_OSD_CMS_MATRIX", use_cms_matrix);
     shader_def_opt(&header_osd, "USE_OSD_3DLUT", p->use_lut_3d);
     // 3DLUT overrides SRGB
@@ -958,7 +981,7 @@ static void compile_shaders(struct gl_video *p)
     char *header_final = talloc_strdup(tmp, "");
     char *header_sep = NULL;
 
-    if (p->image_format == IMGFMT_NV12 || p->image_format == IMGFMT_NV21) {
+    if (p->image_desc.id == IMGFMT_NV12 || p->image_desc.id == IMGFMT_NV21) {
         shader_def(&header_conv, "USE_CONV", "CONV_NV12");
     } else if (p->plane_count > 1) {
         shader_def(&header_conv, "USE_CONV", "CONV_PLANAR");
@@ -966,7 +989,7 @@ static void compile_shaders(struct gl_video *p)
 
     if (p->color_swizzle[0])
         shader_def(&header_conv, "USE_COLOR_SWIZZLE", p->color_swizzle);
-    shader_def_opt(&header_conv, "USE_SWAP_UV", p->image_format == IMGFMT_NV21);
+    shader_def_opt(&header_conv, "USE_SWAP_UV", p->image_desc.id == IMGFMT_NV21);
     shader_def_opt(&header_conv, "USE_YGRAY", p->is_yuv && !p->is_packed_yuv
                                               && p->plane_count == 1);
     shader_def_opt(&header_conv, "USE_INPUT_GAMMA", use_input_gamma);
@@ -974,9 +997,11 @@ static void compile_shaders(struct gl_video *p)
     shader_def_opt(&header_conv, "USE_CONV_GAMMA", use_conv_gamma);
     shader_def_opt(&header_conv, "USE_CONST_LUMA", use_const_luma);
     shader_def_opt(&header_conv, "USE_LINEAR_LIGHT_APPROX",
-                   convert_to_linear_gamma && p->opts.approx_gamma);
+                   gamma_fun == MP_CSP_TRC_BT_2020_APPROX);
     shader_def_opt(&header_conv, "USE_LINEAR_LIGHT_BT2020",
-                   convert_to_linear_gamma && !p->opts.approx_gamma);
+                   gamma_fun == MP_CSP_TRC_BT_2020_EXACT);
+    shader_def_opt(&header_conv, "USE_LINEAR_LIGHT_SRGB",
+                   gamma_fun == MP_CSP_TRC_SRGB);
     if (p->opts.alpha_mode > 0 && p->has_alpha && p->plane_count > 3)
         shader_def(&header_conv, "USE_ALPHA_PLANE", "3");
     if (p->opts.alpha_mode == 2 && p->has_alpha)
@@ -1012,7 +1037,7 @@ static void compile_shaders(struct gl_video *p)
 
     // Don't sample from input video textures before converting the input to
     // linear light.
-    if (use_input_gamma || use_conv_gamma)
+    if (use_input_gamma || use_conv_gamma || gamma_fun != MP_CSP_TRC_NONE)
         use_indirect = true;
 
     // It doesn't make sense to scale the chroma with cscale in the 1. scale
@@ -1259,6 +1284,8 @@ static const char *expected_scaler(struct gl_video *p, int unit)
     {
         return "bilinear";
     }
+    if (p->opts.dscalers[unit] && get_scale_factor(p) < 1.0)
+        return p->opts.dscalers[unit];
     return p->opts.scalers[unit];
 }
 
@@ -1401,7 +1428,7 @@ static void init_video(struct gl_video *p, const struct mp_image_params *params)
     p->image_dh = params->d_h;
     p->image_params = *params;
 
-    if (p->is_rgb && (p->opts.srgb || p->use_lut_3d)) {
+    if (p->is_rgb && (p->opts.srgb || p->use_lut_3d) && !p->hwdec_active) {
         // If we're opening an RGB source like a png file or similar,
         // we just sample it using GL_SRGB which treats it as an sRGB source
         // and pretend it's linear as far as CMS is concerned
@@ -1679,10 +1706,7 @@ void gl_video_render_frame(struct gl_video *p)
     debug_check_gl(p, "after video rendering");
 
 draw_osd:
-    assert(p->osd);
-
-    osd_draw(p->osd_state, p->osd_rect, p->osd_pts, 0, p->osd->formats,
-             draw_osd_cb, p);
+    draw_osd(p);
 }
 
 static void update_window_sized_objects(struct gl_video *p)
@@ -1924,13 +1948,56 @@ static void draw_osd_cb(void *ctx, struct sub_bitmaps *imgs)
 
     debug_check_gl(p, "before drawing osd");
 
-    gl->UseProgram(p->osd_programs[osd->format]);
+    int osd_program = p->osd_programs[osd->format];
+    gl->UseProgram(osd_program);
+
+    bool set_offset = p->osd_offset[0] != 0 || p->osd_offset[1] != 0;
+    if (p->osd_offset_set || set_offset) {
+        gl->Uniform3f(gl->GetUniformLocation(osd_program, "translation"),
+                      p->osd_offset[0], p->osd_offset[1], 0);
+        p->osd_offset_set = set_offset;
+    }
+
     mpgl_osd_set_gl_state(p->osd, osd);
     draw_triangles(p, osd->vertices, osd->num_vertices);
     mpgl_osd_unset_gl_state(p->osd, osd);
+
     gl->UseProgram(0);
 
     debug_check_gl(p, "after drawing osd");
+}
+
+// number of screen divisions per axis (x=0, y=1) for the current 3D mode
+static void get_3d_side_by_side(struct gl_video *p, int div[2])
+{
+    int mode = p->image_params.stereo_out;
+    div[0] = div[1] = 1;
+    switch (mode) {
+    case MP_STEREO3D_SBS2L:
+    case MP_STEREO3D_SBS2R: div[0] = 2; break;
+    case MP_STEREO3D_AB2R:
+    case MP_STEREO3D_AB2L:  div[1] = 2; break;
+    }
+}
+
+static void draw_osd(struct gl_video *p)
+{
+    assert(p->osd);
+
+    int div[2];
+    get_3d_side_by_side(p, div);
+
+    for (int x = 0; x < div[0]; x++) {
+        for (int y = 0; y < div[1]; y++) {
+            struct mp_osd_res res = p->osd_rect;
+            res.w = res.w / div[0];
+            res.h = res.h / div[1];
+            p->osd_offset[0] = res.w * x;
+            p->osd_offset[1] = res.h * y;
+            osd_draw(p->osd_state, res, p->osd_pts, 0, p->osd->formats,
+                     draw_osd_cb, p);
+        }
+    }
 }
 
 static bool test_fbo(struct gl_video *p, GLenum format)
@@ -2280,6 +2347,8 @@ void gl_video_config(struct gl_video *p, struct mp_image_params *params)
         uninit_video(p);
         init_video(p, params);
     }
+
+    check_resize(p);
 }
 
 void gl_video_set_output_depth(struct gl_video *p, int r, int g, int b)
@@ -2340,9 +2409,11 @@ void gl_video_set_options(struct gl_video *p, struct gl_video_opts *opts)
     p->opts = *opts;
     for (int n = 0; n < 2; n++) {
         p->opts.scalers[n] = (char *)handle_scaler_opt(p->opts.scalers[n]);
-        assert(p->opts.scalers[n]);
-        p->scalers[n].name = p->opts.scalers[n];
+        p->opts.dscalers[n] = (char *)handle_scaler_opt(p->opts.dscalers[n]);
     }
+
+    if (!p->opts.gamma && p->video_eq.values[MP_CSP_EQ_GAMMA] != 0)
+        p->opts.gamma = 1.0f;
 
     check_gl_features(p);
     reinit_rendering(p);
