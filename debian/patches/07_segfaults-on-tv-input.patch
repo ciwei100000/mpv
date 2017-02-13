@@ -1,0 +1,42 @@
+From aaad2d847e60a5bbd8fbf9c89f100a9ef9abd008 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Fr=C3=A9d=C3=A9ric=20Bri=C3=A8re?= <fbriere@fbriere.net>
+Date: Fri, 3 Feb 2017 12:57:47 -0500
+Subject: [PATCH] tv: Zero-out newly-allocated handle in tv_new_handle()
+
+Some fields (notably tv_channel_list) were left uninitialized,
+potentially causing problems later on.
+
+Fixes #4096
+---
+ stream/tv.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/stream/tv.c b/stream/tv.c
+index 0b34b566d..89783374f 100644
+--- a/stream/tv.c
++++ b/stream/tv.c
+@@ -145,7 +145,7 @@ const struct m_sub_options tv_params_conf = {
+ 
+ tvi_handle_t *tv_new_handle(int size, struct mp_log *log, const tvi_functions_t *functions)
+ {
+-    tvi_handle_t *h = malloc(sizeof(*h));
++    tvi_handle_t *h = calloc(1, sizeof(*h));
+ 
+     if (!h)
+         return NULL;
+@@ -159,12 +159,9 @@ tvi_handle_t *tv_new_handle(int size, struct mp_log *log, const tvi_functions_t
+ 
+     h->log        = log;
+     h->functions  = functions;
+-    h->seq        = 0;
+     h->chanlist   = -1;
+-    h->chanlist_s = NULL;
+     h->norm       = -1;
+     h->channel    = -1;
+-    h->scan       = NULL;
+ 
+     return h;
+ }
+-- 
+2.11.0
+
