@@ -1,0 +1,99 @@
+Description: ytdl_hook: whitelist protocols from urls retrieved from youtube-dl
+ This patch is a combination of these upstream commits:
+ - e6e6b0dcc7e9 ("ytdl_hook: whitelist protocols from urls retrieved from
+   youtube-dl")
+ - f8263e82cc74 ("ytdl_hook: move url_is_safe earlier in code")
+ - ce42a965330d ("ytdl_hook: fix safe url checking with EDL urls")
+ .
+ jcowgill: heavily backported to 0.23
+ Fixes CVE-2018-6360
+Author: Ricardo Constantino <wiiaboo@gmail.com>
+Bug: https://github.com/mpv-player/mpv/issues/5456
+Bug-Debian: https://bugs.debian.org/888654
+Applied-Upstream: v0.29
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+
+--- a/player/lua/ytdl_hook.lua
++++ b/player/lua/ytdl_hook.lua
+@@ -8,6 +8,18 @@ local ytdl = {
+ 
+ local chapter_list = {}
+ 
++function Set (t)
++    local set = {}
++    for _, v in pairs(t) do set[v] = true end
++    return set
++end
++
++local safe_protos = Set {
++    "http", "https", "ftp", "ftps",
++    "rtmp", "rtmps", "rtmpe", "rtmpt", "rtmpts", "rtmpte",
++    "data"
++}
++
+ local function exec(args)
+     local ret = utils.subprocess({args = args})
+     return ret.status, ret.stdout, ret
+@@ -59,6 +71,15 @@ local function edl_escape(url)
+     return "%" .. string.len(url) .. "%" .. url
+ end
+ 
++local function url_is_safe(url)
++    local proto = type(url) == "string" and url:match("^(.+)://") or nil
++    local safe = proto and safe_protos[proto]
++    if not safe then
++        msg.error(("Ignoring potentially unsafe url: '%s'"):format(url))
++    end
++    return safe
++end
++
+ local function time_to_secs(time_string)
+     local ret
+ 
+@@ -192,6 +213,9 @@ mp.add_hook("on_load", 10, function ()
+ 
+                 local playlist = "edl://"
+                 for i, entry in pairs(json.entries) do
++                    if not url_is_safe(entry.url) then
++                        return
++                    end
+                     playlist = playlist .. edl_escape(entry.url)
+                     if not (entry.duration == nil) then
+                         playlist = playlist..",start=0,length="..entry.duration
+@@ -261,7 +285,9 @@ mp.add_hook("on_load", 10, function ()
+                         site = entry["webpage_url"]
+                     end
+ 
+-                    playlist = playlist .. "ytdl://" .. site .. "\n"
++                    if url_is_safe(site) then
++                        playlist = playlist .. "ytdl://" .. site .. "\n"
++                    end
+                 end
+ 
+                 mp.set_property("stream-open-filename", "memory://" .. playlist)
+@@ -279,14 +305,24 @@ mp.add_hook("on_load", 10, function ()
+ 
+                 -- video url
+                 streamurl = json["requested_formats"][1].url
++                if not url_is_safe(streamurl) then
++                    return
++                end
+ 
+                 -- audio url
++                if not url_is_safe(json["requested_formats"][2].url) then
++                    return
++                end
+                 mp.commandv("audio-add", json["requested_formats"][2].url,
+                     "select", json["requested_formats"][2]["format_note"] or "")
+ 
+             elseif not (json.url == nil) then
+                 -- normal video
+                 streamurl = json.url
++                if not url_is_safe(streamurl) then
++                    return
++                end
++
+                 set_http_headers(json.http_headers)
+             else
+                 msg.error("No URL found in JSON data.")
