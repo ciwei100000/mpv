@@ -1,8 +1,10 @@
-mpv (0.23.0-2+deb9u1) UNRELEASED; urgency=medium
+mpv (0.23.0-2+deb9u1) stretch-security; urgency=high
 
-  *
+  * debian/patches/08_ytdl-hook-whitelist-protocols.patch:
+    - Add patch which whitelists protocols received from youtube-dl.
+      Fixes CVE-2018-6360. (Closes: #888654)
 
- -- James Cowgill <jcowgill@debian.org>  Fri, 02 Feb 2018 22:05:11 +0100
+ -- James Cowgill <jcowgill@debian.org>  Sat, 03 Feb 2018 15:05:34 +0100
 
 mpv (0.23.0-2) unstable; urgency=medium
 
