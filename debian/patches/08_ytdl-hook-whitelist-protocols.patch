@@ -10,6 +10,7 @@ Description: ytdl_hook: whitelist protocols from urls retrieved from youtube-dl
 Author: Ricardo Constantino <wiiaboo@gmail.com>
 Bug: https://github.com/mpv-player/mpv/issues/5456
 Bug-Debian: https://bugs.debian.org/888654
+Bug-Debian: https://bugs.debian.org/889892
 Applied-Upstream: v0.29
 ---
 This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
@@ -61,18 +62,20 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
                      playlist = playlist .. edl_escape(entry.url)
                      if not (entry.duration == nil) then
                          playlist = playlist..",start=0,length="..entry.duration
-@@ -261,7 +285,9 @@ mp.add_hook("on_load", 10, function ()
+@@ -261,7 +285,11 @@ mp.add_hook("on_load", 10, function ()
                          site = entry["webpage_url"]
                      end
  
 -                    playlist = playlist .. "ytdl://" .. site .. "\n"
-+                    if url_is_safe(site) then
++                    if not site:find("://") then
 +                        playlist = playlist .. "ytdl://" .. site .. "\n"
++                    elseif url_is_safe(site) then
++                        playlist = playlist .. site .. "\n"
 +                    end
                  end
  
                  mp.set_property("stream-open-filename", "memory://" .. playlist)
-@@ -279,14 +305,24 @@ mp.add_hook("on_load", 10, function ()
+@@ -279,14 +307,24 @@ mp.add_hook("on_load", 10, function ()
  
                  -- video url
                  streamurl = json["requested_formats"][1].url
