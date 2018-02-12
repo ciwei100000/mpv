@@ -1,3 +1,9 @@
+mpv (0.27.1-1) UNRELEASED; urgency=medium
+
+  *
+
+ -- James Cowgill <jcowgill@debian.org>  Mon, 12 Feb 2018 19:55:48 +0000
+
 mpv (0.27.0-4) unstable; urgency=high
 
   * debian/patches/09_ytdl-hook-whitelist-protocols.patch:
