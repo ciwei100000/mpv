@@ -5,4 +5,3 @@
 06_ffmpeg-abi.patch
 07_io-stdin-used.patch
 08_vaapi-Use-libva2-message-callbacks.patch
-09_ytdl-hook-whitelist-protocols.patch
