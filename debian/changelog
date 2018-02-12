@@ -1,8 +1,10 @@
-mpv (0.27.1-1) UNRELEASED; urgency=medium
+mpv (0.27.1-1) unstable; urgency=medium
 
-  *
+  * New upstream bugfix release.
+  * debian/patches/09_ytdl-hook-whitelist-protocols.patch:
+    - Drop, slightly modified version applied upstream.
 
- -- James Cowgill <jcowgill@debian.org>  Mon, 12 Feb 2018 19:55:48 +0000
+ -- James Cowgill <jcowgill@debian.org>  Mon, 12 Feb 2018 19:57:05 +0000
 
 mpv (0.27.0-4) unstable; urgency=high
 
