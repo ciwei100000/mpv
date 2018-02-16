@@ -1,3 +1,10 @@
+mpv (0.27.2-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+    - Also whitelist subtitle URLs in youtube-dl hook. (Closes: #890410)
+
+ -- James Cowgill <jcowgill@debian.org>  Fri, 16 Feb 2018 22:56:00 +0000
+
 mpv (0.27.1-1) unstable; urgency=medium
 
   * New upstream bugfix release.
