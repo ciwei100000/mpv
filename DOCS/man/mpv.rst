@@ -1127,7 +1127,7 @@ FILES
 
 For Windows-specifics, see `FILES ON WINDOWS`_ section.
 
-``/usr/local/etc/mpv/mpv.conf``
+``/etc/mpv/mpv.conf``
     mpv system-wide settings (depends on ``--prefix`` passed to configure - mpv
     in default configuration will use ``/usr/local/etc/mpv/`` as config
     directory, while most Linux distributions will set it to ``/etc/mpv/``).
