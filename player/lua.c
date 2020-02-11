@@ -273,6 +273,36 @@ static int load_scripts(lua_State *L)
     return 0;
 }
 
+static void fuck_lua(lua_State *L, const char *search_path)
+{
+    void *tmp = talloc_new(NULL);
+
+    lua_getglobal(L, "package"); // package
+    lua_getfield(L, -1, search_path); // package search_path
+    bstr path = bstr0(lua_tostring(L, -1));
+    char *newpath = talloc_strdup(tmp, "");
+
+    // Unbelievable but true: Lua loads .lua files AND dynamic libraries from
+    // the working directory. This is highly security relevant.
+    // Lua scripts are still supposed to load globally installed libraries, so
+    // try to get by by filtering out any relative paths.
+    while (path.len) {
+        bstr item;
+        bstr_split_tok(path, ";", &item, &path);
+        if (bstr_startswith0(item, "/")) {
+            newpath = talloc_asprintf_append(newpath, "%s%.*s",
+                                             newpath[0] ? ";" : "",
+                                             BSTR_P(item));
+        }
+    }
+
+    lua_pushstring(L, newpath);  // package search_path newpath
+    lua_setfield(L, -3, search_path); // package search_path
+    lua_pop(L, 2);  // -
+
+    talloc_free(tmp);
+}
+
 static int run_lua(lua_State *L)
 {
     struct script_ctx *ctx = lua_touserdata(L, -1);
@@ -324,6 +354,10 @@ static int run_lua(lua_State *L)
     }
     lua_pop(L, 2); // -
 
+    assert(lua_gettop(L) == 0);
+
+    fuck_lua(L, "path");
+    fuck_lua(L, "cpath");
     assert(lua_gettop(L) == 0);
 
     // run this under an error handler that can do backtraces
