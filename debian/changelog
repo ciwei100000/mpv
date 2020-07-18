@@ -1,3 +1,10 @@
+mpv (0.32.0-2) unstable; urgency=medium
+
+  * Bug fix: "unintended code execution vulnerability", thanks to astian
+    (Closes: #950816). Patch backported from upstream
+
+ -- Reinhard Tartler <siretart@tauware.de>  Sat, 18 Jul 2020 18:01:43 -0400
+
 mpv (0.32.0-1) unstable; urgency=medium
 
   [ James Cowgill ]
