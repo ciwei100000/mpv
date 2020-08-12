@@ -1,3 +1,9 @@
+mpv (0.32.0-2-nonfree) unstable; urgency=medium
+
+  * Custom Version built with cuda, cuvid, nvdec and nvenc support
+
+ -- ciwei100000 <ciwei100000@gmail.com>  Tue, 11 Aug 2020 20:38:02 -0700
+
 mpv (0.32.0-2) unstable; urgency=medium
 
   * Bug fix: "unintended code execution vulnerability", thanks to astian
