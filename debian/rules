@@ -3,6 +3,9 @@
 include /usr/share/dpkg/architecture.mk
 
 export DEB_BUILD_MAINT_OPTIONS := hardening=+all # #741439, #799738
+export DEB_CFLAGS_MAINT_APPEND := -I/usr/local/cuda/include -O3 -flto=jobserver
+export DEB_CXXFLAGS_MAINT_APPEND := -I/usr/local/cuda/include -O3 -flto=jobserver
+export DEB_LDFLAGS_MAINT_APPEND := -L/usr/local/cuda/lib64 -O3 -flto=jobserver
 
 ifeq ($(DEB_HOST_ARCH_OS),linux)
   ARCH_CONFIGURE = --enable-dvbin
@@ -31,6 +34,9 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	python3 ./waf -v install --destdir=debian/tmp
+	
+override_dh_shlibdeps:
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
 
 override_dh_installchangelogs:
 	dh_installchangelogs RELEASE_NOTES
