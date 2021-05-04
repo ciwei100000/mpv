@@ -1,3 +1,10 @@
+mpv (0.32.0-3-nonfree) unstable; urgency=medium
+
+  * Merge branch 'debian/master' into ciwei100000
+    0.32.0-3
+
+ -- ciwei100000 <ciwei100000@gmail.com>  Tue, 4 May 2021 15:44:39 -0700
+
 mpv (0.32.0-3) unstable; urgency=medium
 
   * debian/patches: Apply upstream fix for CVE-2021-30145 (Closes: #986839)
