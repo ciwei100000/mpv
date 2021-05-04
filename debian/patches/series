@@ -3,3 +3,4 @@
 06_ffmpeg-abi.patch
 07_io-stdin-used.patch
 08_lua_security.patch
+0006-demux_mf-improve-format-string-processing.patch

@@ -1,3 +1,10 @@
+mpv (0.32.0-3) unstable; urgency=medium
+
+  * debian/patches: Apply upstream fix for CVE-2021-30145 (Closes: #986839)
+    Thanks to Jan Ekström.
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Mon, 26 Apr 2021 09:10:40 +0200
+
 mpv (0.32.0-2-nonfree) unstable; urgency=medium
 
   * Custom Version built with cuda, cuvid, nvdec and nvenc support
