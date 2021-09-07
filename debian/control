@@ -52,7 +52,7 @@ Build-Depends:
  python3-docutils,
  spirv-cross,
  wayland-protocols,
-Standards-Version: 4.5.0
+Standards-Version: 4.6.0
 Homepage: https://mpv.io/
 Vcs-Git: https://salsa.debian.org/multimedia-team/mpv.git
 Vcs-Browser: https://salsa.debian.org/multimedia-team/mpv
