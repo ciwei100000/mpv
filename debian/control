@@ -9,7 +9,7 @@ Build-Depends:
  debhelper-compat (= 12),
  libarchive-dev (>= 3.4),
  libasound2-dev [linux-any],
- libass-dev (>= 0.12.1~),
+ libass-dev,
  libavcodec-dev (>= 7:4.0),
  libavdevice-dev (>= 7:4.0),
  libavfilter-dev (>= 7:4.0),
