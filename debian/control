@@ -30,7 +30,6 @@ Build-Depends:
  libpulse-dev,
  librubberband-dev,
  libsdl2-dev,
- libsmbclient-dev,
  libswscale-dev (>= 7:4.0),
  libuchardet-dev,
  libva-dev,
