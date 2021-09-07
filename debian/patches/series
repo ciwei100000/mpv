@@ -1,3 +1,5 @@
 03_waf.patch
 05_add-keywords.patch
 07_io-stdin-used.patch
+0004-vo_gpu-libplacebo-require-v2.72.0.patch
+0005-vo_gpu-placebo-update-for-upstream-API-changes.patch
