@@ -1,3 +1,9 @@
+mpv (0.33.1-1) UNRELEASED; urgency=medium
+
+  * New upstream release (Closes: #982249)
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Tue, 07 Sep 2021 10:07:29 +0200
+
 mpv (0.32.0-3) unstable; urgency=medium
 
   * debian/patches: Apply upstream fix for CVE-2021-30145 (Closes: #986839)
