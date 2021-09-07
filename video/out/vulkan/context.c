@@ -27,6 +27,7 @@ struct vulkan_opts {
     int queue_count;
     int async_transfer;
     int async_compute;
+    int disable_events;
 };
 
 static int vk_validate_dev(struct mp_log *log, const struct m_option *opt,
@@ -87,16 +88,17 @@ done:
 #define OPT_BASE_STRUCT struct vulkan_opts
 const struct m_sub_options vulkan_conf = {
     .opts = (const struct m_option[]) {
-        OPT_STRING_VALIDATE("vulkan-device", device, 0, vk_validate_dev),
-        OPT_CHOICE("vulkan-swap-mode", swap_mode, 0,
-                   ({"auto",        -1},
-                   {"fifo",         VK_PRESENT_MODE_FIFO_KHR},
-                   {"fifo-relaxed", VK_PRESENT_MODE_FIFO_RELAXED_KHR},
-                   {"mailbox",      VK_PRESENT_MODE_MAILBOX_KHR},
-                   {"immediate",    VK_PRESENT_MODE_IMMEDIATE_KHR})),
-        OPT_INTRANGE("vulkan-queue-count", queue_count, 0, 1, 8),
-        OPT_FLAG("vulkan-async-transfer", async_transfer, 0),
-        OPT_FLAG("vulkan-async-compute", async_compute, 0),
+        {"vulkan-device", OPT_STRING_VALIDATE(device, vk_validate_dev)},
+        {"vulkan-swap-mode", OPT_CHOICE(swap_mode,
+            {"auto",        -1},
+            {"fifo",         VK_PRESENT_MODE_FIFO_KHR},
+            {"fifo-relaxed", VK_PRESENT_MODE_FIFO_RELAXED_KHR},
+            {"mailbox",      VK_PRESENT_MODE_MAILBOX_KHR},
+            {"immediate",    VK_PRESENT_MODE_IMMEDIATE_KHR})},
+        {"vulkan-queue-count", OPT_INT(queue_count), M_RANGE(1, 8)},
+        {"vulkan-async-transfer", OPT_FLAG(async_transfer)},
+        {"vulkan-async-compute", OPT_FLAG(async_compute)},
+        {"vulkan-disable-events", OPT_FLAG(disable_events)},
         {0}
     },
     .size = sizeof(struct vulkan_opts),
@@ -169,6 +171,9 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
         .async_compute = p->opts->async_compute,
         .queue_count = p->opts->queue_count,
         .device_name = p->opts->device,
+#if PL_API_VER >= 24
+        .disable_events = p->opts->disable_events,
+#endif
     });
     if (!vk->vulkan)
         goto error;
@@ -224,6 +229,11 @@ static bool start_frame(struct ra_swapchain *sw, struct ra_fbo *out_fbo)
 {
     struct priv *p = sw->priv;
     struct pl_swapchain_frame frame;
+    bool start = true;
+    if (p->params.start_frame)
+        start = p->params.start_frame(sw->ctx);
+    if (!start)
+        return false;
     if (!pl_swapchain_start_frame(p->swapchain, &frame))
         return false;
     if (!mppl_wrap_tex(sw->ctx->ra, frame.fbo, &p->proxy_tex))

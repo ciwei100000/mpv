@@ -42,6 +42,9 @@
 #include "misc/ctype.h"
 #include "terminal.h"
 
+// Timeout in ms after which the (normally ambiguous) ESC key is detected.
+#define ESC_TIMEOUT 100
+
 static volatile struct termios tio_orig;
 static volatile int tio_orig_set;
 
@@ -84,6 +87,10 @@ static const struct key_entry keys[] = {
     {"\033[23~", MP_KEY_F+11},
     {"\033[24~", MP_KEY_F+12},
 
+    {"\033OA", MP_KEY_UP},
+    {"\033OB", MP_KEY_DOWN},
+    {"\033OC", MP_KEY_RIGHT},
+    {"\033OD", MP_KEY_LEFT},
     {"\033[A", MP_KEY_UP},
     {"\033[B", MP_KEY_DOWN},
     {"\033[C", MP_KEY_RIGHT},
@@ -171,22 +178,18 @@ static void skip_buf(struct termbuf *b, unsigned int count)
 
 static struct termbuf buf;
 
-static bool getch2(struct input_ctx *input_ctx)
+static void process_input(struct input_ctx *input_ctx, bool timeout)
 {
-    int retval = read(tty_in, &buf.b[buf.len], BUF_LEN - buf.len);
-    /* Return false on EOF to stop running select() on the FD, as it'd
-     * trigger all the time. Note that it's possible to get temporary
-     * EOF on terminal if the user presses ctrl-d, but that shouldn't
-     * happen if the terminal state change done in terminal_init()
-     * works.
-     */
-    if (retval == 0)
-        return false;
-    if (retval == -1)
-        return errno != EBADF && errno != EINVAL;
-    buf.len += retval;
-
     while (buf.len) {
+        // Lone ESC is ambiguous, so accept it only after a timeout.
+        if (timeout &&
+            ((buf.len == 1 && buf.b[0] == '\033') ||
+             (buf.len > 1 && buf.b[0] == '\033' && buf.b[1] == '\033')))
+        {
+            mp_input_put_key(input_ctx, MP_KEY_ESC);
+            skip_buf(&buf, 1);
+        }
+
         int utf8_len = bstr_parse_utf8_code_length(buf.b[0]);
         if (utf8_len > 1) {
             if (buf.len < utf8_len)
@@ -208,23 +211,26 @@ static bool getch2(struct input_ctx *input_ctx)
         }
 
         if (!match) { // normal or unknown key
+            int mods = 0;
             if (buf.b[0] == '\033') {
                 skip_buf(&buf, 1);
-                if (buf.len > 0 && mp_isalnum(buf.b[0])) { // meta+normal key
-                    mp_input_put_key(input_ctx, buf.b[0] | MP_KEY_MODIFIER_ALT);
-                    skip_buf(&buf, 1);
-                } else if (buf.len == 1 && buf.b[0] == '\033') {
-                    mp_input_put_key(input_ctx, MP_KEY_ESC);
-                    skip_buf(&buf, 1);
+                if (buf.len > 0 && buf.b[0] > 0 && buf.b[0] < 127) {
+                    // meta+normal key
+                    mods |= MP_KEY_MODIFIER_ALT;
                 } else {
                     // Throw it away. Typically, this will be a complete,
                     // unsupported sequence, and dropping this will skip it.
                     skip_buf(&buf, buf.len);
+                    continue;
                 }
-            } else {
-                mp_input_put_key(input_ctx, buf.b[0]);
-                skip_buf(&buf, 1);
             }
+            unsigned char c = buf.b[0];
+            skip_buf(&buf, 1);
+            if (c < 32) {
+                c = c <= 25 ? (c + 'a' - 1) : (c - 25 + '2' - 1);
+                mods |= MP_KEY_MODIFIER_CTRL;
+            }
+            mp_input_put_key(input_ctx, c | mods);
             continue;
         }
 
@@ -246,8 +252,7 @@ static bool getch2(struct input_ctx *input_ctx)
         skip_buf(&buf, seq_len);
     }
 
-read_more:  /* need more bytes */
-    return true;
+read_more: ;  /* need more bytes */
 }
 
 static volatile int getch2_active  = 0;
@@ -392,13 +397,20 @@ static void *terminal_thread(void *ptr)
             { .events = POLLIN, .fd = death_pipe[0] },
             { .events = POLLIN, .fd = tty_in }
         };
-        polldev(fds, stdin_ok ? 2 : 1, -1);
+        int r = polldev(fds, stdin_ok ? 2 : 1, buf.len ? ESC_TIMEOUT : -1);
         if (fds[0].revents)
             break;
         if (fds[1].revents) {
-            if (!getch2(input_ctx))
-                break;
+            int retval = read(tty_in, &buf.b[buf.len], BUF_LEN - buf.len);
+            if (!retval || (retval == -1 && (errno == EBADF || errno == EINVAL)))
+                break; // EOF/closed
+            if (retval > 0) {
+                buf.len += retval;
+                process_input(input_ctx, false);
+            }
         }
+        if (r == 0)
+            process_input(input_ctx, true);
     }
     char c;
     bool quit = read(death_pipe[0], &c, 1) == 1 && c == 1;
@@ -479,6 +491,19 @@ void terminal_get_size(int *w, int *h)
 
     *w = ws.ws_col;
     *h = ws.ws_row;
+}
+
+void terminal_get_size2(int *rows, int *cols, int *px_width, int *px_height)
+{
+    struct winsize ws;
+    if (ioctl(tty_in, TIOCGWINSZ, &ws) < 0 || !ws.ws_row || !ws.ws_col
+                                           || !ws.ws_xpixel || !ws.ws_ypixel)
+        return;
+
+    *rows = ws.ws_row;
+    *cols = ws.ws_col;
+    *px_width = ws.ws_xpixel;
+    *px_height = ws.ws_ypixel;
 }
 
 void terminal_init(void)

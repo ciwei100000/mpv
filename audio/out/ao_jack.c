@@ -55,12 +55,12 @@ struct jack_opts {
 #define OPT_BASE_STRUCT struct jack_opts
 static const struct m_sub_options ao_jack_conf = {
     .opts = (const struct m_option[]){
-        OPT_STRING("jack-port", port, 0),
-        OPT_STRING("jack-name", client_name, 0),
-        OPT_FLAG("jack-autostart", autostart, 0),
-        OPT_FLAG("jack-connect", connect, 0),
-        OPT_CHOICE("jack-std-channel-layout", stdlayout, 0,
-                   ({"waveext", 0}, {"any", 1})),
+        {"jack-port", OPT_STRING(port)},
+        {"jack-name", OPT_STRING(client_name)},
+        {"jack-autostart", OPT_FLAG(autostart)},
+        {"jack-connect", OPT_FLAG(connect)},
+        {"jack-std-channel-layout", OPT_CHOICE(stdlayout,
+            {"waveext", 0}, {"any", 1})},
         {0}
     },
     .defaults = &(const struct jack_opts) {
@@ -194,7 +194,7 @@ err_port_register:
     return -1;
 }
 
-static void resume(struct ao *ao)
+static void start(struct ao *ao)
 {
     struct priv *p = ao->priv;
     if (!p->activated) {
@@ -276,7 +276,7 @@ const struct ao_driver audio_out_jack = {
     .name        = "jack",
     .init      = init,
     .uninit    = uninit,
-    .resume    = resume,
+    .start     = start,
     .priv_size = sizeof(struct priv),
     .global_opts = &ao_jack_conf,
 };

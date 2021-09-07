@@ -26,7 +26,6 @@
 #include "input/event.h"
 
 struct wayland_opts {
-    int frame_offset;
     int disable_vsync;
     int edge_pixels_pointer;
     int edge_pixels_touch;
@@ -36,7 +35,6 @@ struct vo_wayland_sync {
     int64_t ust;
     int64_t msc;
     int64_t sbc;
-    int64_t refresh_usec;
     bool filled;
 };
 
@@ -71,9 +69,16 @@ struct vo_wayland_state {
     /* State */
     struct mp_rect geometry;
     struct mp_rect window_size;
-    float aspect_ratio;
-    bool configured;
+    struct mp_rect vdparams;
+    int gcd;
+    int reduced_width;
+    int reduced_height;
     bool frame_wait;
+    bool state_change;
+    bool toplevel_configured;
+    bool activated;
+    bool has_keyboard_input;
+    bool focused;
     bool hidden;
     int timeout_count;
     int wakeup_pipe[2];
@@ -84,6 +89,8 @@ struct vo_wayland_state {
     int mouse_unscaled_y;
     int scaling;
     int touch_entries;
+    int toplevel_width;
+    int toplevel_height;
     uint32_t pointer_id;
     int display_fd;
     struct wl_callback       *frame_callback;
@@ -105,16 +112,14 @@ struct vo_wayland_state {
     /* Presentation Feedback */
     struct vo_wayland_sync *sync;
     int sync_size;
-    int64_t user_sbc;
     int64_t last_ust;
     int64_t last_msc;
-    int64_t last_sbc;
-    int64_t last_sbc_mp_time;
-    int64_t vsync_duration;
     int64_t last_skipped_vsyncs;
     int64_t last_queue_display_time;
+    int64_t vsync_duration;
 
     /* Input */
+    uint32_t keyboard_code;
     struct wl_seat     *seat;
     struct wl_pointer  *pointer;
     struct wl_touch    *touch;
@@ -148,7 +153,9 @@ void vo_wayland_check_events(struct vo *vo);
 void vo_wayland_uninit(struct vo *vo);
 void vo_wayland_wakeup(struct vo *vo);
 void vo_wayland_wait_events(struct vo *vo, int64_t until_time_us);
-void vo_wayland_wait_frame(struct vo_wayland_state *wl, int frame_offset);
+void vo_wayland_wait_frame(struct vo_wayland_state *wl);
+void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, int alpha);
+void vo_wayland_sync_clear(struct vo_wayland_state *wl);
 void wayland_sync_swap(struct vo_wayland_state *wl);
 void vo_wayland_sync_shift(struct vo_wayland_state *wl);
 void queue_new_sync(struct vo_wayland_state *wl);

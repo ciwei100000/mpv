@@ -706,11 +706,11 @@ const struct ao_driver audio_out_audiotrack = {
     .init      = init,
     .uninit    = uninit,
     .reset     = stop,
-    .resume    = start,
+    .start     = start,
     .priv_size = sizeof(struct priv),
     .options   = (const struct m_option[]) {
-        OPT_FLAG("pcm-float", cfg_pcm_float, 0),
-        OPT_INT("session-id", cfg_session_id, 0),
+        {"pcm-float", OPT_FLAG(cfg_pcm_float)},
+        {"session-id", OPT_INT(cfg_session_id)},
         {0}
     },
     .options_prefix = "audiotrack",

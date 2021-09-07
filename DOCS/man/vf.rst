@@ -321,6 +321,10 @@ Available mpv-only filters are:
         Set the rotation the video is assumed to be encoded with in degrees.
         The special value ``-1`` uses the input format.
 
+    ``<w>``, ``<h>``
+        If not 0, perform conversion to the given size. Ignored if
+        ``convert=yes`` is not set.
+
     ``<dw>``, ``<dh>``
         Set the display size. Note that setting the display size such that
         the video is scaled in both directions instead of just changing the
@@ -330,6 +334,18 @@ Available mpv-only filters are:
         Set the display aspect ratio of the video frame. This is a float,
         but values such as ``[16:9]`` can be passed too (``[...]`` for quoting
         to prevent the option parser from interpreting the ``:`` character).
+
+    ``<force-scaler=auto|zimg|sws>``
+        Force a specific scaler backend, if applicable. This is a debug option
+        and could go away any time.
+
+    ``<alpha=auto|straight|premul>``
+        Set the kind of alpha the video uses. Undefined effect if the image
+        format has no alpha channel (could be ignored or cause an error,
+        depending on how mpv internals evolve). Setting this may or may not
+        cause downstream image processing to treat alpha differently, depending
+        on support. With ``convert`` and zimg used, this will convert the alpha.
+        libswscale and other FFmpeg components completely ignore this.
 
 ``lavfi=graph[:sws-flags[:o=opts]]``
     Filter video using FFmpeg's libavfilter.

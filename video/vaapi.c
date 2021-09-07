@@ -38,7 +38,7 @@ struct vaapi_opts {
 #define OPT_BASE_STRUCT struct vaapi_opts
 const struct m_sub_options vaapi_conf = {
     .opts = (const struct m_option[]) {
-        OPT_STRING("device", path, 0),
+        {"device", OPT_STRING(path)},
         {0},
     },
     .defaults = &(const struct vaapi_opts) {
@@ -226,7 +226,7 @@ static void drm_create(VADisplay **out_display, void **out_native_ctx,
     struct va_native_display_drm *ctx = talloc_ptrtype(NULL, ctx);
     ctx->drm_fd = drm_fd;
     *out_display = vaGetDisplayDRM(drm_fd);
-    if (out_display) {
+    if (*out_display) {
         *out_native_ctx = ctx;
         return;
     }

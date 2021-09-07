@@ -48,10 +48,11 @@ enum {
     // Special thing for encode mode (vo_driver.initially_blocked).
     // Part of VO_EVENTS_USER to make vo_is_ready_for_frame() work properly.
     VO_EVENT_INITIAL_UNBLOCK            = 1 << 7,
+    VO_EVENT_FOCUS                      = 1 << 8,
 
     // Set of events the player core may be interested in.
     VO_EVENTS_USER = VO_EVENT_RESIZE | VO_EVENT_WIN_STATE | VO_EVENT_DPI |
-                     VO_EVENT_INITIAL_UNBLOCK,
+                     VO_EVENT_INITIAL_UNBLOCK | VO_EVENT_FOCUS,
 };
 
 enum mp_voctrl {
@@ -67,7 +68,7 @@ enum mp_voctrl {
     VOCTRL_SET_PANSCAN,
     VOCTRL_SET_EQUALIZER,
 
-    // Trigger by any change to mp_vo_opts. This is for convenience. In theory,
+    // Triggered by any change to mp_vo_opts. This is for convenience. In theory,
     // you could install your own listener.
     VOCTRL_VO_OPTS_CHANGED,
 
@@ -99,6 +100,8 @@ enum mp_voctrl {
     VOCTRL_GET_UNFS_WINDOW_SIZE,        // int[2] (w/h)
     VOCTRL_SET_UNFS_WINDOW_SIZE,        // int[2] (w/h)
 
+    VOCTRL_GET_FOCUSED,                 // bool*
+
     // char *** (NULL terminated array compatible with CONF_TYPE_STRING_LIST)
     // names for displays the window is on
     VOCTRL_GET_DISPLAY_NAMES,
@@ -117,8 +120,6 @@ enum mp_voctrl {
     VOCTRL_GET_AMBIENT_LUX,             // int*
     VOCTRL_GET_DISPLAY_FPS,             // double*
     VOCTRL_GET_HIDPI_SCALE,             // double*
-
-    VOCTRL_GET_PREF_DEINT,              // int*
 
     /* private to vo_gpu */
     VOCTRL_EXTERNAL_RESIZE,
@@ -485,6 +486,7 @@ bool vo_is_ready_for_frame(struct vo *vo, int64_t next_pts);
 void vo_queue_frame(struct vo *vo, struct vo_frame *frame);
 void vo_wait_frame(struct vo *vo);
 bool vo_still_displaying(struct vo *vo);
+void vo_request_wakeup_on_done(struct vo *vo);
 bool vo_has_frame(struct vo *vo);
 void vo_redraw(struct vo *vo);
 bool vo_want_redraw(struct vo *vo);
