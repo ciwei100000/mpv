@@ -27,6 +27,7 @@ Build-Depends:
  libjpeg-dev,
  liblcms2-dev (>= 2.6~),
  liblua5.2-dev,
+ libmujs-dev,
  libpulse-dev,
  librubberband-dev,
  libsdl2-dev,
