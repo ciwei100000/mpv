@@ -13,4 +13,4 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
 +_IO_stdin_used
  mpv_abort_async_command
  mpv_client_api_version
- mpv_client_name
+ mpv_client_id
