@@ -8,6 +8,12 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
   ARCH_CONFIGURE = --enable-dvbin
 endif
 
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+else
+NUMJOBS = 1
+endif
+
 %:
 	dh $@
 
@@ -25,7 +31,7 @@ override_dh_auto_configure:
 			$(ARCH_CONFIGURE)
 
 override_dh_auto_build:
-	python3 ./waf -v build
+	python3 ./waf -v build --jobs=$(NUMJOBS)
 
 override_dh_auto_install:
 	python3 ./waf -v install --destdir=debian/tmp
