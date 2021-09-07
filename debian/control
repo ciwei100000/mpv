@@ -33,6 +33,7 @@ Build-Depends:
  librubberband-dev,
  libsdl2-dev,
  libsixel-dev,
+ libspirv-cross-c-shared-dev,
  libswscale-dev (>= 7:4.0),
  libuchardet-dev,
  libva-dev,
@@ -49,6 +50,7 @@ Build-Depends:
  pkg-config,
  python3,
  python3-docutils,
+ spirv-cross,
  wayland-protocols,
 Standards-Version: 4.5.0
 Homepage: https://mpv.io/
