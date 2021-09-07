@@ -31,7 +31,6 @@ Build-Depends:
  librubberband-dev,
  libsdl2-dev,
  libsmbclient-dev,
- libsndio-dev (>= 1.0.1),
  libswscale-dev (>= 7:4.0),
  libuchardet-dev,
  libva-dev,

@@ -22,7 +22,6 @@ override_dh_auto_configure:
 			--enable-libmpv-shared				\
 			--enable-libsmbclient				\
 			--enable-sdl2					\
-			--enable-sndio					\
 			--disable-build-date				\
 			$(ARCH_CONFIGURE)
 
