@@ -6,7 +6,7 @@ Uploaders: Alessandro Ghedini <ghedo@debian.org>,
  Reinhard Tartler <siretart@tauware.de>,
  James Cowgill <jcowgill@debian.org>
 Build-Depends:
- debhelper-compat (= 12),
+ debhelper-compat (= 13),
  libarchive-dev (>= 3.4),
  libasound2-dev [linux-any],
  libass-dev,
