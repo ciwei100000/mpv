@@ -20,22 +20,9 @@
 
 #include "android_common.h"
 #include "common/msg.h"
+#include "misc/jni.h"
 #include "options/m_config.h"
 #include "vo.h"
-
-struct android_opts {
-    struct m_geometry surface_size;
-};
-
-#define OPT_BASE_STRUCT struct android_opts
-const struct m_sub_options android_conf = {
-    .opts = (const struct m_option[]) {
-        OPT_SIZE_BOX("android-surface-size", surface_size, UPDATE_VO_RESIZE),
-        {0}
-    },
-    .size = sizeof(struct android_opts),
-};
-
 
 struct vo_android_state {
     struct mp_log *log;
@@ -51,18 +38,18 @@ int vo_android_init(struct vo *vo)
         .log = mp_log_new(ctx, vo->log, "android"),
     };
 
-    jobject surface = (jobject)(intptr_t)vo->opts->WinID;
-    JavaVM *vm = (JavaVM *)av_jni_get_java_vm(NULL);
-    JNIEnv *env;
-    int ret = (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6);
-    if (ret == JNI_EDETACHED) {
-        if ((*vm)->AttachCurrentThread(vm, &env, NULL) != 0) {
-            MP_FATAL(ctx, "Could not attach Java VM.\n");
-            goto fail;
-        }
+    JNIEnv *env = MP_JNI_GET_ENV(ctx);
+    if (!env) {
+        MP_FATAL(ctx, "Could not attach java VM.\n");
+        goto fail;
     }
+
+    jobject surface = (jobject)(intptr_t)vo->opts->WinID;
     ctx->native_window = ANativeWindow_fromSurface(env, surface);
-    (*vm)->DetachCurrentThread(vm);
+    if (!ctx->native_window) {
+        MP_FATAL(ctx, "Failed to create ANativeWindow\n");
+        goto fail;
+    }
 
     return 1;
 fail:
@@ -93,16 +80,14 @@ ANativeWindow *vo_android_native_window(struct vo *vo)
 bool vo_android_surface_size(struct vo *vo, int *out_w, int *out_h)
 {
     struct vo_android_state *ctx = vo->android;
-    void *tmp = talloc_new(NULL);
-    struct android_opts *opts = mp_get_config_group(tmp, vo->global, &android_conf);
 
-    int w = opts->surface_size.w, h = opts->surface_size.h;
+    int w = vo->opts->android_surface_size.w,
+        h = vo->opts->android_surface_size.h;
     if (!w)
         w = ANativeWindow_getWidth(ctx->native_window);
     if (!h)
         h = ANativeWindow_getHeight(ctx->native_window);
 
-    talloc_free(tmp);
     if (w <= 0 || h <= 0) {
         MP_ERR(ctx, "Failed to get height and width.\n");
         return false;

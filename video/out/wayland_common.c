@@ -19,7 +19,7 @@
 #include <limits.h>
 #include <poll.h>
 #include <unistd.h>
-#include <linux/input.h>
+#include <linux/input-event-codes.h>
 #include <time.h>
 #include "common/msg.h"
 #include "options/m_config.h"
@@ -31,29 +31,29 @@
 #include "wayland_common.h"
 
 // Generated from xdg-shell.xml
-#include "video/out/wayland/xdg-shell.h"
+#include "generated/wayland/xdg-shell.h"
 
 // Generated from idle-inhibit-unstable-v1.xml
-#include "video/out/wayland/idle-inhibit-v1.h"
+#include "generated/wayland/idle-inhibit-unstable-v1.h"
 
 // Generated from xdg-decoration-unstable-v1.xml
-#include "video/out/wayland/xdg-decoration-v1.h"
+#include "generated/wayland/xdg-decoration-unstable-v1.h"
 
 // Generated from presentation-time.xml
-#include "video/out/wayland/presentation-time.h"
+#include "generated/wayland/presentation-time.h"
 
 #define OPT_BASE_STRUCT struct wayland_opts
 const struct m_sub_options wayland_conf = {
     .opts = (const struct m_option[]) {
-        OPT_INTRANGE("wayland-frame-wait-offset", frame_offset, 0, -500, 3000),
-        OPT_FLAG("wayland-disable-vsync", disable_vsync, 0),
-        OPT_INTRANGE("wayland-edge-pixels-pointer", edge_pixels_pointer, 10, 0, INT_MAX),
-        OPT_INTRANGE("wayland-edge-pixels-touch", edge_pixels_touch, 64, 0, INT_MAX),
+        {"wayland-disable-vsync", OPT_FLAG(disable_vsync)},
+        {"wayland-edge-pixels-pointer", OPT_INT(edge_pixels_pointer),
+            M_RANGE(0, INT_MAX)},
+        {"wayland-edge-pixels-touch", OPT_INT(edge_pixels_touch),
+            M_RANGE(0, INT_MAX)},
         {0},
     },
     .size = sizeof(struct wayland_opts),
     .defaults = &(struct wayland_opts) {
-        .frame_offset = 1000,
         .disable_vsync = false,
         .edge_pixels_pointer = 10,
         .edge_pixels_touch = 64,
@@ -125,6 +125,32 @@ static int set_cursor_visibility(struct vo_wayland_state *wl, bool on)
     return VO_TRUE;
 }
 
+static int get_mods(struct vo_wayland_state *wl)
+{
+    static char* const mod_names[] = {
+        XKB_MOD_NAME_SHIFT,
+        XKB_MOD_NAME_CTRL,
+        XKB_MOD_NAME_ALT,
+        XKB_MOD_NAME_LOGO,
+    };
+
+    static const int mods[] = {
+        MP_KEY_MODIFIER_SHIFT,
+        MP_KEY_MODIFIER_CTRL,
+        MP_KEY_MODIFIER_ALT,
+        MP_KEY_MODIFIER_META,
+    };
+
+    for (int n = 0; n < MP_ARRAY_SIZE(mods); n++) {
+        xkb_mod_index_t index = xkb_keymap_mod_get_index(wl->xkb_keymap, mod_names[n]);
+        if (!xkb_state_mod_index_is_consumed(wl->xkb_state, wl->keyboard_code, index)
+            && xkb_state_mod_index_is_active(wl->xkb_state, index,
+                                             XKB_STATE_MODS_DEPRESSED))
+            return mods[n];
+    }
+    return 0;
+}
+
 static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
                                  uint32_t serial, struct wl_surface *surface,
                                  wl_fixed_t sx, wl_fixed_t sy)
@@ -155,7 +181,9 @@ static void pointer_handle_motion(void *data, struct wl_pointer *pointer,
     wl->mouse_unscaled_x = sx;
     wl->mouse_unscaled_y = sy;
 
-    mp_input_set_mouse_pos(wl->vo->input_ctx, wl->mouse_x, wl->mouse_y);
+    if (!wl->toplevel_configured)
+        mp_input_set_mouse_pos(wl->vo->input_ctx, wl->mouse_x, wl->mouse_y);
+    wl->toplevel_configured = false;
 }
 
 static void window_move(struct vo_wayland_state *wl, uint32_t serial)
@@ -205,6 +233,7 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
                                   uint32_t state)
 {
     struct vo_wayland_state *wl = data;
+    int mpmod = 0;
 
     state = state == WL_POINTER_BUTTON_STATE_PRESSED ? MP_KEY_STATE_DOWN
                                                      : MP_KEY_STATE_UP;
@@ -230,9 +259,11 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
         break;
     }
 
-    if (button) {
-        mp_input_put_key(wl->vo->input_ctx, button | state);
-    }
+    if (wl->keyboard)
+        mpmod = get_mods(wl);
+
+    if (button)
+        mp_input_put_key(wl->vo->input_ctx, button | state | mpmod);
 
     if (!mp_input_test_dragging(wl->vo->input_ctx, wl->mouse_x, wl->mouse_y) &&
         (button == MP_MBTN_LEFT) && (state == MP_KEY_STATE_DOWN)) {
@@ -244,6 +275,8 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
             xdg_toplevel_resize(wl->xdg_toplevel, wl->seat, serial, edges);
         else
             window_move(wl, serial);
+        // Explictly send an UP event after the client finishes a move/resize
+        mp_input_put_key(wl->vo->input_ctx, button | MP_KEY_STATE_UP);
     }
 }
 
@@ -251,9 +284,8 @@ static void pointer_handle_axis(void *data, struct wl_pointer *wl_pointer,
                                 uint32_t time, uint32_t axis, wl_fixed_t value)
 {
     struct vo_wayland_state *wl = data;
-    if (wl_fixed_to_double(value) == 0)
-        return;
-    double val = wl_fixed_to_double(value)/abs(wl_fixed_to_double(value));
+
+    double val = wl_fixed_to_double(value) < 0 ? -1 : 1;
     switch (axis) {
     case WL_POINTER_AXIS_VERTICAL_SCROLL:
         if (value > 0)
@@ -444,11 +476,15 @@ static void keyboard_handle_enter(void *data, struct wl_keyboard *wl_keyboard,
                                   uint32_t serial, struct wl_surface *surface,
                                   struct wl_array *keys)
 {
+    struct vo_wayland_state *wl = data;
+    wl->has_keyboard_input = true;
 }
 
 static void keyboard_handle_leave(void *data, struct wl_keyboard *wl_keyboard,
                                   uint32_t serial, struct wl_surface *surface)
 {
+    struct vo_wayland_state *wl = data;
+    wl->has_keyboard_input = false;
 }
 
 static bool create_input(struct vo_wayland_state *wl)
@@ -485,43 +521,20 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *wl_keyboard,
 {
     struct vo_wayland_state *wl = data;
 
-    uint32_t code = code = key + 8;
-    xkb_keysym_t sym = xkb_state_key_get_one_sym(wl->xkb_state, code);
+    wl->keyboard_code = key + 8;
+    xkb_keysym_t sym = xkb_state_key_get_one_sym(wl->xkb_state, wl->keyboard_code);
 
-    int mpmod = state == WL_KEYBOARD_KEY_STATE_PRESSED ? MP_KEY_STATE_DOWN
-                                                       : MP_KEY_STATE_UP;
+    state = state == WL_KEYBOARD_KEY_STATE_PRESSED ? MP_KEY_STATE_DOWN
+                                                   : MP_KEY_STATE_UP;
 
-    static const char *mod_names[] = {
-        XKB_MOD_NAME_SHIFT,
-        XKB_MOD_NAME_CTRL,
-        XKB_MOD_NAME_ALT,
-        XKB_MOD_NAME_LOGO,
-        0,
-    };
-
-    static int mods[] = {
-        MP_KEY_MODIFIER_SHIFT,
-        MP_KEY_MODIFIER_CTRL,
-        MP_KEY_MODIFIER_ALT,
-        MP_KEY_MODIFIER_META,
-        0,
-    };
-
-    for (int n = 0; mods[n]; n++) {
-        xkb_mod_index_t index = xkb_keymap_mod_get_index(wl->xkb_keymap, mod_names[n]);
-        if (!xkb_state_mod_index_is_consumed(wl->xkb_state, code, index)
-            && xkb_state_mod_index_is_active(wl->xkb_state, index,
-                                             XKB_STATE_MODS_DEPRESSED))
-            mpmod |= mods[n];
-    }
-
+    int mpmod = get_mods(wl);
     int mpkey = lookupkey(sym);
     if (mpkey) {
-        mp_input_put_key(wl->vo->input_ctx, mpkey | mpmod);
+        mp_input_put_key(wl->vo->input_ctx, mpkey | state | mpmod);
     } else {
         char s[128];
         if (xkb_keysym_to_utf8(sym, s, sizeof(s)) > 0)
-            mp_input_put_key_utf8(wl->vo->input_ctx, mpmod, bstr0(s));
+            mp_input_put_key_utf8(wl->vo->input_ctx, state | mpmod, bstr0(s));
     }
 }
 
@@ -633,6 +646,8 @@ static void output_handle_done(void* data, struct wl_output *wl_output)
                "\tHz: %f\n", o->make, o->model, o->id, o->geometry.x0,
                o->geometry.y0, mp_rect_w(o->geometry), o->phys_width,
                mp_rect_h(o->geometry), o->phys_height, o->scale, o->refresh_rate);
+    
+    o->wl->pending_vo_events |= VO_EVENT_WIN_STATE;
 }
 
 static void output_handle_scale(void* data, struct wl_output *wl_output,
@@ -760,6 +775,7 @@ static void data_device_handle_drop(void *data, struct wl_data_device *wl_ddev)
     close(pipefd[1]);
 
     wl->dnd_fd = pipefd[0];
+    wl_data_offer_finish(wl->dnd_offer);
 }
 
 static void data_device_handle_selection(void *data, struct wl_data_device *wl_ddev,
@@ -826,8 +842,8 @@ static void pres_set_clockid(void *data, struct wp_presentation *pres,
 {
     struct vo_wayland_state *wl = data;
     
-    wl->presentation = pres;
-    clockid = CLOCK_MONOTONIC;
+    if (clockid == CLOCK_MONOTONIC)
+        wl->presentation = pres;
 }
 
 static const struct wp_presentation_listener pres_listener = {
@@ -943,8 +959,9 @@ static void handle_toplevel_config(void *data, struct xdg_toplevel *toplevel,
     struct mp_vo_opts *vo_opts = wl->vo_opts;
     struct mp_rect old_geometry = wl->geometry;
 
-    bool is_maximized = vo_opts->window_maximized;
-    bool is_fullscreen = vo_opts->fullscreen;
+    bool is_maximized = false;
+    bool is_fullscreen = false;
+    bool is_activated = false;
     enum xdg_toplevel_state *state;
     wl_array_for_each(state, states) {
         switch (*state) {
@@ -955,9 +972,10 @@ static void handle_toplevel_config(void *data, struct xdg_toplevel *toplevel,
             wl->pending_vo_events |= VO_EVENT_LIVE_RESIZING;
             break;
         case XDG_TOPLEVEL_STATE_ACTIVATED:
+            is_activated = true;
             /*
              * If we get an ACTIVATED state, we know it cannot be
-             * minimised, but it may not have been minimized
+             * minimized, but it may not have been minimized
              * previously, so we can't detect the exact state.
              */
             vo_opts->window_minimized = false;
@@ -974,43 +992,82 @@ static void handle_toplevel_config(void *data, struct xdg_toplevel *toplevel,
         }
     }
 
-    vo_opts->fullscreen = is_fullscreen;
-    m_config_cache_write_opt(wl->vo_opts_cache, &vo_opts->fullscreen);
-    vo_opts->window_maximized = is_maximized;
-    m_config_cache_write_opt(wl->vo_opts_cache, &vo_opts->window_maximized);
+    if (vo_opts->fullscreen != is_fullscreen) {
+        wl->state_change = true;
+        vo_opts->fullscreen = is_fullscreen;
+        m_config_cache_write_opt(wl->vo_opts_cache, &vo_opts->fullscreen);
+    }
+
+    if (vo_opts->window_maximized != is_maximized) {
+        wl->state_change = true;
+        vo_opts->window_maximized = is_maximized;
+        m_config_cache_write_opt(wl->vo_opts_cache, &vo_opts->window_maximized);
+    }
+
+    if (wl->activated != is_activated) {
+        wl->activated = is_activated;
+        if ((!wl->focused && wl->activated && wl->has_keyboard_input) ||
+            (wl->focused && !wl->activated))
+        {
+            wl->focused = !wl->focused;
+            wl->pending_vo_events |= VO_EVENT_FOCUS;
+
+            if (wl->activated) {
+                /* If the surface comes back into view, force a redraw. */
+                wl->pending_vo_events |= VO_EVENT_EXPOSE;
+            }
+        }
+    }
 
     if (!(wl->pending_vo_events & VO_EVENT_LIVE_RESIZING))
         vo_query_and_reset_events(wl->vo, VO_EVENT_LIVE_RESIZING);
 
-    if (width > 0 && height > 0) {
+    int old_toplevel_width = wl->toplevel_width;
+    int old_toplevel_height = wl->toplevel_height;
+    wl->toplevel_width = width;
+    wl->toplevel_height = height;
+
+    if (wl->state_change) {
         if (!is_fullscreen && !is_maximized) {
-            if (wl->vo_opts->keepaspect && wl->vo_opts->keepaspect_window) {
-                if (width > height)
-                    width  = height * wl->aspect_ratio;
-                else
-                    height =  width / wl->aspect_ratio;
-            }
-            wl->window_size.x0 = 0;
-            wl->window_size.y0 = 0;
-            wl->window_size.x1 = width;
-            wl->window_size.y1 = height;
+            wl->geometry = wl->window_size;
+            wl->state_change = false;
+            goto resize;
         }
-        wl->geometry.x0 = 0;
-        wl->geometry.y0 = 0;
-        wl->geometry.x1 = width;
-        wl->geometry.y1 = height;
-    } else {
-        wl->geometry = wl->window_size;
     }
+
+    if (old_toplevel_width == wl->toplevel_width && old_toplevel_height == wl->toplevel_height)
+        return;
+
+    if (!is_fullscreen && !is_maximized) {
+        if (vo_opts->keepaspect && vo_opts->keepaspect_window) {
+            if (abs(wl->toplevel_width - old_toplevel_width) > abs(wl->toplevel_height - old_toplevel_height)) {
+                double scale_factor = (double)width / wl->reduced_width;
+                width = wl->reduced_width * scale_factor;
+            } else {
+                double scale_factor = (double)height / wl->reduced_height;
+                height = wl->reduced_height * scale_factor;
+            }
+        }
+        wl->window_size.x0 = 0;
+        wl->window_size.y0 = 0;
+        wl->window_size.x1 = width;
+        wl->window_size.y1 = height;
+    }
+    wl->geometry.x0 = 0;
+    wl->geometry.y0 = 0;
+    wl->geometry.x1 = width;
+    wl->geometry.y1 = height;
 
     if (mp_rect_equals(&old_geometry, &wl->geometry))
         return;
 
+resize:
     MP_VERBOSE(wl, "Resizing due to xdg from %ix%i to %ix%i\n",
                mp_rect_w(old_geometry)*wl->scaling, mp_rect_h(old_geometry)*wl->scaling,
                mp_rect_w(wl->geometry)*wl->scaling, mp_rect_h(wl->geometry)*wl->scaling);
 
     wl->pending_vo_events |= VO_EVENT_RESIZE;
+    wl->toplevel_configured = true;
 }
 
 static void handle_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
@@ -1032,10 +1089,20 @@ static int create_xdg_surface(struct vo_wayland_state *wl)
     wl->xdg_toplevel = xdg_surface_get_toplevel(wl->xdg_surface);
     xdg_toplevel_add_listener(wl->xdg_toplevel, &xdg_toplevel_listener, wl);
 
-    xdg_toplevel_set_title (wl->xdg_toplevel, "mpv");
-    xdg_toplevel_set_app_id(wl->xdg_toplevel, "mpv");
-
+    if (!wl->xdg_surface || !wl->xdg_toplevel)
+        return 1;
     return 0;
+}
+
+static void update_app_id(struct vo_wayland_state *wl)
+{
+    if (!wl->xdg_toplevel)
+        return;
+    if (!wl->vo_opts->appid) {
+        wl->vo_opts->appid = talloc_strdup(wl->vo_opts, "mpv");
+        m_config_cache_write_opt(wl->vo_opts_cache, &wl->vo_opts->appid);
+    }
+    xdg_toplevel_set_app_id(wl->xdg_toplevel, wl->vo_opts->appid);
 }
 
 static void set_border_decorations(struct vo_wayland_state *wl, int state)
@@ -1104,10 +1171,11 @@ int vo_wayland_init(struct vo *vo)
     /* Can't be initialized during registry due to multi-protocol dependence */
     if (create_xdg_surface(wl))
         return false;
+    update_app_id(wl);
 
     const char *xdg_current_desktop = getenv("XDG_CURRENT_DESKTOP");
     if (xdg_current_desktop != NULL && strstr(xdg_current_desktop, "GNOME"))
-        MP_WARN(wl, "GNOME's wayland compositor is known to have many serious issues with mpv. Switch to GNOME's xorg session for the best experience.\n");
+        MP_WARN(wl, "GNOME's wayland compositor lacks support for the idle inhibit protocol. This means the screen can blank during playback.\n");
 
     if (wl->dnd_devman && wl->seat) {
         wl->dnd_ddev = wl_data_device_manager_get_data_device(wl->dnd_devman, wl->seat);
@@ -1220,6 +1288,9 @@ void vo_wayland_uninit(struct vo *vo)
     if (wl->presentation)
         wp_presentation_destroy(wl->presentation);
 
+    if (wl->feedback)
+        wp_presentation_feedback_destroy(wl->feedback);
+
     if (wl->pointer)
         wl_pointer_destroy(wl->pointer);
 
@@ -1249,22 +1320,87 @@ void vo_wayland_uninit(struct vo *vo)
     vo->wl = NULL;
 }
 
-static struct vo_wayland_output *find_output(struct vo_wayland_state *wl, int index)
+static bool find_output(struct vo_wayland_state *wl, int index)
 {
     int screen_id = 0;
-    struct vo_wayland_output *output;
+    struct vo_wayland_output *output = NULL;
+    struct vo_wayland_output *fallback_output = NULL;
     wl_list_for_each(output, &wl->output_list, link) {
+        if (screen_id == 0)
+            fallback_output = output;
         if (index == screen_id++)
-            return output;
+            wl->current_output = output;
     }
-    return NULL;
+    if (!wl->current_output) {
+        if (!fallback_output) {
+            MP_ERR(wl, "Screen index %i not found/unavailable!\n", index);
+            return 1;
+        } else {
+            MP_WARN(wl, "Screen index %i not found/unavailable! Falling back to screen 0!\n", index);
+            wl->current_output = fallback_output;
+        }
+    }
+    return 0;
+}
+
+static void toggle_fullscreen(struct vo_wayland_state *wl)
+{
+    if (!wl->xdg_toplevel)
+        return;
+    wl->state_change = true;
+    if (wl->vo_opts->fullscreen && wl->vo_opts->fsscreen_id < 0) {
+        xdg_toplevel_set_fullscreen(wl->xdg_toplevel, NULL);
+    } else if (wl->vo_opts->fullscreen && wl->vo_opts->fsscreen_id >= 0) {
+        find_output(wl, wl->vo_opts->fsscreen_id);
+        xdg_toplevel_set_fullscreen(wl->xdg_toplevel, wl->current_output->output);
+    } else {
+        xdg_toplevel_unset_fullscreen(wl->xdg_toplevel);
+    }
+}
+
+static void toggle_maximized(struct vo_wayland_state *wl)
+{
+    if (!wl->xdg_toplevel)
+        return;
+    wl->state_change = true;
+    if (wl->vo_opts->window_maximized) {
+        xdg_toplevel_set_maximized(wl->xdg_toplevel);
+    } else {
+        xdg_toplevel_unset_maximized(wl->xdg_toplevel);
+    }
+}
+
+static void do_minimize(struct vo_wayland_state *wl)
+{
+    if (!wl->xdg_toplevel)
+        return;
+    if (wl->vo_opts->window_minimized)
+        xdg_toplevel_set_minimized(wl->xdg_toplevel);
+}
+
+static void greatest_common_divisor(struct vo_wayland_state *wl, int a, int b) {
+    // euclidean algorithm
+    int larger;
+    int smaller;
+    if (a > b) {
+        larger = a;
+        smaller = b;
+    } else {
+        larger = b;
+        smaller = a;
+    }
+    int remainder = larger - smaller * floor(larger/smaller);
+    if (remainder == 0) {
+        wl->gcd = smaller;
+    } else {
+        greatest_common_divisor(wl, smaller, remainder);
+    }
 }
 
 int vo_wayland_reconfig(struct vo *vo)
 {
-    struct wl_output *wl_out = NULL;
-    struct mp_rect screenrc = { 0 };
     struct vo_wayland_state *wl = vo->wl;
+    bool configure = false;
 
     MP_VERBOSE(wl, "Reconfiguring!\n");
 
@@ -1272,63 +1408,53 @@ int vo_wayland_reconfig(struct vo *vo)
         int idx = 0;
         if (wl->vo_opts->fullscreen && (wl->vo_opts->fsscreen_id >= 0))
             idx = wl->vo_opts->fsscreen_id;
-        struct vo_wayland_output *out = find_output(wl, idx);
-        if (!out) {
-            MP_ERR(wl, "Screen index %i not found/unavailable!\n", idx);
-        } else {
-            wl_out = out->output;
-            wl->current_output = out;
-            if (!wl->vo_opts->hidpi_window_scale)
-                out->scale = 1;
-            wl->scaling = out->scale;
-            screenrc = wl->current_output->geometry;
-        }
+        if (find_output(wl, idx))
+            return false;
+        if (!wl->vo_opts->hidpi_window_scale)
+            wl->current_output->scale = 1;
+        wl->scaling = wl->current_output->scale;
+        configure = true;
     }
 
     struct vo_win_geometry geo;
+    struct mp_rect screenrc = wl->current_output->geometry;
     vo_calc_window_geometry(vo, &screenrc, &geo);
     vo_apply_window_geometry(vo, &geo);
 
-    if (!wl->configured || !wl->vo_opts->window_maximized) {
-        wl->geometry.x0 = 0;
-        wl->geometry.y0 = 0;
-        wl->geometry.x1 = vo->dwidth  / wl->scaling;
-        wl->geometry.y1 = vo->dheight / wl->scaling;
-        wl->window_size = wl->geometry;
+    greatest_common_divisor(wl, vo->dwidth, vo->dheight);
+    wl->reduced_width = vo->dwidth / wl->gcd;
+    wl->reduced_height = vo->dheight / wl->gcd;
+
+    wl->vdparams.x0 = 0;
+    wl->vdparams.y0 = 0;
+    wl->vdparams.x1 = vo->dwidth / wl->scaling;
+    wl->vdparams.y1 = vo->dheight / wl->scaling;
+    if (wl->vo_opts->keepaspect && wl->vo_opts->keepaspect_window) {
+        wl->window_size = wl->vdparams;
     }
 
-    wl->aspect_ratio = vo->dwidth / (float)vo->dheight;
-
-    if (wl->vo_opts->fullscreen) {
-        /* If already fullscreen, fix resolution for the frame size change */
-        if (wl->current_output) {
-            wl->geometry.x0  = 0;
-            wl->geometry.y0  = 0;
-            wl->geometry.x1  = mp_rect_w(wl->current_output->geometry)/wl->scaling;
-            wl->geometry.y1  = mp_rect_h(wl->current_output->geometry)/wl->scaling;
-        }
-        if (wl->vo_opts->fsscreen_id < 0) {
-            xdg_toplevel_set_fullscreen(wl->xdg_toplevel, NULL);
-        } else {
-            xdg_toplevel_set_fullscreen(wl->xdg_toplevel, wl_out);
-        }
-    }
+    if (wl->vo_opts->fullscreen)
+        toggle_fullscreen(wl);
 
     if (wl->vo_opts->window_maximized)
-        xdg_toplevel_set_maximized(wl->xdg_toplevel);
+        toggle_maximized(wl);
 
     if (wl->vo_opts->window_minimized)
-        xdg_toplevel_set_minimized(wl->xdg_toplevel);
+        do_minimize(wl);
 
     wl_surface_set_buffer_scale(wl->surface, wl->scaling);
     wl_surface_commit(wl->surface);
-    wl->pending_vo_events |= VO_EVENT_RESIZE;
-    if (!wl->configured) {
-        if (spawn_cursor(wl))
-            return false;
+
+    if (configure) {
+        wl->window_size = wl->vdparams;
+        wl->geometry = wl->vdparams;
         wl_display_roundtrip(wl->display);
-        wl->configured = true;
     }
+
+    if (!wl->vo_opts->fullscreen && !wl->vo_opts->window_maximized)
+        wl->geometry = wl->window_size;
+
+    wl->pending_vo_events |= VO_EVENT_RESIZE;
 
     return true;
 }
@@ -1351,35 +1477,7 @@ static int set_screensaver_inhibitor(struct vo_wayland_state *wl, int state)
     return VO_TRUE;
 }
 
-static void toggle_fullscreen(struct vo_wayland_state *wl)
-{
-    if (!wl->xdg_toplevel)
-        return;
-    if (wl->vo_opts->fullscreen)
-        xdg_toplevel_set_fullscreen(wl->xdg_toplevel, NULL);
-    else
-        xdg_toplevel_unset_fullscreen(wl->xdg_toplevel);
-}
-
-static void toggle_maximized(struct vo_wayland_state *wl)
-{
-    if (!wl->xdg_toplevel)
-        return;
-    if (wl->vo_opts->window_maximized)
-        xdg_toplevel_set_maximized(wl->xdg_toplevel);
-    else
-        xdg_toplevel_unset_maximized(wl->xdg_toplevel);
-}
-
-static void do_minimize(struct vo_wayland_state *wl)
-{
-    if (!wl->xdg_toplevel)
-        return;
-    if (wl->vo_opts->window_minimized)
-        xdg_toplevel_set_minimized(wl->xdg_toplevel);
-}
-
-static int update_window_title(struct vo_wayland_state *wl, char *title)
+static int update_window_title(struct vo_wayland_state *wl, const char *title)
 {
     if (!wl->xdg_toplevel)
         return VO_NOTAVAIL;
@@ -1419,7 +1517,6 @@ static void check_dnd_fd(struct vo_wayland_state *wl)
                                 file_list, wl->dnd_action);
         talloc_free(buffer);
 end:
-        wl_data_offer_finish(wl->dnd_offer);
         talloc_free(wl->dnd_mime_type);
         wl->dnd_mime_type = NULL;
         wl->dnd_mime_score = 0;
@@ -1469,7 +1566,13 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
                 toggle_maximized(wl);
             if (opt == &opts->border)
                 set_border_decorations(wl, opts->border);
+            if (opt == &opts->appid)
+                update_app_id(wl);
         }
+        return VO_TRUE;
+    }
+    case VOCTRL_GET_FOCUSED: {
+        *(bool *)arg = wl->focused;
         return VO_TRUE;
     }
     case VOCTRL_GET_DISPLAY_NAMES: {
@@ -1478,17 +1581,18 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
     }
     case VOCTRL_GET_UNFS_WINDOW_SIZE: {
         int *s = arg;
-        s[0] = mp_rect_w(wl->geometry)*wl->scaling;
-        s[1] = mp_rect_h(wl->geometry)*wl->scaling;
+        s[0] = mp_rect_w(wl->geometry) * wl->scaling;
+        s[1] = mp_rect_h(wl->geometry) * wl->scaling;
         return VO_TRUE;
     }
     case VOCTRL_SET_UNFS_WINDOW_SIZE: {
         int *s = arg;
+        wl->window_size.x0 = 0;
+        wl->window_size.y0 = 0;
+        wl->window_size.x1 = s[0] / wl->scaling;
+        wl->window_size.y1 = s[1] / wl->scaling;
         if (!wl->vo_opts->fullscreen && !wl->vo_opts->window_maximized) {
-            wl->geometry.x0 = 0;
-            wl->geometry.y0 = 0;
-            wl->geometry.x1 = s[0]/wl->scaling;
-            wl->geometry.y1 = s[1]/wl->scaling;
+            wl->geometry = wl->window_size;
             wl->pending_vo_events |= VO_EVENT_RESIZE;
         }
         return VO_TRUE;
@@ -1500,7 +1604,7 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
         return VO_TRUE;
     }
     case VOCTRL_UPDATE_WINDOW_TITLE:
-        return update_window_title(wl, (char *)arg);
+        return update_window_title(wl, (const char *)arg);
     case VOCTRL_SET_CURSOR_VISIBILITY:
         if (!wl->pointer)
             return VO_NOTAVAIL;
@@ -1512,6 +1616,27 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
     }
 
     return VO_NOTIMPL;
+}
+
+void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, int alpha)
+{
+    const int32_t width = wl->scaling * mp_rect_w(wl->geometry);
+    const int32_t height = wl->scaling * mp_rect_h(wl->geometry);
+    if (!alpha) {
+        struct wl_region *region = wl_compositor_create_region(wl->compositor);
+        wl_region_add(region, 0, 0, width, height);
+        wl_surface_set_opaque_region(wl->surface, region);
+        wl_region_destroy(region);
+    } else {
+        wl_surface_set_opaque_region(wl->surface, NULL);
+    }
+}
+
+void vo_wayland_sync_clear(struct vo_wayland_state *wl)
+{
+    struct vo_wayland_sync sync = {0, 0, 0, 0};
+    for (int i = 0; i < wl->sync_size; ++i)
+        wl->sync[i] = sync;
 }
 
 void vo_wayland_sync_shift(struct vo_wayland_state *wl)
@@ -1537,48 +1662,43 @@ void queue_new_sync(struct vo_wayland_state *wl)
     wl->sync_size += 1;
     wl->sync = talloc_realloc(wl, wl->sync, struct vo_wayland_sync, wl->sync_size);
     vo_wayland_sync_shift(wl);
-    wl->sync[0].sbc = wl->user_sbc;
 }
 
 void wayland_sync_swap(struct vo_wayland_state *wl)
 {
     int index = wl->sync_size - 1;
 
-    wl->last_skipped_vsyncs = 0;
-
-    // If these are the same (can happen if a frame takes too long), update
-    // the ust/msc/sbc based on when the next frame is expected to arrive.
-    if (wl->sync[index].ust == wl->last_ust && wl->last_ust) {
-        wl->sync[index].ust += wl->sync[index].refresh_usec;
-        wl->sync[index].msc += 1;
-        wl->sync[index].sbc += 1;
+    // If these are the same, presentation feedback has not been received.
+    // This can happen if a frame takes too long and misses vblank.
+    // Additionally, a compositor may return an ust value of 0. In either case,
+    // Don't attempt to use these statistics and wait until the next presentation
+    // event arrives.
+    if (!wl->sync[index].ust || wl->sync[index].ust == wl->last_ust) {
+        wl->last_skipped_vsyncs = -1;
+        wl->vsync_duration = -1;
+        wl->last_queue_display_time = -1;
+        return;
     }
+
+    wl->last_skipped_vsyncs = 0;
 
     int64_t ust_passed = wl->sync[index].ust ? wl->sync[index].ust - wl->last_ust: 0;
     wl->last_ust = wl->sync[index].ust;
     int64_t msc_passed = wl->sync[index].msc ? wl->sync[index].msc - wl->last_msc: 0;
     wl->last_msc = wl->sync[index].msc;
-    int64_t sbc_passed = wl->sync[index].sbc ? wl->sync[index].sbc - wl->last_sbc: 0;
-    wl->last_sbc = wl->sync[index].sbc;
 
     if (msc_passed && ust_passed)
         wl->vsync_duration = ust_passed / msc_passed;
 
-    if (sbc_passed) {
-        struct timespec ts;
-        if (clock_gettime(CLOCK_MONOTONIC, &ts)) {
-            return;
-        }
-
-        uint64_t now_monotonic = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
-        uint64_t ust_mp_time = mp_time_us() - (now_monotonic - wl->sync[index].ust);
-        wl->last_sbc_mp_time = ust_mp_time;
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts)) {
+        return;
     }
 
-    if (!wl->sync[index].sbc)
-        return;
+    uint64_t now_monotonic = ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
+    uint64_t ust_mp_time = mp_time_us() - (now_monotonic - wl->sync[index].ust);
 
-    wl->last_queue_display_time = wl->last_sbc_mp_time + sbc_passed*wl->vsync_duration;
+    wl->last_queue_display_time = ust_mp_time + wl->vsync_duration;
 }
 
 void vo_wayland_wakeup(struct vo *vo)
@@ -1587,57 +1707,55 @@ void vo_wayland_wakeup(struct vo *vo)
     (void)write(wl->wakeup_pipe[1], &(char){0}, 1);
 }
 
-void vo_wayland_wait_frame(struct vo_wayland_state *wl, int frame_offset)
+void vo_wayland_wait_frame(struct vo_wayland_state *wl)
 {
     struct pollfd fds[1] = {
         {.fd = wl->display_fd,     .events = POLLIN },
     };
 
     double vblank_time = 1e6 / wl->current_output->refresh_rate;
-    int64_t finish_time = mp_time_us() + vblank_time + (int64_t)frame_offset;
+    int64_t finish_time = mp_time_us() + vblank_time;
 
     while (wl->frame_wait && finish_time > mp_time_us()) {
+
+        int poll_time = ceil((double)(finish_time - mp_time_us()) / 1000);
+        if (poll_time < 0) {
+            poll_time = 0;
+        }
 
         while (wl_display_prepare_read(wl->display) != 0)
             wl_display_dispatch_pending(wl->display);
         wl_display_flush(wl->display);
 
-        int poll_time = (finish_time - mp_time_us()) / 1000;
-        if (poll_time < 0) {
-            poll_time = 0;
-        }
-
         poll(fds, 1, poll_time);
 
-        wl_display_read_events(wl->display);
+        if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            wl_display_cancel_read(wl->display);
+        } else {
+            wl_display_read_events(wl->display);
+        }
+
         wl_display_dispatch_pending(wl->display);
     }
 
-    if (wl->frame_wait) {
-        if (!wl->hidden) {
-            wl->timeout_count += 1;
-        } else {
-            wl->timeout_count = 0;
-        }
-    } else {
-        if (wl->hidden) {
-            wl->timeout_count -= 1;
-        } else {
-            wl->timeout_count = 0;
-        }
+    if (!wl->hidden && wl->frame_wait) {
+        wl->timeout_count += 1;
+        if (wl->timeout_count > wl->current_output->refresh_rate)
+            wl->hidden = true;
     }
-    
-    if (wl->timeout_count > wl->current_output->refresh_rate) {
-        wl->hidden = true;
-    } else if (wl->timeout_count < -1*wl->current_output->refresh_rate) {
+
+    if (!wl->frame_wait) {
+        wl->timeout_count = 0;
         wl->hidden = false;
     }
+
+    if (wl_display_get_error(wl->display) == 0)
+        wl_display_roundtrip(wl->display);
 }
 
 void vo_wayland_wait_events(struct vo *vo, int64_t until_time_us)
 {
     struct vo_wayland_state *wl = vo->wl;
-    struct wl_display *display = wl->display;
 
     if (wl->display_fd == -1)
         return;
@@ -1650,20 +1768,24 @@ void vo_wayland_wait_events(struct vo *vo, int64_t until_time_us)
     int64_t wait_us = until_time_us - mp_time_us();
     int timeout_ms = MPCLAMP((wait_us + 999) / 1000, 0, 10000);
 
-    wl_display_dispatch_pending(display);
-    wl_display_flush(display);
+    while (wl_display_prepare_read(wl->display) != 0)
+        wl_display_dispatch_pending(wl->display);
+    wl_display_flush(wl->display);
 
     poll(fds, 2, timeout_ms);
 
     if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
         MP_FATAL(wl, "Error occurred on the display fd, closing\n");
+        wl_display_cancel_read(wl->display);
         close(wl->display_fd);
         wl->display_fd = -1;
         mp_input_put_key(vo->input_ctx, MP_KEY_CLOSE_WIN);
+    } else {
+        wl_display_read_events(wl->display);
     }
 
     if (fds[0].revents & POLLIN)
-        wl_display_dispatch(display);
+        wl_display_dispatch_pending(wl->display);
 
     if (fds[1].revents & POLLIN)
         mp_flush_wakeup_pipe(wl->wakeup_pipe[0]);

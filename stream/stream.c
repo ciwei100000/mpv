@@ -44,7 +44,6 @@
 
 extern const stream_info_t stream_info_cdda;
 extern const stream_info_t stream_info_dvb;
-extern const stream_info_t stream_info_smb;
 extern const stream_info_t stream_info_null;
 extern const stream_info_t stream_info_memory;
 extern const stream_info_t stream_info_mf;
@@ -52,6 +51,8 @@ extern const stream_info_t stream_info_ffmpeg;
 extern const stream_info_t stream_info_ffmpeg_unsafe;
 extern const stream_info_t stream_info_avdevice;
 extern const stream_info_t stream_info_file;
+extern const stream_info_t stream_info_slice;
+extern const stream_info_t stream_info_fd;
 extern const stream_info_t stream_info_ifo_dvdnav;
 extern const stream_info_t stream_info_dvdnav;
 extern const stream_info_t stream_info_bdmv_dir;
@@ -71,9 +72,6 @@ static const stream_info_t *const stream_list[] = {
 #if HAVE_DVBIN
     &stream_info_dvb,
 #endif
-#if HAVE_LIBSMBCLIENT
-    &stream_info_smb,
-#endif
 #if HAVE_DVDNAV
     &stream_info_ifo_dvdnav,
     &stream_info_dvdnav,
@@ -91,6 +89,8 @@ static const stream_info_t *const stream_list[] = {
     &stream_info_mf,
     &stream_info_edl,
     &stream_info_file,
+    &stream_info_slice,
+    &stream_info_fd,
     &stream_info_cb,
     NULL
 };
@@ -98,6 +98,9 @@ static const stream_info_t *const stream_list[] = {
 // Because of guarantees documented on STREAM_BUFFER_SIZE.
 // Half the buffer is used as forward buffer, the other for seek-back.
 #define STREAM_MIN_BUFFER_SIZE (STREAM_BUFFER_SIZE * 2)
+// Sort of arbitrary; keep *2 of it comfortably within integer limits.
+// Must be power of 2.
+#define STREAM_MAX_BUFFER_SIZE (512 * 1024 * 1024)
 
 struct stream_opts {
     int64_t buffer_size;
@@ -108,9 +111,9 @@ struct stream_opts {
 
 const struct m_sub_options stream_conf = {
     .opts = (const struct m_option[]){
-        OPT_BYTE_SIZE("stream-buffer-size", buffer_size, 0,
-                      STREAM_MIN_BUFFER_SIZE, 512 * 1024 * 1024),
-        OPT_FLAG("load-unsafe-playlists", load_unsafe_playlists, 0),
+        {"stream-buffer-size", OPT_BYTE_SIZE(buffer_size),
+            M_RANGE(STREAM_MIN_BUFFER_SIZE, STREAM_MAX_BUFFER_SIZE)},
+        {"load-unsafe-playlists", OPT_FLAG(load_unsafe_playlists)},
         {0}
     },
     .size = sizeof(struct stream_opts),
@@ -263,27 +266,28 @@ static int ring_copy(struct stream *s, void *dst, int len, int pos)
 // Does nothing if the size is adequate. Calling this with 0 ensures it uses the
 // default buffer size if possible.
 // The caller must check whether enough data was really allocated.
-// Returns false if buffer allocation failed.
-static bool stream_resize_buffer(struct stream *s, uint32_t new)
+//  keep: keep at least [buf_end-keep, buf_end] (used for assert()s only)
+//  new: new total size of buffer
+//  returns: false if buffer allocation failed, true if reallocated or size ok
+static bool stream_resize_buffer(struct stream *s, int keep, int new)
 {
-    // Keep all valid buffer.
-    int old_used_len = s->buf_end - s->buf_start;
-    int old_pos = s->buf_cur - s->buf_start;
-    new = MPMAX(new, old_used_len);
+    assert(keep >= s->buf_end - s->buf_cur);
+    assert(keep <= new);
 
     new = MPMAX(new, s->requested_buffer_size);
-
-    // This much is always required.
-    new = MPMAX(new, STREAM_MIN_BUFFER_SIZE);
-
+    new = MPMIN(new, STREAM_MAX_BUFFER_SIZE);
     new = mp_round_next_power_of_2(new);
-    if (!new || new > INT_MAX / 8)
-        return false;
+
+    assert(keep <= new); // can't fail (if old buffer size was valid)
 
     if (new == s->buffer_mask + 1)
         return true;
 
-    MP_DBG(s, "resize stream to %d bytes\n", new);
+    int old_pos = s->buf_cur - s->buf_start;
+    int old_used_len = s->buf_end - s->buf_start;
+    int skip = old_used_len > new ? old_used_len - new : 0;
+
+    MP_DBG(s, "resize stream to %d bytes, drop %d bytes\n", new, skip);
 
     void *nbuf = ta_alloc_size(s, new);
     if (!nbuf)
@@ -291,11 +295,12 @@ static bool stream_resize_buffer(struct stream *s, uint32_t new)
 
     int new_len = 0;
     if (s->buffer)
-        new_len = ring_copy(s, nbuf, new, s->buf_start);
-    assert(new_len == old_used_len);
-    assert(old_pos <= old_used_len);
+        new_len = ring_copy(s, nbuf, new, s->buf_start + skip);
+    assert(new_len == old_used_len - skip);
+    assert(old_pos >= skip); // "keep" too low
+    assert(old_pos - skip <= new_len);
     s->buf_start = 0;
-    s->buf_cur = old_pos;
+    s->buf_cur = old_pos - skip;
     s->buf_end = new_len;
 
     ta_free(s->buffer);
@@ -316,14 +321,20 @@ static int stream_create_instance(const stream_info_t *sinfo,
     *ret = NULL;
 
     const char *path = url;
-    for (int n = 0; sinfo->protocols && sinfo->protocols[n]; n++) {
-        path = match_proto(url, sinfo->protocols[n]);
-        if (path)
-            break;
-    }
 
-    if (!path)
-        return STREAM_NO_MATCH;
+    if (flags & STREAM_LOCAL_FS_ONLY) {
+        if (!sinfo->local_fs)
+            return STREAM_NO_MATCH;
+    } else {
+        for (int n = 0; sinfo->protocols && sinfo->protocols[n]; n++) {
+            path = match_proto(url, sinfo->protocols[n]);
+            if (path)
+                break;
+        }
+
+        if (!path)
+            return STREAM_NO_MATCH;
+    }
 
     stream_t *s = talloc_zero(NULL, stream_t);
     s->global = args->global;
@@ -339,6 +350,9 @@ static int stream_create_instance(const stream_info_t *sinfo,
     s->path = talloc_strdup(s, path);
     s->mode = flags & (STREAM_READ | STREAM_WRITE);
     s->requested_buffer_size = opts->buffer_size;
+
+    if (flags & STREAM_LESS_NOISE)
+        mp_msg_set_max_level(s->log, MSGL_WARN);
 
     int opt;
     mp_read_option_raw(s->global, "access-references", &m_option_type_flag, &opt);
@@ -381,7 +395,7 @@ static int stream_create_instance(const stream_info_t *sinfo,
         return r;
     }
 
-    if (!stream_resize_buffer(s, 0)) {
+    if (!stream_resize_buffer(s, 0, 0)) {
         free_stream(s);
         return STREAM_ERROR;
     }
@@ -427,8 +441,7 @@ int stream_create_with_args(struct stream_open_args *args, struct stream **ret)
 
         if (r == STREAM_UNSAFE) {
             mp_err(log, "\nRefusing to load potentially unsafe URL from a playlist.\n"
-                   "Use --playlist=file or the --load-unsafe-playlists option to "
-                   "load it anyway.\n\n");
+                   "Use the --load-unsafe-playlists option to load it anyway.\n\n");
         } else if (r == STREAM_NO_MATCH || r == STREAM_UNSUPPORTED) {
             mp_err(log, "No protocol handler found to open URL %s\n", args->url);
             mp_err(log, "The protocol is either unsupported, or was disabled "
@@ -481,6 +494,7 @@ static int stream_read_unbuffered(stream_t *s, void *buf, int len)
         s->eof = 1;
         return 0;
     }
+    assert(res <= len);
     // When reading succeeded we are obviously not at eof.
     s->eof = 0;
     s->pos += res;
@@ -502,11 +516,12 @@ static bool stream_read_more(struct stream *s, int forward)
 
     // Avoid that many small reads will lead to many low-level read calls.
     forward = MPMAX(forward, s->requested_buffer_size / 2);
+    assert(forward_avail < forward);
 
     // Keep guaranteed seek-back.
     int buf_old = MPMIN(s->buf_cur - s->buf_start, s->requested_buffer_size / 2);
 
-    if (!stream_resize_buffer(s, buf_old + forward))
+    if (!stream_resize_buffer(s, buf_old + forward_avail, buf_old + forward))
         return false;
 
     int buf_alloc = s->buffer_mask + 1;
@@ -520,7 +535,7 @@ static bool stream_read_more(struct stream *s, int forward)
     // Note: read as much as possible, even if forward is much smaller. Do
     // this because the stream buffer is supposed to set an approx. minimum
     // read size on it.
-    int read = buf_alloc - buf_old - forward_avail; // free buffer past end
+    int read = buf_alloc - (buf_old + forward_avail); // free buffer past end
 
     int pos = s->buf_end & s->buffer_mask;
     read = MPMIN(read, buf_alloc - pos);
@@ -597,11 +612,19 @@ int stream_read(stream_t *s, void *mem, int total)
     return total;
 }
 
+// Read ahead so that at least forward_size bytes are readable ahead. Returns
+// the actual forward amount available (restricted by EOF or buffer limits).
+int stream_peek(stream_t *s, int forward_size)
+{
+    while (stream_read_more(s, forward_size)) {}
+    return s->buf_end - s->buf_cur;
+}
+
 // Like stream_read(), but do not advance the current position. This may resize
 // the buffer to satisfy the read request.
 int stream_read_peek(stream_t *s, void *buf, int buf_size)
 {
-    while (stream_read_more(s, buf_size)) {}
+    stream_peek(s, buf_size);
     return ring_copy(s, buf, buf_size, s->buf_cur);
 }
 
@@ -648,7 +671,7 @@ void stream_drop_buffers(stream_t *s)
     s->pos = stream_tell(s);
     s->buf_start = s->buf_cur = s->buf_end = 0;
     s->eof = 0;
-    stream_resize_buffer(s, 0);
+    stream_resize_buffer(s, 0, 0);
 }
 
 // Seek function bypassing the local stream buffer.
@@ -720,8 +743,13 @@ bool stream_seek(stream_t *s, int64_t pos)
 // it's a forward-seek.
 bool stream_seek_skip(stream_t *s, int64_t pos)
 {
-    return !s->seekable && pos > stream_tell(s)
-        ? stream_skip_read(s, pos - stream_tell(s))
+    uint64_t cur_pos = stream_tell(s);
+
+    if (cur_pos == pos)
+        return true;
+
+    return !s->seekable && pos > cur_pos
+        ? stream_skip_read(s, pos - cur_pos)
         : stream_seek(s, pos);
 }
 
@@ -810,14 +838,13 @@ struct bstr stream_read_file(const char *filename, void *talloc_ctx,
                              struct mpv_global *global, int max_size)
 {
     struct bstr res = {0};
-    char *fname = mp_get_user_path(NULL, global, filename);
-    stream_t *s =
-        stream_create(fname, STREAM_ORIGIN_DIRECT | STREAM_READ, NULL, global);
+    int flags = STREAM_ORIGIN_DIRECT | STREAM_READ | STREAM_LOCAL_FS_ONLY |
+                STREAM_LESS_NOISE;
+    stream_t *s = stream_create(filename, flags, NULL, global);
     if (s) {
         res = stream_read_complete(s, talloc_ctx, max_size);
         free_stream(s);
     }
-    talloc_free(fname);
     return res;
 }
 

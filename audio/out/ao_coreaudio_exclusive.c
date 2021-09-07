@@ -455,7 +455,7 @@ const struct ao_driver audio_out_coreaudio_exclusive = {
     .uninit    = uninit,
     .init      = init,
     .reset     = audio_pause,
-    .resume    = audio_resume,
+    .start     = audio_resume,
     .list_devs = ca_get_device_list,
     .priv_size = sizeof(struct priv),
     .priv_defaults = &(const struct priv){
@@ -465,7 +465,7 @@ const struct ao_driver audio_out_coreaudio_exclusive = {
         .changed_mixing = false,
     },
     .options = (const struct m_option[]){
-        OPT_FLAG("spdif-hack", spdif_hack, 0),
+        {"spdif-hack", OPT_FLAG(spdif_hack)},
         {0}
     },
     .options_prefix = "coreaudio",

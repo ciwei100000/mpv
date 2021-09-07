@@ -61,8 +61,6 @@ struct priv {
     int direct_channels;
 };
 
-static void reset(struct ao *ao);
-
 static int control(struct ao *ao, enum aocontrol cmd, void *arg)
 {
     switch (cmd) {
@@ -266,22 +264,12 @@ static int init(struct ao *ao)
         goto err_out;
     }
 
-    ao->period_size = p->num_samples;
+    ao->device_buffer = p->num_buffers * p->num_samples;
     return 0;
 
 err_out:
     ao_data = NULL;
     return -1;
-}
-
-static void drain(struct ao *ao)
-{
-    ALint state;
-    alGetSourcei(source, AL_SOURCE_STATE, &state);
-    while (state == AL_PLAYING) {
-        mp_sleep_us(10000);
-        alGetSourcei(source, AL_SOURCE_STATE, &state);
-    }
 }
 
 static void unqueue_buffers(struct ao *ao)
@@ -301,67 +289,32 @@ static void unqueue_buffers(struct ao *ao)
     }
 }
 
-/**
- * \brief stop playing and empty buffers (for seeking/pause)
- */
 static void reset(struct ao *ao)
 {
     alSourceStop(source);
     unqueue_buffers(ao);
 }
 
-/**
- * \brief stop playing, keep buffers (for pause)
- */
-static void audio_pause(struct ao *ao)
+static bool audio_set_pause(struct ao *ao, bool pause)
 {
-    alSourcePause(source);
-}
-
-/**
- * \brief resume playing, after audio_pause()
- */
-static void audio_resume(struct ao *ao)
-{
-    alSourcePlay(source);
-}
-
-static int get_space(struct ao *ao)
-{
-    struct priv *p = ao->priv;
-    ALint queued;
-    unqueue_buffers(ao);
-    alGetSourcei(source, AL_BUFFERS_QUEUED, &queued);
-    queued = p->num_buffers - queued;
-    if (queued < 0)
-        return 0;
-    return p->num_samples * queued;
-}
-
-/**
- * \brief write data into buffer and reset underrun flag
- */
-static int play(struct ao *ao, void **data, int samples, int flags)
-{
-    struct priv *p = ao->priv;
-
-    int buffered_samples = 0;
-    int num = 0;
-    if (flags & AOPLAY_FINAL_CHUNK) {
-        num = 1;
-        buffered_samples = samples;
+    if (pause) {
+        alSourcePause(source);
     } else {
-        num = samples / p->num_samples;
-        buffered_samples = num * p->num_samples;
+        alSourcePlay(source);
     }
+    return true;
+}
+
+static bool audio_write(struct ao *ao, void **data, int samples)
+{
+    struct priv *p = ao->priv;
+
+    int num = (samples + p->num_samples - 1) / p->num_samples;
 
     for (int i = 0; i < num; i++) {
         char *d = *data;
-        if (flags & AOPLAY_FINAL_CHUNK) {
-            buffer_size[cur_buf] = samples;
-        } else {
-            buffer_size[cur_buf] = p->num_samples;
-        }
+        buffer_size[cur_buf] =
+            MPMIN(samples - i * p->num_samples, p->num_samples);
         d += i * buffer_size[cur_buf] * ao->sstride;
         alBufferData(buffers[cur_buf], p->al_format, d,
             buffer_size[cur_buf] * ao->sstride, ao->samplerate);
@@ -369,33 +322,34 @@ static int play(struct ao *ao, void **data, int samples, int flags)
         cur_buf = (cur_buf + 1) % p->num_buffers;
     }
 
-    ALint state;
-    alGetSourcei(source, AL_SOURCE_STATE, &state);
-    if (state != AL_PLAYING) // checked here in case of an underrun
-        alSourcePlay(source);
-
-    return buffered_samples;
+    return true;
 }
 
-static double get_delay(struct ao *ao)
+static void audio_start(struct ao *ao)
+{
+    alSourcePlay(source);
+}
+
+static void get_state(struct ao *ao, struct mp_pcm_state *state)
 {
     struct priv *p = ao->priv;
+
     ALint queued;
     unqueue_buffers(ao);
     alGetSourcei(source, AL_BUFFERS_QUEUED, &queued);
 
-    double soft_source_latency = 0;
+    double source_offset = 0;
     if(alIsExtensionPresent("AL_SOFT_source_latency")) {
         ALdouble offsets[2];
         LPALGETSOURCEDVSOFT alGetSourcedvSOFT = alGetProcAddress("alGetSourcedvSOFT");
         alGetSourcedvSOFT(source, AL_SEC_OFFSET_LATENCY_SOFT, offsets);
         // Additional latency to the play buffer, the remaining seconds to be
         // played minus the offset (seconds already played)
-        soft_source_latency = offsets[1] - offsets[0];
+        source_offset = offsets[1] - offsets[0];
     } else {
         float offset = 0;
         alGetSourcef(source, AL_SEC_OFFSET, &offset);
-        soft_source_latency = -offset;
+        source_offset = -offset;
     }
 
     int queued_samples = 0;
@@ -403,7 +357,15 @@ static double get_delay(struct ao *ao)
         queued_samples += buffer_size[index];
         index = (index + 1) % p->num_buffers;
     }
-    return (queued_samples / (double)ao->samplerate) + soft_source_latency;
+
+    state->delay = queued_samples / (double)ao->samplerate + source_offset;
+
+    state->queued_samples = queued_samples;
+    state->free_samples = MPMAX(p->num_buffers - queued, 0) * p->num_samples;
+
+    ALint source_state = 0;
+    alGetSourcei(source, AL_SOURCE_STATE, &source_state);
+    state->playing = source_state == AL_PLAYING;
 }
 
 #define OPT_BASE_STRUCT struct priv
@@ -414,13 +376,11 @@ const struct ao_driver audio_out_openal = {
     .init      = init,
     .uninit    = uninit,
     .control   = control,
-    .get_space = get_space,
-    .play      = play,
-    .get_delay = get_delay,
-    .pause     = audio_pause,
-    .resume    = audio_resume,
+    .get_state = get_state,
+    .write     = audio_write,
+    .start     = audio_start,
+    .set_pause = audio_set_pause,
     .reset     = reset,
-    .drain     = drain,
     .priv_size = sizeof(struct priv),
     .priv_defaults = &(const struct priv) {
         .num_buffers = 4,
@@ -428,9 +388,9 @@ const struct ao_driver audio_out_openal = {
         .direct_channels = 0,
     },
     .options = (const struct m_option[]) {
-        OPT_INTRANGE("num-buffers", num_buffers, 0, 2, MAX_BUF),
-        OPT_INTRANGE("num-samples", num_samples, 0, 256, MAX_SAMPLES),
-        OPT_FLAG("direct-channels", direct_channels, 0),
+        {"num-buffers", OPT_INT(num_buffers), M_RANGE(2, MAX_BUF)},
+        {"num-samples", OPT_INT(num_samples), M_RANGE(256, MAX_SAMPLES)},
+        {"direct-channels", OPT_FLAG(direct_channels)},
         {0}
     },
     .options_prefix = "openal",

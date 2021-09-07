@@ -98,16 +98,18 @@ enum {
     MP_EVENT_WIN_RESIZE,
     MP_EVENT_WIN_STATE,
     MP_EVENT_WIN_STATE2,
+    MP_EVENT_FOCUS,
     MP_EVENT_CHANGE_PLAYLIST,
     MP_EVENT_CORE_IDLE,
     MP_EVENT_DURATION_UPDATE,
+    MP_EVENT_INPUT_PROCESSED,
 };
 
 bool mp_hook_test_completion(struct MPContext *mpctx, char *type);
 void mp_hook_start(struct MPContext *mpctx, char *type);
-int mp_hook_continue(struct MPContext *mpctx, char *client, uint64_t id);
-void mp_hook_add(struct MPContext *mpctx, const char *client, const char *name,
-                 uint64_t user_id, int pri, bool legacy);
+int mp_hook_continue(struct MPContext *mpctx, int64_t client_id, uint64_t id);
+void mp_hook_add(struct MPContext *mpctx, char *client, int64_t client_id,
+                 const char *name, uint64_t user_id, int pri);
 
 void mark_seek(struct MPContext *mpctx);
 

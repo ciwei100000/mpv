@@ -98,6 +98,9 @@ struct mp_filter_info {
     bool (*command)(struct mp_filter *f, struct mp_filter_command *cmd);
 };
 
+// Return the mp_filter_info this filter was crated with.
+const struct mp_filter_info *mp_filter_get_info(struct mp_filter *f);
+
 // Create a filter instance. Returns NULL on failure.
 // Destroy/free with talloc_free().
 // This is for filter implementers only. Filters are created with their own
@@ -119,8 +122,6 @@ struct mp_filter_info {
 // automatically free'd.
 // All filters in the same parent tree must be driven in the same thread (or be
 // explicitly synchronized otherwise).
-// Driving the parent (or root) filter with mp_filter_run() will make sure this
-// filter is driven too, without having to resort to recursion.
 struct mp_filter *mp_filter_create(struct mp_filter *parent,
                                    const struct mp_filter_info *info);
 

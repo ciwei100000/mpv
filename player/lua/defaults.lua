@@ -42,6 +42,11 @@ function mp.input_disable_section(section)
     mp.commandv("disable-section", section)
 end
 
+function mp.get_mouse_pos()
+    local m = mp.get_property_native("mouse-pos")
+    return m.x, m.y
+end
+
 -- For dispatching script-binding. This is sent as:
 --      script-message-to $script_name $binding_name $keystate
 -- The array is indexed by $binding_name, and has functions like this as value:
@@ -475,6 +480,15 @@ _G.print = mp.msg.info
 package.loaded["mp"] = mp
 package.loaded["mp.msg"] = mp.msg
 
+function mp.wait_event(t)
+    local r = mp.raw_wait_event(t)
+    if r and r.file_error and not r.error then
+        -- compat; deprecated
+        r.error = r.file_error
+    end
+    return r
+end
+
 _G.mp_event_loop = function()
     mp.dispatch_events(true)
 end
@@ -538,12 +552,35 @@ end
 
 local hook_table = {}
 
+local hook_mt = {}
+hook_mt.__index = hook_mt
+
+function hook_mt.cont(t)
+    if t._id == nil then
+        mp.msg.error("hook already continued")
+    else
+        mp.raw_hook_continue(t._id)
+        t._id = nil
+    end
+end
+
+function hook_mt.defer(t)
+    t._defer = true
+end
+
 mp.register_event("hook", function(ev)
     local fn = hook_table[tonumber(ev.id)]
+    local hookobj = {
+        _id = ev.hook_id,
+        _defer = false,
+    }
+    setmetatable(hookobj, hook_mt)
     if fn then
-        fn()
+        fn(hookobj)
     end
-    mp.raw_hook_continue(ev.hook_id)
+    if (not hookobj._defer) and hookobj._id ~= nil then
+        hookobj:cont()
+    end
 end)
 
 function mp.add_hook(name, pri, cb)
@@ -614,7 +651,7 @@ function overlay_mt.update(ov)
     cmd.name = "osd-overlay"
     cmd.res_x = math.floor(cmd.res_x)
     cmd.res_y = math.floor(cmd.res_y)
-    mp.command_native(cmd)
+    return mp.command_native(cmd)
 end
 
 function overlay_mt.remove(ov)
@@ -631,10 +668,15 @@ function mp.set_osd_ass(res_x, res_y, data)
     if not mp._legacy_overlay then
         mp._legacy_overlay = mp.create_osd_overlay("ass-events")
     end
-    mp._legacy_overlay.res_x = res_x
-    mp._legacy_overlay.res_y = res_y
-    mp._legacy_overlay.data = data
-    mp._legacy_overlay:update()
+    if mp._legacy_overlay.res_x ~= res_x or
+       mp._legacy_overlay.res_y ~= res_y or
+       mp._legacy_overlay.data ~= data
+    then
+        mp._legacy_overlay.res_x = res_x
+        mp._legacy_overlay.res_y = res_y
+        mp._legacy_overlay.data = data
+        mp._legacy_overlay:update()
+    end
 end
 
 function mp.get_osd_size()

@@ -36,7 +36,7 @@ INSERT
     Toggle insert mode.
 
 Shift+INSERT
-    Paste text (uses the primary selection on X11.)
+    Paste text (uses the primary selection on X11).
 
 TAB
     Complete the command or property name at the cursor.
@@ -44,7 +44,7 @@ TAB
 Ctrl+C
     Clear current line.
 
-Ctrl+K.
+Ctrl+K
     Delete text from the cursor to the end of the line.
 
 Ctrl+L
@@ -54,7 +54,7 @@ Ctrl+U
     Delete text from the cursor to the beginning of the line.
 
 Ctrl+V
-    Paste text (uses the clipboard on X11.)
+    Paste text (uses the clipboard on X11).
 
 Ctrl+W
     Delete text from the cursor to the beginning of the current word.
@@ -62,8 +62,14 @@ Ctrl+W
 Commands
 --------
 
-``script-message-to console type <text>``
-    Show the console and pre-fill it with the provided text.
+``script-message-to console type <text> [<cursor_pos>]``
+    Show the console and pre-fill it with the provided text, optionally
+    specifying the initial cursor position as a positive integer starting from
+    1.
+
+    .. admonition:: Example for input.conf
+
+        ``% script-message-to console type "seek  absolute-percent" 6``
 
 Known issues
 ------------

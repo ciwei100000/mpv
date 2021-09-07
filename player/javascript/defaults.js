@@ -126,10 +126,17 @@ function dispatch_message(ev) {
 var hooks = [];  // array of callbacks, id is index+1
 
 function run_hook(ev) {
+    var state = 0;  // 0:initial, 1:deferred, 2:continued
+    function do_cont() { return state = 2, mp._hook_continue(ev.hook_id) }
+
+    function err() { return mp.msg.error("hook already continued"), undefined }
+    function usr_defer() { return state == 2 ? err() : (state = 1, true) }
+    function usr_cont()  { return state == 2 ? err() : do_cont() }
+
     var cb = ev.id > 0 && hooks[ev.id - 1];
     if (cb)
-        cb();
-    mp._hook_continue(ev.hook_id);
+        cb({ defer: usr_defer, cont: usr_cont });
+    return state == 0 ? do_cont() : true;
 }
 
 mp.add_hook = function add_hook(name, pri, fn) {
@@ -204,16 +211,17 @@ mp.create_osd_overlay = function create_osd_overlay(format) {
         z: 0,
 
         update: function ass_update() {
-            mp.command_native({
-                name: "osd-overlay",
-                format: this.format,
-                id: this.id,
-                data: this.data,
-                res_x: Math.round(this.res_x),
-                res_y: Math.round(this.res_y),
-                z: this.z,
-            });
-            return mp.last_error() ? undefined : true;
+            var cmd = {};  // shallow clone of `this', excluding methods
+            for (var k in this) {
+                if (typeof this[k] != "function")
+                    cmd[k] = this[k];
+            }
+
+            cmd.name = "osd-overlay";
+            cmd.res_x = Math.round(this.res_x);
+            cmd.res_y = Math.round(this.res_y);
+
+            return mp.command_native(cmd);
         },
 
         remove: function ass_remove() {
@@ -232,6 +240,11 @@ mp.create_osd_overlay = function create_osd_overlay(format) {
 mp.set_osd_ass = function set_osd_ass(res_x, res_y, data) {
     if (!mp._legacy_overlay)
         mp._legacy_overlay = mp.create_osd_overlay("ass-events");
+
+    var lo = mp._legacy_overlay;
+    if (lo.res_x == res_x && lo.res_y == res_y && lo.data == data)
+        return true;
+
     mp._legacy_overlay.res_x = res_x;
     mp._legacy_overlay.res_y = res_y;
     mp._legacy_overlay.data = data;
@@ -462,7 +475,9 @@ function process_timers() {
  - Module id supports mpv path enhancements, e.g. ~/foo, ~~/bar, ~~desktop/baz
  *********************************************************************/
 
-mp.module_paths = ["~~/scripts/modules.js"];  // global modules search paths
+mp.module_paths = [];  // global modules search paths
+if (mp.script_path !== undefined)  // loaded as a directory
+    mp.module_paths.push(mp.utils.join_path(mp.script_path, "modules"));
 
 // Internal meta top-dirs. Users should not rely on these names.
 var MODULES_META = "~~modules",
@@ -645,8 +660,10 @@ mp.options = { read_options: read_options };
 g.print = mp.msg.info;  // convenient alias
 mp.get_script_name = function() { return mp.script_name };
 mp.get_script_file = function() { return mp.script_file };
+mp.get_script_directory = function() { return mp.script_path };
 mp.get_time = function() { return mp.get_time_ms() / 1000 };
 mp.utils.getcwd = function() { return mp.get_property("working-directory") };
+mp.get_mouse_pos = function() { return mp.get_property_native("mouse-pos") };
 mp.dispatch_event = dispatch_event;
 mp.process_timers = process_timers;
 mp.notify_idle_observers = notify_idle_observers;
@@ -740,3 +757,8 @@ g.mp_event_loop = function mp_event_loop() {
 };
 
 })(this)
+
+try {
+    // let the user extend us, e.g. for updating mp.module_paths
+    require("~~/.init");
+} catch(e) {}

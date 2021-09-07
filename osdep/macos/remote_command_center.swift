@@ -19,7 +19,6 @@ import MediaPlayer
 
 @available(macOS 10.12.2, *)
 class RemoteCommandCenter: NSObject {
-
     enum KeyType {
         case normal
         case repeatable
@@ -87,14 +86,10 @@ class RemoteCommandCenter: NSObject {
         MPRemoteCommandCenter.shared().bookmarkCommand,
     ]
 
-    let application: Application
-
     var mpInfoCenter: MPNowPlayingInfoCenter { get { return MPNowPlayingInfoCenter.default() } }
     var isPaused: Bool = false { didSet { updatePlaybackState() } }
 
-    @objc init(app: Application) {
-        application = app
-
+    @objc override init() {
         super.init()
 
         for cmd in disabledCommands {
@@ -110,8 +105,10 @@ class RemoteCommandCenter: NSObject {
             }
         }
 
-        if let icon = application.getMPVIcon(), #available(macOS 10.13.2, *) {
-            let albumArt = MPMediaItemArtwork(boundsSize:icon.size) { _ in
+        if let app = NSApp as? Application, let icon = app.getMPVIcon(),
+               #available(macOS 10.13.2, *)
+        {
+            let albumArt = MPMediaItemArtwork(boundsSize: icon.size) { _ in
                 return icon
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = albumArt
@@ -119,6 +116,13 @@ class RemoteCommandCenter: NSObject {
 
         mpInfoCenter.nowPlayingInfo = nowPlayingInfo
         mpInfoCenter.playbackState = .playing
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(self.makeCurrent),
+            name: NSApplication.willBecomeActiveNotification,
+            object: nil
+        )
     }
 
     @objc func stop() {
@@ -131,7 +135,7 @@ class RemoteCommandCenter: NSObject {
         mpInfoCenter.playbackState = .unknown
     }
 
-    @objc func makeCurrent() {
+    @objc func makeCurrent(notification: NSNotification) {
         mpInfoCenter.playbackState = .paused
         mpInfoCenter.playbackState = .playing
         updatePlaybackState()
@@ -160,7 +164,7 @@ class RemoteCommandCenter: NSObject {
             }
         }
 
-        application.handleMPKey(mpKey, withMask: Int32(state));
+        EventsResponder.sharedInstance().handleMPKey(mpKey, withMask: Int32(state))
 
         return .success
     }

@@ -33,6 +33,7 @@
 #include "options/m_property.h"
 #include "common/msg.h"
 #include "common/msg_control.h"
+#include "common/stats.h"
 #include "options/m_option.h"
 #include "input/input.h"
 #include "options/path.h"
@@ -51,7 +52,7 @@
 // All these are generated from player/javascript/*.js
 static const char *const builtin_files[][3] = {
     {"@/defaults.js",
-#   include "player/javascript/defaults.js.inc"
+#   include "generated/player/javascript/defaults.js.inc"
     },
     {0}
 };
@@ -59,10 +60,13 @@ static const char *const builtin_files[][3] = {
 // Represents a loaded script. Each has its own js state.
 struct script_ctx {
     const char *filename;
+    const char *path; // NULL if single file
     struct mpv_handle *client;
     struct MPContext *mpctx;
     struct mp_log *log;
     char *last_error_str;
+    size_t js_malloc_size;
+    struct stats_ctx *stats;
 };
 
 static struct script_ctx *jctx(js_State *J)
@@ -457,6 +461,25 @@ static int s_init_js(js_State *J, struct script_ctx *ctx)
     return 0;
 }
 
+static void *mp_js_alloc(void *actx, void *ptr, int size_)
+{
+    if (size_ < 0)
+        return NULL;
+
+    struct script_ctx* ctx = actx;
+    size_t size = size_, osize = 0;
+    if (ptr)  // free/realloc
+        osize = ta_get_size(ptr);
+
+    void *ret = talloc_realloc_size(actx, ptr, size);
+
+    if (!size || ret) {  // free / successful realloc/malloc
+        ctx->js_malloc_size = ctx->js_malloc_size - osize + size;
+        stats_size_value(ctx->stats, "mem", ctx->js_malloc_size);
+    }
+    return ret;
+}
+
 /**********************************************************************
  *  Initialization - booting the script
  *********************************************************************/
@@ -468,19 +491,34 @@ static int s_init_js(js_State *J, struct script_ctx *ctx)
 //
 // Note: init functions don't need autofree. They can use ctx as a talloc
 // context and free normally. If they throw - ctx is freed right afterwards.
-static int s_load_javascript(struct mpv_handle *client, const char *fname)
+static int s_load_javascript(struct mp_script_args *args)
 {
     struct script_ctx *ctx = talloc_ptrtype(NULL, ctx);
     *ctx = (struct script_ctx) {
-        .client = client,
-        .mpctx = mp_client_get_core(client),
-        .log = mp_client_get_log(client),
+        .client = args->client,
+        .mpctx = args->mpctx,
+        .log = args->log,
         .last_error_str = talloc_strdup(ctx, "Cannot initialize JavaScript"),
-        .filename = fname,
+        .filename = args->filename,
+        .path = args->path,
+        .js_malloc_size = 0,
+        .stats = stats_ctx_create(ctx, args->mpctx->global,
+                    mp_tprintf(80, "script/%s", mpv_client_name(args->client))),
     };
 
+    stats_register_thread_cputime(ctx->stats, "cpu");
+
+    js_Alloc alloc_fn = NULL;
+    void *actx = NULL;
+
+    char *mem_report = getenv("MPV_LEAK_REPORT");
+    if (mem_report && strcmp(mem_report, "1") == 0) {
+        alloc_fn = mp_js_alloc;
+        actx = ctx;
+    }
+
     int r = -1;
-    js_State *J = js_newstate(NULL, NULL, 0);
+    js_State *J = js_newstate(alloc_fn, actx, 0);
     if (!J || s_init_js(J, ctx))
         goto error_out;
 
@@ -743,16 +781,6 @@ static void push_nums_obj(js_State *J, const char * const names[],
     }
 }
 
-// args: none, return: object with properties x, y
-static void script_get_mouse_pos(js_State *J)
-{
-    int x, y;
-    mp_input_get_mouse_pos(jctx(J)->mpctx->input, &x, &y);
-    const char * const names[] = {"x", "y", NULL};
-    const double vals[] = {x, y};
-    push_nums_obj(J, names, vals);
-}
-
 // args: input-section-name, x0, y0, x1, y1
 static void script_input_set_section_mouse_area(js_State *J)
 {
@@ -937,6 +965,16 @@ static void script_getenv(js_State *J)
     }
 }
 
+// args: none
+static void script_get_env_list(js_State *J)
+{
+    js_newarray(J);
+    for (int n = 0; environ && environ[n]; n++) {
+        js_pushstring(J, environ[n]);
+        js_setindex(J, -2, n);
+    }
+}
+
 // args: as-filename, content-string, returns the compiled result as a function
 static void script_compile_js(js_State *J)
 {
@@ -1082,109 +1120,14 @@ static void makenode(void *ta_ctx, mpv_node *dst, js_State *J, int idx)
 }
 
 // args: wait in secs (infinite if negative) if mpv doesn't send events earlier.
-static void script_wait_event(js_State *J)
+static void script_wait_event(js_State *J, void *af)
 {
-    int top = js_gettop(J);
     double timeout = js_isnumber(J, 1) ? js_tonumber(J, 1) : -1;
     mpv_event *event = mpv_wait_event(jclient(J), timeout);
 
-    js_newobject(J); // the reply
-    js_pushstring(J, mpv_event_name(event->event_id));
-    js_setproperty(J, -2, "event");  // reply.event (is an event name)
-
-    if (event->reply_userdata) {
-        js_pushnumber(J, event->reply_userdata);
-        js_setproperty(J, -2, "id");   // reply.id
-    }
-
-    if (event->error < 0) {
-        // TODO: untested
-        js_pushstring(J, mpv_error_string(event->error));
-        js_setproperty(J, -2, "error");  // reply.error
-    }
-
-    switch (event->event_id) {
-    case MPV_EVENT_LOG_MESSAGE: {
-        mpv_event_log_message *msg = event->data;
-
-        js_pushstring(J, msg->prefix);
-        js_setproperty(J, -2, "prefix");  // reply.prefix (e.g. "cplayer")
-        js_pushstring(J, msg->level);
-        js_setproperty(J, -2, "level");  // reply.level (e.g. "v" or "info")
-        js_pushstring(J, msg->text);
-        js_setproperty(J, -2, "text");  // reply.text
-        break;
-    }
-
-    case MPV_EVENT_CLIENT_MESSAGE: {
-        mpv_event_client_message *msg = event->data;
-
-        js_newarray(J);  // reply.args
-        for (int n = 0; n < msg->num_args; n++) {
-            js_pushstring(J, msg->args[n]);
-            js_setindex(J, -2, n);
-        }
-        js_setproperty(J, -2, "args");  // reply.args (is a strings array)
-        break;
-    }
-
-    case MPV_EVENT_END_FILE: {
-        mpv_event_end_file *eef = event->data;
-        const char *reason;
-
-        switch (eef->reason) {
-        case MPV_END_FILE_REASON_EOF: reason = "eof"; break;
-        case MPV_END_FILE_REASON_STOP: reason = "stop"; break;
-        case MPV_END_FILE_REASON_QUIT: reason = "quit"; break;
-        case MPV_END_FILE_REASON_ERROR: reason = "error"; break;
-        case MPV_END_FILE_REASON_REDIRECT: reason = "redirect"; break;
-        default:
-            reason = "unknown";
-        }
-        js_pushstring(J, reason);
-        js_setproperty(J, -2, "reason");  // reply.reason
-
-        if (eef->reason == MPV_END_FILE_REASON_ERROR) {
-            js_pushstring(J, mpv_error_string(eef->error));
-            js_setproperty(J, -2, "error");  // reply.error
-        }
-        break;
-    }
-
-    case MPV_EVENT_PROPERTY_CHANGE: {
-        mpv_event_property *prop = event->data;
-        js_pushstring(J, prop->name);
-        js_setproperty(J, -2, "name");  // reply.name (is a property name)
-
-        switch (prop->format) {
-        case MPV_FORMAT_NODE:   pushnode(J, prop->data); break;
-        case MPV_FORMAT_DOUBLE: js_pushnumber(J, *(double *)prop->data); break;
-        case MPV_FORMAT_INT64:  js_pushnumber(J, *(int64_t *)prop->data); break;
-        case MPV_FORMAT_FLAG:   js_pushboolean(J, *(int *)prop->data); break;
-        case MPV_FORMAT_STRING: js_pushstring(J, *(char **)prop->data); break;
-        default:
-            js_pushnull(J);  // also for FORMAT_NONE, e.g. observe type "none"
-        }
-        js_setproperty(J, -2, "data");  // reply.data (value as observed type)
-        break;
-    }
-
-    case MPV_EVENT_HOOK: {
-        mpv_event_hook *hook = event->data;
-        js_pushnumber(J, hook->id);
-        js_setproperty(J, -2, "hook_id");  // reply.hook_id (is a number)
-        break;
-    }
-
-    case MPV_EVENT_COMMAND_REPLY: {
-        mpv_event_command *cmd = event->data;
-        pushnode(J, &cmd->result);
-        js_setproperty(J, -2, "result");  // reply.result (mpv node)
-        break;
-    }
-    }  // switch (event->event_id)
-
-    assert(top == js_gettop(J) - 1);
+    mpv_node *rn = new_af_mpv_node(af);
+    mpv_event_to_node(rn, event);
+    pushnode(J, rn);
 }
 
 /**********************************************************************
@@ -1203,7 +1146,7 @@ struct fn_entry {
 // FN_ENTRY is a normal js C function, AF_ENTRY is an autofree js C function.
 static const struct fn_entry main_fns[] = {
     FN_ENTRY(log, 1),
-    FN_ENTRY(wait_event, 1),
+    AF_ENTRY(wait_event, 1),
     FN_ENTRY(_request_event, 2),
     AF_ENTRY(find_config_file, 1),
     FN_ENTRY(command, 1),
@@ -1228,7 +1171,6 @@ static const struct fn_entry main_fns[] = {
     FN_ENTRY(get_wakeup_pipe, 0),
     FN_ENTRY(_hook_add, 3),
     FN_ENTRY(_hook_continue, 1),
-    FN_ENTRY(get_mouse_pos, 0),
     FN_ENTRY(input_set_section_mouse_area, 5),
     FN_ENTRY(last_error, 0),
     FN_ENTRY(_set_last_error, 1),
@@ -1242,6 +1184,7 @@ static const struct fn_entry utils_fns[] = {
     AF_ENTRY(join_path, 2),
     AF_ENTRY(get_user_path, 1),
     FN_ENTRY(getpid, 0),
+    FN_ENTRY(get_env_list, 0),
 
     FN_ENTRY(read_file, 2),
     AF_ENTRY(write_file, 2),
@@ -1280,6 +1223,11 @@ static void add_functions(js_State *J, struct script_ctx *ctx)
 
     js_pushstring(J, ctx->filename);
     js_setproperty(J, -2, "script_file");
+
+    if (ctx->path) {
+        js_pushstring(J, ctx->path);
+        js_setproperty(J, -2, "script_path");
+    }
 
     js_pop(J, 2);  // leave the stack as we got it
 }
