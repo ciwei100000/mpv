@@ -362,7 +362,9 @@ void update_demuxer_properties(struct MPContext *mpctx)
 
 // Enables or disables the stream for the given track, according to
 // track->selected.
-void reselect_demux_stream(struct MPContext *mpctx, struct track *track)
+// With refresh_only=true, refreshes the stream if it's enabled.
+void reselect_demux_stream(struct MPContext *mpctx, struct track *track,
+                           bool refresh_only)
 {
     if (!track->stream)
         return;
@@ -372,7 +374,10 @@ void reselect_demux_stream(struct MPContext *mpctx, struct track *track)
         if (track->type == STREAM_SUB)
             pts -= 10.0;
     }
-    demuxer_select_track(track->demuxer, track->stream, pts, track->selected);
+    if (refresh_only)
+        demuxer_refresh_track(track->demuxer, track->stream, pts);
+    else
+        demuxer_select_track(track->demuxer, track->stream, pts, track->selected);
 }
 
 static void enable_demux_thread(struct MPContext *mpctx, struct demuxer *demux)
@@ -416,6 +421,7 @@ static struct track *add_stream_track(struct MPContext *mpctx,
         .dependent_track = stream->dependent_track,
         .visual_impaired_track = stream->visual_impaired_track,
         .hearing_impaired_track = stream->hearing_impaired_track,
+        .image = stream->image,
         .attached_picture = stream->attached_picture != NULL,
         .lang = stream->lang,
         .demuxer = demuxer,
@@ -471,8 +477,12 @@ static bool compare_track(struct track *t1, struct track *t2, char **langs,
         return !t1->is_external;
     bool ext1 = t1->is_external && !t1->no_default;
     bool ext2 = t2->is_external && !t2->no_default;
-    if (ext1 != ext2)
+    if (ext1 != ext2) {
+        if (t1->attached_picture && t2->attached_picture
+            && opts->audio_display == 1)
+            return !ext1;
         return ext1;
+    }
     if (t1->auto_loaded != t2->auto_loaded)
         return !t1->auto_loaded;
     int l1 = match_lang(langs, t1->lang), l2 = match_lang(langs, t2->lang);
@@ -658,14 +668,14 @@ void mp_switch_track_n(struct MPContext *mpctx, int order, enum stream_type type
         if (current->remux_sink)
             close_recorder_and_error(mpctx);
         current->selected = false;
-        reselect_demux_stream(mpctx, current);
+        reselect_demux_stream(mpctx, current, false);
     }
 
     mpctx->current_track[order][type] = track;
 
     if (track) {
         track->selected = true;
-        reselect_demux_stream(mpctx, track);
+        reselect_demux_stream(mpctx, track, false);
     }
 
     if (type == STREAM_VIDEO && order == 0) {
@@ -753,7 +763,8 @@ bool mp_remove_track(struct MPContext *mpctx, struct track *track)
 // cancel will generally be used to abort the loading process, but on success
 // the demuxer is changed to be slaved to mpctx->playback_abort instead.
 int mp_add_external_file(struct MPContext *mpctx, char *filename,
-                         enum stream_type filter, struct mp_cancel *cancel)
+                         enum stream_type filter, struct mp_cancel *cancel,
+                         bool cover_art)
 {
     struct MPOpts *opts = mpctx->opts;
     if (!filename || mp_cancel_test(cancel))
@@ -827,8 +838,8 @@ int mp_add_external_file(struct MPContext *mpctx, char *filename,
         t->external_filename = talloc_strdup(t, filename);
         t->no_default = sh->type != filter;
         t->no_auto_select = t->no_default;
-        // filter==STREAM_VIDEO always means cover art.
-        t->attached_picture = t->type == STREAM_VIDEO && filter == STREAM_VIDEO;
+        // if we found video, and we are loading cover art, flag as such.
+        t->attached_picture = t->type == STREAM_VIDEO && cover_art;
         if (first_num < 0 && (filter == STREAM_TYPE_COUNT || sh->type == filter))
             first_num = mpctx->num_tracks - 1;
     }
@@ -853,7 +864,9 @@ static void open_external_files(struct MPContext *mpctx, char **files,
     files = mp_dup_str_array(tmp, files);
 
     for (int n = 0; files && files[n]; n++)
-        mp_add_external_file(mpctx, files[n], filter, mpctx->playback_abort);
+        // when given filter is set to video, we are loading up cover art
+        mp_add_external_file(mpctx, files[n], filter, mpctx->playback_abort,
+                             filter == STREAM_VIDEO);
 
     talloc_free(tmp);
 }
@@ -892,15 +905,16 @@ void autoload_external_files(struct MPContext *mpctx, struct mp_cancel *cancel)
             goto skip;
         if (e->type == STREAM_VIDEO && (sc[STREAM_VIDEO] || !sc[STREAM_AUDIO]))
             goto skip;
-        int first = mp_add_external_file(mpctx, e->fname, e->type, cancel);
+
+        // when given filter is set to video, we are loading up cover art
+        int first = mp_add_external_file(mpctx, e->fname, e->type, cancel,
+                                         e->type == STREAM_VIDEO);
         if (first < 0)
             goto skip;
 
         for (int n = first; n < mpctx->num_tracks; n++) {
             struct track *t = mpctx->tracks[n];
             t->auto_loaded = true;
-            t->attached_picture =
-                t->type == STREAM_VIDEO && e->type == STREAM_VIDEO;
             if (!t->lang)
                 t->lang = talloc_strdup(t, e->lang);
         }
@@ -1341,7 +1355,7 @@ done:
 
     if (mpctx->playback_initialized) {
         for (int n = 0; n < mpctx->num_tracks; n++)
-            reselect_demux_stream(mpctx, mpctx->tracks[n]);
+            reselect_demux_stream(mpctx, mpctx->tracks[n], false);
     }
 
     mp_notify(mpctx, MPV_EVENT_TRACKS_CHANGED, NULL);
@@ -1583,7 +1597,7 @@ static void play_current_file(struct MPContext *mpctx)
     }
 
     for (int n = 0; n < mpctx->num_tracks; n++)
-        reselect_demux_stream(mpctx, mpctx->tracks[n]);
+        reselect_demux_stream(mpctx, mpctx->tracks[n], false);
 
     update_demuxer_properties(mpctx);
 
@@ -1610,7 +1624,7 @@ static void play_current_file(struct MPContext *mpctx)
 
     if (mpctx->vo_chain && mpctx->vo_chain->is_coverart) {
         MP_INFO(mpctx,
-            "Displaying attached picture. Use --no-audio-display to prevent this.\n");
+            "Displaying cover art. Use --no-audio-display to prevent this.\n");
     }
 
     if (!mpctx->vo_chain)
@@ -1950,11 +1964,18 @@ void open_recorder(struct MPContext *mpctx, bool on_init)
             MP_TARRAY_APPEND(NULL, streams, num_streams, track->stream);
     }
 
+    struct demux_attachment **attachments = talloc_array(NULL, struct demux_attachment*, mpctx->demuxer->num_attachments);
+    for (int n = 0; n < mpctx->demuxer->num_attachments; n++) {
+        attachments[n] = &mpctx->demuxer->attachments[n];
+    }
+
     mpctx->recorder = mp_recorder_create(mpctx->global, mpctx->opts->record_file,
-                                         streams, num_streams);
+                                         streams, num_streams,
+                                         attachments, mpctx->demuxer->num_attachments);
 
     if (!mpctx->recorder) {
         talloc_free(streams);
+        talloc_free(attachments);
         close_recorder_and_error(mpctx);
         return;
     }
@@ -1978,5 +1999,6 @@ void open_recorder(struct MPContext *mpctx, bool on_init)
     }
 
     talloc_free(streams);
+    talloc_free(attachments);
 }
 

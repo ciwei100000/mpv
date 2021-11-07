@@ -14,7 +14,7 @@ in the list.
 
     See ``--ao=help`` for a list of compiled-in audio output drivers. The
     driver ``--ao=alsa`` is preferred. ``--ao=pulse`` is preferred on systems
-    where PulseAudio is used.
+    where PulseAudio is used. On BSD systems, ``--ao=oss`` is preferred.
 
 Available audio output drivers are:
 
@@ -34,6 +34,9 @@ Available audio output drivers are:
         This setup enables multichannel audio on the ``default`` device
         with automatic upmixing with shared access, so playing stereo
         and multichannel audio at the same time will work as expected.
+
+``oss``
+    OSS audio output driver
 
 ``jack``
     JACK (Jack Audio Connection Kit) audio output driver.
@@ -65,8 +68,8 @@ Available audio output drivers are:
         mode is probably not very useful, other than for debugging or when used
         with fixed setups.
 
-``coreaudio`` (Mac OS X only)
-    Native Mac OS X audio output driver using AudioUnits and the CoreAudio
+``coreaudio`` (macOS only)
+    Native macOS audio output driver using AudioUnits and the CoreAudio
     sound server.
 
     Automatically redirects to ``coreaudio_exclusive`` when playing compressed
@@ -92,8 +95,8 @@ Available audio output drivers are:
         extreme care.
 
 
-``coreaudio_exclusive`` (Mac OS X only)
-    Native Mac OS X audio output driver using direct device access and
+``coreaudio_exclusive`` (macOS only)
+    Native macOS audio output driver using direct device access and
     exclusive mode (bypasses the sound server).
 
 ``openal``

@@ -25,9 +25,6 @@
 #include "egl_helpers.h"
 #include "utils.h"
 
-// Generated from presentation-time.xml
-#include "generated/wayland/presentation-time.h"
-
 #define EGL_PLATFORM_WAYLAND_EXT 0x31D8
 
 struct priv {
@@ -37,79 +34,6 @@ struct priv {
     EGLSurface egl_surface;
     EGLConfig  egl_config;
     struct wl_egl_window *egl_window;
-};
-
-static const struct wp_presentation_feedback_listener feedback_listener;
-
-static void feedback_sync_output(void *data, struct wp_presentation_feedback *fback,
-                               struct wl_output *output)
-{
-}
-
-static void feedback_presented(void *data, struct wp_presentation_feedback *fback,
-                              uint32_t tv_sec_hi, uint32_t tv_sec_lo,
-                              uint32_t tv_nsec, uint32_t refresh_nsec,
-                              uint32_t seq_hi, uint32_t seq_lo,
-                              uint32_t flags)
-{
-    struct vo_wayland_state *wl = data;
-    vo_wayland_sync_shift(wl);
-
-    if (fback)
-        wp_presentation_feedback_destroy(fback);
-
-    // Very similar to oml_sync_control, in this case we assume that every
-    // time the compositor receives feedback, a buffer swap has been already
-    // been performed.
-    //
-    // Notes:
-    //  - tv_sec_lo + tv_sec_hi is the equivalent of oml's ust
-    //  - seq_lo + seq_hi is the equivalent of oml's msc
-    //  - these values are updated everytime the compositor receives feedback.
-
-    int index = last_available_sync(wl);
-    if (index < 0) {
-        queue_new_sync(wl);
-        index = 0;
-    }
-    int64_t sec = (uint64_t) tv_sec_lo + ((uint64_t) tv_sec_hi << 32);
-    wl->sync[index].ust = sec * 1000000LL + (uint64_t) tv_nsec / 1000;
-    wl->sync[index].msc = (uint64_t) seq_lo + ((uint64_t) seq_hi << 32);
-    wl->sync[index].filled = true;
-}
-
-static void feedback_discarded(void *data, struct wp_presentation_feedback *fback)
-{
-}
-
-static const struct wp_presentation_feedback_listener feedback_listener = {
-    feedback_sync_output,
-    feedback_presented,
-    feedback_discarded,
-};
-
-static const struct wl_callback_listener frame_listener;
-
-static void frame_callback(void *data, struct wl_callback *callback, uint32_t time)
-{
-    struct vo_wayland_state *wl = data;
-
-    if (callback)
-        wl_callback_destroy(callback);
-
-    wl->frame_callback = wl_surface_frame(wl->surface);
-    wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
-
-    if (wl->presentation) {
-        wl->feedback = wp_presentation_feedback(wl->presentation, wl->surface);
-        wp_presentation_feedback_add_listener(wl->feedback, &feedback_listener, wl);
-    }
-
-    wl->frame_wait = false;
-}
-
-static const struct wl_callback_listener frame_listener = {
-    frame_callback,
 };
 
 static void resize(struct ra_ctx *ctx)
@@ -123,8 +47,6 @@ static void resize(struct ra_ctx *ctx)
     const int32_t height = wl->scaling * mp_rect_h(wl->geometry);
 
     vo_wayland_set_opaque_region(wl, ctx->opts.want_alpha);
-    wl_surface_set_buffer_scale(wl->surface, wl->scaling);
-
     if (p->egl_window)
         wl_egl_window_resize(p->egl_window, width, height, 0, 0);
 
@@ -136,14 +58,8 @@ static bool wayland_egl_start_frame(struct ra_swapchain *sw, struct ra_fbo *out_
 {
     struct ra_ctx *ctx = sw->ctx;
     struct vo_wayland_state *wl = ctx->vo->wl;
-
     bool render = !wl->hidden || wl->opts->disable_vsync;
-
-    if (wl->frame_wait && wl->presentation)
-        vo_wayland_sync_clear(wl);
-
-    if (render)
-        wl->frame_wait = true;
+    wl->frame_wait = true;
 
     return render ? ra_gl_ctx_start_frame(sw, out_fbo) : false;
 }
@@ -160,12 +76,12 @@ static void wayland_egl_swap_buffers(struct ra_swapchain *sw)
         vo_wayland_wait_frame(wl);
 
     if (wl->presentation)
-        wayland_sync_swap(wl);
+        vo_wayland_sync_swap(wl);
 }
 
 static const struct ra_swapchain_fns wayland_egl_swapchain = {
-    .start_frame   = wayland_egl_start_frame,
-    .swap_buffers  = wayland_egl_swap_buffers,
+    .start_frame  = wayland_egl_start_frame,
+    .swap_buffers = wayland_egl_swap_buffers,
 };
 
 static void wayland_egl_get_vsync(struct ra_ctx *ctx, struct vo_vsync_info *info)
@@ -208,9 +124,6 @@ static bool egl_create_context(struct ra_ctx *ctx)
         return false;
 
     ra_add_native_resource(ctx->ra, "wl", wl->display);
-
-    wl->frame_callback = wl_surface_frame(wl->surface);
-    wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
 
     return true;
 }

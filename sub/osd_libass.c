@@ -367,6 +367,14 @@ static void get_osd_bar_box(struct osd_state *osd, struct osd_object *obj,
 
     mp_ass_set_style(style, track->PlayResY, opts->osd_style);
 
+    if (osd->opts->osd_style->back_color.a) {
+        // override the default osd opaque-box into plain outline. Otherwise
+        // the opaque box is not aligned with the bar (even without shadow),
+        // and each bar ass event gets its own opaque box - breaking the bar.
+        style->BackColour = MP_ASS_COLOR(opts->osd_style->shadow_color);
+        style->BorderStyle = 1; // outline
+    }
+
     *o_w = track->PlayResX * (opts->osd_bar_w / 100.0);
     *o_h = track->PlayResY * (opts->osd_bar_h / 100.0);
 
@@ -416,6 +424,22 @@ static void update_progbar(struct osd_state *osd, struct osd_object *obj)
     talloc_free(buf.start);
 
     struct ass_draw *d = &(struct ass_draw) { .scale = 4 };
+
+    if (osd->opts->osd_style->back_color.a) {
+        // the bar style always ignores the --osd-back-color config - it messes
+        // up the bar. draw an artificial box at the original back color.
+        struct m_color bc = osd->opts->osd_style->back_color;
+        d->text = talloc_asprintf_append(d->text,
+            "{\\pos(%f,%f)\\bord0\\1a&H%02X\\1c&H%02X%02X%02X&}",
+             px, py, 255 - bc.a, (int)bc.b, (int)bc.g, (int)bc.r);
+
+        ass_draw_start(d);
+        ass_draw_rect_cw(d, -border, -border, width + border, height + border);
+        ass_draw_stop(d);
+        add_osd_ass_event(track, "progbar", d->text);
+        ass_draw_reset(d);
+    }
+
     // filled area
     d->text = talloc_asprintf_append(d->text, "{\\bord0\\pos(%f,%f)}", px, py);
     ass_draw_start(d);

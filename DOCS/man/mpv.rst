@@ -43,6 +43,9 @@ The following listings are not necessarily complete. See ``etc/input.conf`` for
 a list of default bindings. User ``input.conf`` files and Lua scripts can
 define additional key bindings.
 
+See also ``--input-test`` for interactive binding details by key, and the
+`stats`_ built-in script for key bindings list (including print to terminal).
+
 Keyboard Control
 ----------------
 
@@ -227,7 +230,7 @@ i and I
     `STATS`_ for more information.
 
 del
-    Cycles visibility between never / auto (mouse-move) / always
+    Cycle OSC visibility between never / auto (mouse-move) / always
 
 \`
     Show the console. (ESC closes it again. See `CONSOLE`_.)
@@ -247,16 +250,16 @@ corresponding adjustment.)
 7 and 8
     Adjust saturation.
 
-Alt+0 (and command+0 on OSX)
+Alt+0 (and command+0 on macOS)
     Resize video window to half its original size.
 
-Alt+1 (and command+1 on OSX)
+Alt+1 (and command+1 on macOS)
     Resize video window to its original size.
 
-Alt+2 (and command+2 on OSX)
+Alt+2 (and command+2 on macOS)
     Resize video window to double its original size.
 
-command + f (OSX only)
+command + f (macOS only)
     Toggle fullscreen (see also ``--fs``).
 
 (The following keys are valid if you have a keyboard with multimedia keys.)
@@ -390,6 +393,9 @@ It is started with ``%`` and has the following format::
 
     ``mpv --vf=foo:option1=%`expr length "$NAME"`%"$NAME" test.avi``
 
+Note: where applicable with JSON-IPC, ``%n%`` is the length in UTF-8 bytes,
+after decoding the JSON data.
+
 Suboptions passed to the client API are also subject to escaping. Using
 ``mpv_set_option_string()`` is exactly like passing ``--name=data`` to the
 command line (but without shell processing of the string). Some options
@@ -427,23 +433,28 @@ need to escape special characters. To work this around, the path can be
 additionally wrapped in the fixed-length syntax, e.g. ``%n%string_of_length_n``
 (see above).
 
-Some mpv options interpret paths starting with ``~``. Currently, the prefix
-``~~/`` expands to the mpv configuration directory (usually ``~/.config/mpv/``).
+Some mpv options interpret paths starting with ``~``.
+Currently, the prefix ``~~home/`` expands to the mpv configuration directory
+(usually ``~/.config/mpv/``).
 ``~/`` expands to the user's home directory. (The trailing ``/`` is always
 required.) The following paths are currently recognized:
 
 ================ ===============================================================
 Name             Meaning
 ================ ===============================================================
-``~~/``          mpv config dir (for example ``~/.config/mpv/``)
+``~~/``          If the subpath exists in any of the mpv's config directories
+                 the path of the existing file/dir is returned. Otherwise this
+                 is equivalent to ``~~home/``.
+                 Note that if --no-config is used ``~~/foobar`` will resolve to
+                 ``foobar`` which can be unexpected.
 ``~/``           user home directory root (similar to shell, ``$HOME``)
-``~~home/``      same as ``~~/``
+``~~home/``      mpv config dir (for example ``~/.config/mpv/``)
 ``~~global/``    the global config path, if available (not on win32)
-``~~osxbundle/`` the OSX bundle resource path (OSX only)
-``~~desktop/``   the path to the desktop (win32, OSX)
-``~~exe_dir``    win32 only: the path to the directory containing the exe (for
+``~~osxbundle/`` the macOS bundle resource path (macOS only)
+``~~desktop/``   the path to the desktop (win32, macOS)
+``~~exe_dir/``   win32 only: the path to the directory containing the exe (for
                  config file purposes; ``$MPV_HOME`` overrides it)
-``~~old_home``   do not use
+``~~old_home/``  do not use
 ================ ===============================================================
 
 
@@ -511,7 +522,7 @@ They support the following operations:
 ============= ===============================================
 Suffix        Meaning
 ============= ===============================================
--set          Set a list of items (using the list separator, interprets escapes)
+-set          Set a list of items (using the list separator, escaped with backslash)
 -append       Append single item (does not interpret escapes)
 -add          Append 1 or more items (same syntax as -set)
 -pre          Prepend 1 or more items (same syntax as -set)
@@ -781,9 +792,11 @@ ignored. This Lua code execution is not sandboxed.
 
 Any variables in condition expressions can reference properties. If an
 identifier is not already defined by Lua or mpv, it is interpreted as property.
-For example, ``pause`` would return the current pause status. If the variable
-name contains any ``_`` characters, they are turned into ``-``. For example,
-``playback_time`` would return the property ``playback-time``.
+For example, ``pause`` would return the current pause status. You cannot
+reference properties with ``-`` this way since that would denote a subtraction,
+but if the variable name contains any ``_`` characters, they are turned into
+``-``. For example, ``playback_time`` would return the property
+``playback-time``.
 
 A more robust way to access properties is using ``p.property_name`` or
 ``get("property-name", default_value)``. The automatic variable to property
@@ -1001,7 +1014,7 @@ listed.
 - ``AV:`` or ``V:`` (video only) or ``A:`` (audio only)
 - The current time position in ``HH:MM:SS`` format (``playback-time`` property)
 - The total file duration (absent if unknown) (``duration`` property)
-- Playback speed, e.g. `` x2.0``. Only visible if the speed is not normal. This
+- Playback speed, e.g. ``x2.0``. Only visible if the speed is not normal. This
   is the user-requested speed, and not the actual speed  (usually they should
   be the same, unless playback is too slow). (``speed`` property.)
 - Playback percentage, e.g. ``(13%)``. How much of the file has been played.
@@ -1260,7 +1273,7 @@ Currently this happens only in the following cases:
   or file associations provided by desktop environments)
 - if started from explorer.exe on Windows (technically, if it was started on
   Windows, and all of the stdout/stderr/stdin handles are unset)
-- started out of the bundle on OSX
+- started out of the bundle on macOS
 - if you manually use ``--player-operation-mode=pseudo-gui`` on the command line
 
 This mode applies options from the builtin profile ``builtin-pseudo-gui``, but
@@ -1298,7 +1311,7 @@ Linux desktop issues
 ====================
 
 This subsection describes common problems on the Linux desktop. None of these
-problems exist on systems like Windows or OSX.
+problems exist on systems like Windows or macOS.
 
 Disabling Screensaver
 ---------------------

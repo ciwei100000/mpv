@@ -136,6 +136,7 @@ struct track {
     char *title;
     bool default_track, forced_track, dependent_track;
     bool visual_impaired_track, hearing_impaired_track;
+    bool image;
     bool attached_picture;
     char *lang;
 
@@ -295,7 +296,6 @@ typedef struct MPContext {
     // Return code to use with PT_QUIT
     int quit_custom_rc;
     bool has_quit_custom_rc;
-    char **resume_defaults;
 
     // Global file statistics
     int files_played;       // played without issues (even if stopped by user)
@@ -511,7 +511,6 @@ void audio_start_ao(struct MPContext *mpctx);
 // configfiles.c
 void mp_parse_cfgfiles(struct MPContext *mpctx);
 void mp_load_auto_profiles(struct MPContext *mpctx);
-void mp_get_resume_defaults(struct MPContext *mpctx);
 void mp_load_playback_resume(struct MPContext *mpctx, const char *file);
 void mp_write_watch_later_conf(struct MPContext *mpctx);
 void mp_delete_watch_later_conf(struct MPContext *mpctx, const char *file);
@@ -528,7 +527,8 @@ void mp_abort_trigger_locked(struct MPContext *mpctx,
                              struct mp_abort_entry *abort);
 void uninit_player(struct MPContext *mpctx, unsigned int mask);
 int mp_add_external_file(struct MPContext *mpctx, char *filename,
-                         enum stream_type filter, struct mp_cancel *cancel);
+                         enum stream_type filter, struct mp_cancel *cancel,
+                         bool cover_art);
 void mark_track_selection(struct MPContext *mpctx, int order,
                           enum stream_type type, int value);
 #define FLAG_MARK_SELECTION 1
@@ -547,7 +547,8 @@ void mp_set_playlist_entry(struct MPContext *mpctx, struct playlist_entry *e);
 void mp_play_files(struct MPContext *mpctx);
 void update_demuxer_properties(struct MPContext *mpctx);
 void print_track_list(struct MPContext *mpctx, const char *msg);
-void reselect_demux_stream(struct MPContext *mpctx, struct track *track);
+void reselect_demux_stream(struct MPContext *mpctx, struct track *track,
+                           bool refresh_only);
 void prepare_playlist(struct MPContext *mpctx, struct playlist *pl);
 void autoload_external_files(struct MPContext *mpctx, struct mp_cancel *cancel);
 struct track *select_default_track(struct MPContext *mpctx, int order,

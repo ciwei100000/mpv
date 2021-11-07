@@ -117,6 +117,10 @@ build_options = [
         'default': 'enable',
         'func': check_true,
     }, {
+        'name': '--vector',
+        'desc': 'GCC vector instructions',
+        'func': check_statement([], 'float v __attribute__((vector_size(32)))'),
+    }, {
         'name': '--clang-database',
         'desc': 'generate a clang compilation database',
         'func': check_true,
@@ -182,7 +186,7 @@ main_dependencies = [
         'name': '--swift',
         'desc': 'macOS Swift build tools',
         'deps': 'os-darwin',
-        'func': compose_checks(check_swift, check_macos_sdk('10.10')),
+        'func': compose_checks(check_swift('4.1'), check_macos_sdk('10.10')),
     }, {
         'name': '--uwp',
         'desc': 'Universal Windows Platform',
@@ -323,8 +327,8 @@ iconv support use --disable-iconv.",
     }, {
         'name': '--zlib',
         'desc': 'zlib',
-        'func': check_libs(['z'],
-                    check_statement('zlib.h', 'inflate(0, Z_NO_FLUSH)')),
+        'func': any_check(check_pkg_config('zlib'),
+                          check_libs(['z'], check_statement('zlib.h', 'inflate(0, Z_NO_FLUSH)'))),
         'req': True,
         'fmsg': 'Unable to find development files for zlib.'
     }, {
@@ -408,10 +412,14 @@ FFmpeg libraries. Git master is recommended."
         'desc': 'libavdevice',
         'func': check_pkg_config('libavdevice', '>= 57.0.0'),
     }, {
-        'name': '--ffmpeg-strict-abi',
-        'desc': 'Disable all known FFmpeg ABI violations',
-        'func': check_true,
-        'default': 'disable',
+        # The following should be removed in 2022 or if libavformat requirement
+        # is bumped to >= 59.8.100
+        'name': 'ffmpeg-aviocontext-bytes-read',
+        'desc': 'FFmpeg AVIOContext bytes_read statistic field',
+        'deps': 'ffmpeg',
+        'func': check_statement(['libavformat/avio.h'],
+                                '(struct AVIOContext){ 0 }.bytes_read = 7357',
+                                use=['ffmpeg']),
     }
 ]
 
@@ -421,6 +429,11 @@ audio_output_features = [
         'desc': 'SDL2 audio output',
         'deps': 'sdl2',
         'func': check_true,
+    }, {
+        'name': '--oss-audio',
+        'desc': 'OSSv4 audio output',
+        'func': check_statement(['sys/soundcard.h'], 'int x = SNDCTL_DSP_SETPLAYVOL'),
+        'deps': 'posix && gpl',
     }, {
         'name': '--pulse',
         'desc': 'PulseAudio audio output',
@@ -478,7 +491,7 @@ video_output_features = [
         'name': '--drm',
         'desc': 'DRM',
         'deps': 'vt.h || consio.h',
-        'func': check_pkg_config('libdrm', '>= 2.4.74'),
+        'func': check_pkg_config('libdrm', '>= 2.4.75'),
     }, {
         'name': '--gbm',
         'desc': 'GBM',
@@ -725,7 +738,7 @@ video_output_features = [
     }, {
         'name': '--libplacebo',
         'desc': 'libplacebo support',
-        'func': check_pkg_config('libplacebo >= 1.18.0'),
+        'func': check_pkg_config('libplacebo >= 3.104.0'),
     }, {
         'name': '--vulkan',
         'desc':  'Vulkan context support',
@@ -898,7 +911,7 @@ def options(opt):
     group.add_option('--lua',
         type    = 'string',
         dest    = 'LUA_VER',
-        help    = "select Lua package which should be autodetected. Choices: 51 51deb 51obsd 51fbsd 52 52deb 52arch 52fbsd luajit")
+        help    = "select Lua package to autodetect. Choices (x is 1 or 2): luadef5x, lua5x, lua5.x, lua-5.x, luajit (luadef5x is for pkg-config name 'lua', the rest are exact pkg-config names)")
     group.add_option('--swift-flags',
         type    = 'string',
         dest    = 'SWIFT_FLAGS',
@@ -958,15 +971,15 @@ def configure(ctx):
         while re.match('\$\{([^}]+)\}', ctx.env[varname]):
             ctx.env[varname] = Utils.subst_vars(ctx.env[varname], ctx.env)
 
+    if ctx.options.LUA_VER:
+        ctx.options.enable_lua = True
+
     ctx.parse_dependencies(build_options)
     ctx.parse_dependencies(main_dependencies)
     ctx.parse_dependencies(libav_dependencies)
     ctx.parse_dependencies(audio_output_features)
     ctx.parse_dependencies(video_output_features)
     ctx.parse_dependencies(hwaccel_features)
-
-    if ctx.options.LUA_VER:
-        ctx.options.enable_lua = True
 
     if ctx.options.SWIFT_FLAGS:
         ctx.env.SWIFT_FLAGS.extend(split(ctx.options.SWIFT_FLAGS))

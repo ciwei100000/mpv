@@ -45,6 +45,14 @@
 // Timeout in ms after which the (normally ambiguous) ESC key is detected.
 #define ESC_TIMEOUT 100
 
+// Timeout in ms after which the poll for input is aborted. The FG/BG state is
+// tested before every wait, and a positive value allows reactivating input
+// processing when mpv is brought to the foreground while it was running in the
+// background. In such a situation, an infinite timeout (-1) will keep mpv
+// waiting for input without realizing the terminal state changed - and thus
+// buffer all keypresses until ENTER is pressed.
+#define INPUT_TIMEOUT 1000
+
 static volatile struct termios tio_orig;
 static volatile int tio_orig_set;
 
@@ -213,6 +221,17 @@ static void process_input(struct input_ctx *input_ctx, bool timeout)
         if (!match) { // normal or unknown key
             int mods = 0;
             if (buf.b[0] == '\033') {
+                if (buf.len > 1 && buf.b[1] == '[') {
+                    // unknown CSI sequence. wait till it completes
+                    for (int i = 2; i < buf.len; i++) {
+                        if (buf.b[i] >= 0x40 && buf.b[i] <= 0x7E)  {
+                            skip_buf(&buf, i+1);
+                            continue;  // complete - throw it away
+                        }
+                    }
+                    goto read_more;  // not yet complete
+                }
+                // non-CSI esc sequence
                 skip_buf(&buf, 1);
                 if (buf.len > 0 && buf.b[0] > 0 && buf.b[0] < 127) {
                     // meta+normal key
@@ -227,7 +246,8 @@ static void process_input(struct input_ctx *input_ctx, bool timeout)
             unsigned char c = buf.b[0];
             skip_buf(&buf, 1);
             if (c < 32) {
-                c = c <= 25 ? (c + 'a' - 1) : (c - 25 + '2' - 1);
+                // 1..26 is ^A..^Z, and 27..31 is ^3..^7
+                c = c <= 26 ? (c + 'a' - 1) : (c + '3' - 27);
                 mods |= MP_KEY_MODIFIER_CTRL;
             }
             mp_input_put_key(input_ctx, c | mods);
@@ -397,7 +417,7 @@ static void *terminal_thread(void *ptr)
             { .events = POLLIN, .fd = death_pipe[0] },
             { .events = POLLIN, .fd = tty_in }
         };
-        int r = polldev(fds, stdin_ok ? 2 : 1, buf.len ? ESC_TIMEOUT : -1);
+        int r = polldev(fds, stdin_ok ? 2 : 1, buf.len ? ESC_TIMEOUT : INPUT_TIMEOUT);
         if (fds[0].revents)
             break;
         if (fds[1].revents) {

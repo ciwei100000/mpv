@@ -26,6 +26,30 @@ Interface changes
 
 ::
 
+ --- mpv 0.34.0 ---
+    - deprecate selecting by card number with `--drm-connector`, add
+      `--drm-device` which can be used instead
+    - add `--screen-name` and `--fs-screen-name` flags to allow selecting the
+      screen by its name instead of the index
+    - add `--macos-geometry-calculation` to change the rectangle used for screen
+      position and size calculation. the old behavior used the whole screen,
+      which didn't take the menu bar and Dock into account. The new default
+      behaviour includes both. To revert to the old behavior set this to
+      `whole`.
+    - add an additional optional `albumart` argument to the `video-add` command,
+      which tells mpv to load the given video as album art.
+    - undeprecate `--cache-secs` option
+    - remove `--icc-contrast` and introduce `--icc-force-contrast`. The latter
+      defaults to the equivalent of the old `--icc-contrast=inf`, and can
+      instead be used to specifically set the contrast to any value.
+    - add a `--watch-later-options` option to allow configuring which
+      options quit-watch-later saves
+    - make `current-window-scale` writeable and use it in the default input.conf
+    - add `--input-builtin-bindings` flag to control loading of built-in key
+      bindings during start-up (default: yes).
+    - add ``track-list/N/image`` sub-property
+    - remove `--opengl-restrict` option
+    - js custom-init: use filename ~~/init.js instead of ~~/.init.js (dot)
  --- mpv 0.33.0 ---
     - add `--d3d11-exclusive-fs` flag to enable D3D11 exclusive fullscreen mode
       when the player enters fullscreen.

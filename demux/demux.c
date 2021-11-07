@@ -121,8 +121,7 @@ const struct m_sub_options demux_conf = {
             M_RANGE(0, M_MAX_MEM_BYTES)},
         {"demuxer-donate-buffer", OPT_FLAG(donate_fw)},
         {"force-seekable", OPT_FLAG(force_seekable)},
-        {"cache-secs", OPT_DOUBLE(min_secs_cache), M_RANGE(0, DBL_MAX),
-            .deprecation_message = "will use unlimited time"},
+        {"cache-secs", OPT_DOUBLE(min_secs_cache), M_RANGE(0, DBL_MAX)},
         {"access-references", OPT_FLAG(access_references)},
         {"demuxer-seekable-cache", OPT_CHOICE(seekable_cache,
             {"auto", -1}, {"no", 0}, {"yes", 1})},
@@ -1945,9 +1944,18 @@ static struct mp_recorder *recorder_create(struct demux_internal *in,
         if (stream->ds->selected)
             MP_TARRAY_APPEND(NULL, streams, num_streams, stream);
     }
+
+    struct demuxer *demuxer = in->d_thread;
+    struct demux_attachment **attachments = talloc_array(NULL, struct demux_attachment*, demuxer->num_attachments);
+    for (int n = 0; n < demuxer->num_attachments; n++) {
+        attachments[n] = &demuxer->attachments[n];
+    }
+
     struct mp_recorder *res = mp_recorder_create(in->d_thread->global, dst,
-                                                 streams, num_streams);
+                                                 streams, num_streams,
+                                                 attachments, demuxer->num_attachments);
     talloc_free(streams);
+    talloc_free(attachments);
     return res;
 }
 
@@ -2827,7 +2835,7 @@ done:
     return out_pkt;
 }
 
-void demuxer_help(struct mp_log *log)
+int demuxer_help(struct mp_log *log, const m_option_t *opt, struct bstr name)
 {
     int i;
 
@@ -2837,6 +2845,9 @@ void demuxer_help(struct mp_log *log)
         mp_info(log, "%10s  %s\n",
                 demuxer_list[i]->name, demuxer_list[i]->desc);
     }
+    mp_info(log, "\n");
+
+    return M_OPT_EXIT;
 }
 
 static const char *d_level(enum demux_check level)
@@ -3970,6 +3981,26 @@ void demuxer_select_track(struct demuxer *demuxer, struct sh_stream *stream,
     pthread_mutex_unlock(&in->lock);
 }
 
+// Execute a refresh seek on the given stream.
+// ref_pts has the same meaning as with demuxer_select_track()
+void demuxer_refresh_track(struct demuxer *demuxer, struct sh_stream *stream,
+                           double ref_pts)
+{
+    struct demux_internal *in = demuxer->in;
+    struct demux_stream *ds = stream->ds;
+    pthread_mutex_lock(&in->lock);
+    ref_pts = MP_ADD_PTS(ref_pts, -in->ts_offset);
+    if (ds->selected) {
+        MP_VERBOSE(in, "refresh track %d\n", stream->index);
+        update_stream_selection_state(in, ds);
+        if (in->back_demuxing)
+            ds->back_seek_pos = ref_pts;
+        if (!in->after_seek)
+            initiate_refresh_seek(in, ds, ref_pts);
+    }
+    pthread_mutex_unlock(&in->lock);
+}
+
 // This is for demuxer implementations only. demuxer_select_track() sets the
 // logical state, while this function returns the actual state (in case the
 // demuxer attempts to cache even unselected packets for track switching - this
@@ -4106,9 +4137,9 @@ static void update_cache(struct demux_internal *in)
         stream_control(stream, STREAM_CTRL_GET_METADATA, &stream_metadata);
     }
 
-    update_bytes_read(in);
-
     pthread_mutex_lock(&in->lock);
+
+    update_bytes_read(in);
 
     if (do_update)
         in->stream_size = stream_size;
@@ -4144,8 +4175,8 @@ static void dumper_close(struct demux_internal *in)
 
 static int range_time_compare(const void *p1, const void *p2)
 {
-    struct demux_cached_range *r1 = (void *)p1;
-    struct demux_cached_range *r2 = (void *)p2;
+    struct demux_cached_range *r1 = *((struct demux_cached_range **)p1);
+    struct demux_cached_range *r2 = *((struct demux_cached_range **)p2);
 
     if (r1->seek_start == r2->seek_start)
         return 0;

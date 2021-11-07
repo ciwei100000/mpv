@@ -56,7 +56,7 @@ Track Selection
         behavior tends to change around with each mpv release.
 
         The track selection properties will return the option value outside of
-        playback (as expected), but during playbac, the affective track
+        playback (as expected), but during playback, the affective track
         selection is returned. For example, with ``--aid=auto``, the ``aid``
         property will suddenly return ``2`` after playback initialization
         (assuming the file has at least 2 audio tracks, and the second is the
@@ -213,7 +213,7 @@ Playback Control
     Slow down or speed up playback by the factor given as parameter.
 
     If ``--audio-pitch-correction`` (on by default) is used, playing with a
-    speed higher than normal automatically inserts the ``scaletempo`` audio
+    speed higher than normal automatically inserts the ``scaletempo2`` audio
     filter.
 
 ``--pause``
@@ -391,6 +391,13 @@ Playback Control
     just the file itself. If the playlist contains only a single file, the
     difference between the two option is that this option performs a seek on
     loop, instead of reloading the file.
+
+    .. note::
+
+        ``--loop-file`` counts the number of times it causes the player to
+        seek to the beginning of the file, not the number of full playthroughs. This
+        means ``--loop-file=1`` will end up playing the file twice. Contrast with
+        ``--loop-playlist``, which counts the number of full playthroughs.
 
     ``--loop`` is an alias for this option.
 
@@ -844,6 +851,29 @@ Program Behavior
         - ``--reset-on-next-file=all``
           Try to reset all settings that were changed during playback.
 
+``--watch-later-options=option1,option2,...``
+    The options that are saved in "watch later" files if they have been changed
+    since when mpv started. These values will be restored the next time the
+    files are played. The playback position is always saved as ``start``, so
+    adding ``start`` to this list has no effect.
+
+    When removing options, existing watch later data won't be modified and will
+    still be applied fully, but new watch later data won't contain these
+    options.
+
+    This is a string list option. See `List Options`_ for details.
+
+    .. admonition:: Examples
+
+        - ``--watch-later-options-remove=fullscreen``
+          The fullscreen state won't be saved to watch later files.
+        - ``--watch-later-options-remove=volume``
+          ``--watch-later-options-remove=mute``
+          The volume and mute state won't be saved to watch later files.
+        - ``--watch-later-options-clr``
+          No option will be saved to watch later files except the starting
+          position.
+
 ``--write-filename-in-watch-later-config``
     Prepend the watch later config files with the name of the file they refer
     to. This is simply written as comment on the top of the file.
@@ -965,9 +995,11 @@ Program Behavior
         no). It's disabled ("no") by default for performance reasons.
 
     ``ytdl_path=youtube-dl``
-        Configure path to youtube-dl executable or a compatible fork's.
-        The default "youtube-dl" looks for the executable in PATH. In a Windows
-        environment the suffix extension ".exe" is always appended.
+        Configure paths to youtube-dl's executable or a compatible fork's. The
+        paths should be separated by : on Unix and ; on Windows. mpv looks in
+        order for the configured paths in PATH and in mpv's config directory.
+        The defaults are "yt-dlp", "yt-dlp_x86" and "youtube-dl". On Windows
+        the suffix extension ".exe" is always appended.
 
     .. admonition:: Why do the option names mix ``_`` and ``-``?
 
@@ -1196,9 +1228,9 @@ Video
     :vdpau-copy: copies video back into system RAM (Linux with some GPUs only)
     :vaapi:     requires ``--vo=gpu`` or ``--vo=vaapi`` (Linux only)
     :vaapi-copy: copies video back into system RAM (Linux with some GPUs only)
-    :videotoolbox: requires ``--vo=gpu`` (OS X 10.8 and up),
+    :videotoolbox: requires ``--vo=gpu`` (macOS 10.8 and up),
                    or ``--vo=libmpv`` (iOS 9.0 and up)
-    :videotoolbox-copy: copies video back into system RAM (OS X 10.8 or iOS 9.0 and up)
+    :videotoolbox-copy: copies video back into system RAM (macOS 10.8 or iOS 9.0 and up)
     :dxva2:     requires ``--vo=gpu`` with ``--gpu-context=d3d11``,
                 ``--gpu-context=angle`` or ``--gpu-context=dxinterop``
                 (Windows only)
@@ -1477,11 +1509,14 @@ Video
     This option is disabled if the ``--no-keepaspect`` option is used.
 
 ``--video-rotate=<0-359|no>``
-    Rotate the video clockwise, in degrees. Currently supports 90° steps only.
-    If ``no`` is given, the video is never rotated, even if the file has
-    rotation metadata. (The rotation value is added to the rotation metadata,
-    which means the value ``0`` would rotate the video according to the
-    rotation metadata.)
+    Rotate the video clockwise, in degrees. If ``no`` is given, the video is
+    never rotated, even if the file has rotation metadata. (The rotation value
+    is added to the rotation metadata, which means the value ``0`` would rotate
+    the video according to the rotation metadata.)
+
+    When using hardware decoding without copy-back, only 90° steps work, while
+    software decoding and hardware decoding methods that copy the video back to
+    system memory support all values between 0 and 359.
 
 ``--video-zoom=<value>``
     Adjust the video display scale factor by the given value. The parameter is
@@ -1606,7 +1641,7 @@ Video
     You can get the list of allowed codecs with ``mpv --vd=help``. Remove the
     prefix, e.g. instead of ``lavc:h264`` use ``h264``.
 
-    By default, this is set to ``h264,vc1,hevc,vp9,av1``. Note that
+    By default, this is set to ``h264,vc1,hevc,vp8,vp9,av1``. Note that
     the hardware acceleration special codecs like ``h264_vdpau`` are not
     relevant anymore, and in fact have been removed from Libav in this form.
 
@@ -1739,7 +1774,7 @@ Audio
 
 ``--audio-pitch-correction=<yes|no>``
     If this is enabled (default), playing with a speed different from normal
-    automatically inserts the ``scaletempo`` audio filter. For details, see
+    automatically inserts the ``scaletempo2`` audio filter. For details, see
     audio filter section.
 
 ``--audio-device=<name>``
@@ -2003,14 +2038,17 @@ Audio
         want. For example, most A/V receivers connected via HDMI and that can
         do 7.1 would  be served by: ``--audio-channels=7.1,5.1,stereo``
 
-``--audio-display=<no|attachment>``
-    Setting this option to ``attachment`` (default) will display image
-    attachments (e.g. album cover art) when playing audio files. It will
-    display the first image found, and additional images are available as
-    video tracks.
+``--audio-display=<no|embedded-first|external-first>``
+    Determines whether to display cover art when playing audio files and with
+    what priority. It will display the first image found, and additional images
+    are available as video tracks.
 
-    Setting this option to ``no`` disables display of video entirely when
-    playing audio files.
+    :no:             Disable display of video entirely when playing audio
+                     files.
+    :embedded-first: Display embedded images and external cover art, giving
+                     priority to embedded images (default).
+    :external-first: Display embedded images and external cover art, giving
+                     priority to external files.
 
     This option has no influence on files with normal video tracks.
 
@@ -2091,7 +2129,7 @@ Audio
 
     :no:    Don't automatically load external audio files (default).
     :exact: Load the media filename with audio file extension.
-    :fuzzy: Load all audio files containing media filename.
+    :fuzzy: Load all audio files containing the media filename.
     :all:   Load all audio files in the current and ``--audio-file-paths``
             directories.
 
@@ -2471,7 +2509,7 @@ Subtitles
     :no:    Don't automatically load external subtitle files.
     :exact: Load the media filename with subtitle file extension and possibly
             language suffixes (default).
-    :fuzzy: Load all subs containing media filename.
+    :fuzzy: Load all subs containing the media filename.
     :all:   Load all subs in the current and ``--sub-file-paths`` directories.
 
 ``--sub-codepage=<codepage>``
@@ -2575,6 +2613,15 @@ Subtitles
     Can be used to disable display of subtitles, but still select and decode
     them.
 
+``--secondary-sub-visibility``, ``--no-secondary-sub-visibility``
+    Can be used to disable display of secondary subtitles, but still select and
+    decode them.
+
+    .. note::
+
+        If ``--sub-visibility=no``, secondary subtitles are hidden regardless of
+        ``--secondary-sub-visibility``.
+
 ``--sub-clear-on-seek``
     (Obscure, rarely useful.) Can be used to play broken mkv files with
     duplicate ReadOrder fields. ReadOrder is the first field in a
@@ -2586,6 +2633,13 @@ Subtitles
 ``--teletext-page=<1-999>``
     This works for ``dvb_teletext`` subtitle streams, and if FFmpeg has been
     compiled with support for it.
+
+``--sub-past-video-end``
+    After the last frame of video, if this option is enabled, subtitles will
+    continue to update based on audio timestamps. Otherwise, the subtitles
+    for the last video frame will stay onscreen.
+
+    Default: disabled
 
 ``--sub-font=<name>``
     Specify font to use for subtitles that do not themselves
@@ -2752,7 +2806,7 @@ Subtitles
 
     List items are matched in order. If a regular expression matches, the
     process is stopped, and the subtitle line is discarded. The text matched
-    against is, currently, always the ``Text`` field of ASS events (if the
+    against is, by default, the ``Text`` field of ASS events (if the
     subtitle format is different, it is always converted). This may include
     formatting tags. Matching is case-insensitive, but how this is done depends
     on the libc, and most likely works in ASCII only. It does not work on
@@ -2773,6 +2827,17 @@ Subtitles
         use this, you should be prepared to update the option later. Ideas
         include replacing the regexes with a very primitive and small subset of
         sed, or some method to control case-sensitivity.
+
+``--sub-filter-jsre-...=...``
+    Same as ``--sub-filter-regex`` but with JavaScript regular expressions.
+    Shares/affected-by all ``--sub-filter-regex-*`` control options (see below),
+    and also experimental. Requires only JavaScript support.
+
+``--sub-filter-regex-plain=<yes|no>``
+    Whether to first convert the ASS "Text" field to plain-text (default: no).
+    This strips ASS tags and applies ASS directives, like ``\N`` to new-line.
+    If the result is multi-line then the regexp anchors ``^`` and ``$`` match
+    each line, but still any match discards all lines.
 
 ``--sub-filter-regex-warn=<yes|no>``
     Log dropped lines with warning log level, instead of verbose (default: no).
@@ -2799,7 +2864,7 @@ Subtitles
 ``--sub-font-provider=<auto|none|fontconfig>``
     Which libass font provider backend to use (default: auto). ``auto`` will
     attempt to use the native font provider: fontconfig on Linux, CoreText on
-    OSX, DirectWrite on Windows. ``fontconfig`` forces fontconfig, if libass
+    macOS, DirectWrite on Windows. ``fontconfig`` forces fontconfig, if libass
     was built with support (if not, it behaves like ``none``).
 
     The ``none`` font provider effectively disables system fonts. It will still
@@ -2839,6 +2904,12 @@ Window
 
     See also ``--fs-screen``.
 
+``--screen-name=<string>``
+    In multi-monitor configurations, this option tells mpv which screen to
+    display the video on based on the screen name from the video backend. The
+    same caveats in the ``--screen`` option also apply here. This option is
+    ignored and does nothing if ``--screen`` is explicitly set.
+
 ``--fullscreen``, ``--fs``
     Fullscreen playback.
 
@@ -2853,11 +2924,17 @@ Window
         This option works properly only with window managers which
         understand the EWMH ``_NET_WM_FULLSCREEN_MONITORS`` hint.
 
-    .. admonition:: Note (OS X)
+    .. admonition:: Note (macOS)
 
-        ``all`` does not work on OS X and will behave like ``current``.
+        ``all`` does not work on macOS and will behave like ``current``.
 
     See also ``--screen``.
+
+``--fs-screen-name=<string>``
+    In multi-monitor configurations, this option tells mpv which screen to go
+    fullscreen to based on the screen name from the video backend. The same
+    caveats in the ``--fs-screen`` option also apply here. This option is
+    ignored and does nothing if ``--fs-screen`` is explicitly set.
 
 ``--keep-open=<yes|no|always>``
     Do not terminate when playing or seeking beyond the end of the file, and
@@ -2956,7 +3033,7 @@ Window
     Manager.
 
 ``--ontop-level=<window|system|desktop|level>``
-    (OS X only)
+    (macOS only)
     Sets the level of an ontop window (default: window).
 
     :window:  On top of all other windows.
@@ -2973,14 +3050,8 @@ Window
     Play video with window border and decorations. Since this is on by
     default, use ``--no-border`` to disable the standard window decorations.
 
-``--fit-border``, ``--no-fit-border``
-    (Windows only) Fit the whole window with border and decorations on the
-    screen. Since this is on by default, use ``--no-fit-border`` to make mpv
-    try to only fit client area with video on the screen. This behavior only
-    applied to window/video with size exceeding size of the screen.
-
 ``--on-all-workspaces``
-    (X11 only)
+    (X11 and macOS only)
     Show the video window on all virtual desktops.
 
 ``--geometry=<[W[xH]][+-x+-y][/WS]>``, ``--geometry=<x:y>``
@@ -3006,9 +3077,9 @@ Window
 
         Generally only supported by GUI VOs. Ignored for encoding.
 
-    .. admonition: Note (OS X)
+    .. admonition: Note (macOS)
 
-        On Mac OS X the origin of the screen coordinate system is located on the
+        On macOS, the origin of the screen coordinate system is located on the
         bottom-left corner. For instance, ``0:0`` will place the window at the
         bottom-left of the screen.
 
@@ -3176,14 +3247,14 @@ Window
         - ``--monitoraspect=16:9`` or ``--monitoraspect=1.7777``
 
 ``--hidpi-window-scale``, ``--no-hidpi-window-scale``
-    (OS X, Windows, X11, and Wayland only)
+    (macOS, Windows, X11, and Wayland only)
     Scale the window size according to the backing scale factor (default: yes).
     On regular HiDPI resolutions the window opens with double the size but appears
-    as having the same size as on non-HiDPI resolutions. This is the default OS X
-    behavior.
+    as having the same size as on non-HiDPI resolutions. This is enabled by
+    default on macOS.
 
 ``--native-fs``, ``--no-native-fs``
-    (OS X only)
+    (macOS only)
     Uses the native fullscreen mechanism of the OS (default: yes).
 
 ``--monitorpixelaspect=<ratio>``
@@ -3216,8 +3287,8 @@ Window
     ``intptr_t``. mpv will create its own window, and set the wid window as
     parent, like with X11.
 
-    On OSX/Cocoa, the ID is interpreted as ``NSView*``. Pass it as value cast
-    to ``intptr_t``. mpv will create its own sub-view. Because OSX does not
+    On macOS/Cocoa, the ID is interpreted as ``NSView*``. Pass it as value cast
+    to ``intptr_t``. mpv will create its own sub-view. Because macOS does not
     support window embedding of foreign processes, this works only with libmpv,
     and will crash when used from the command line.
 
@@ -3699,14 +3770,16 @@ Demuxer
 
 ``--prefetch-playlist=<yes|no>``
     Prefetch next playlist entry while playback of the current entry is ending
-    (default: no). This merely opens the URL of the next playlist entry as soon
-    as the current URL is fully read.
+    (default: no).
+
+    This does not prefill the cache with the video data of the next URL.
+    Prefetching video data is supported only for the current playlist entry,
+    and depends on the demuxer cache settings (on by default). This merely
+    opens the URL of the next playlist entry as soon the current URL is fully
+    read.
 
     This does **not** work with URLs resolved by the ``youtube-dl`` wrapper,
     and it won't.
-
-    This does not affect HLS (``.m3u8`` URLs) - HLS prefetching depends on the
-    demuxer cache settings and is on by default.
 
     This can give subtly wrong results if per-file options are used, or if
     options are changed in the time window between prefetching start and next
@@ -3764,7 +3837,15 @@ Input
     configuration directory (usually ``~/.config/mpv/input.conf``).
 
 ``--no-input-default-bindings``
-    Disable mpv default (built-in) key bindings.
+    Disable default-level ("weak") key bindings. These are bindings which config
+    files like ``input.conf`` can override. It currently affects the builtin key
+    bindings, and keys which scripts bind using ``mp.add_key_binding`` (but not
+    ``mp.add_forced_key_binding`` because this overrides ``input.conf``).
+
+``--no-input-builtin-bindings``
+    Disable loading of built-in key bindings during start-up. This option is
+    applied only during (lib)mpv initialization, and if used then it will not
+    be not possible to enable them later. May be useful to libmpv clients.
 
 ``--input-cmdlist``
     Prints all commands that can be bound to keys.
@@ -3852,8 +3933,15 @@ Input
     Support depends on the VO in use.
 
 ``--input-media-keys=<yes|no>``
-    (OS X and Windows only)
-    Enable/disable media keys support. Enabled by default (except for libmpv).
+    On systems where mpv can choose between receiving media keys or letting
+    the system handle them - this option controls whether mpv should receive
+    them.
+
+    Default: yes (except for libmpv). macOS and Windows only, because elsewhere
+    mpv doesn't have a choice - the system decides whether to send media keys
+    to mpv. For instance, on X11 or Wayland, system-wide media keys are not
+    implemented. Whether media keys work when the mpv window is focused is
+    implementation-defined.
 
 ``--input-right-alt-gr``, ``--no-input-right-alt-gr``
     (Cocoa and Windows only)
@@ -4555,12 +4643,6 @@ Cache
     Turn off input stream caching. See ``--cache``.
 
 ``--cache-secs=<seconds>``
-    Deprecated. Once this option is removed, there will be no way to limit the
-    cache size by time (only by size with ``--demuxer-max-bytes``). This option
-    is considered useless, since there is no good reason to limit the cache by
-    time, and the default value of this option is already something very high.
-    The interaction with the other cache options is also confusing.
-
     How many seconds of audio/video to prefetch if the cache is active. This
     overrides the ``--demuxer-readahead-secs`` option if and only if the cache
     is enabled and the value is larger. The default value is set to something
@@ -5159,18 +5241,29 @@ The following video options are currently all specific to ``--vo=gpu`` and
 
 ``--interpolation-threshold=<0..1,-1>``
     Threshold below which frame ratio interpolation gets disabled (default:
-    ``0.0001``). This is calculated as ``abs(disphz/vfps - 1) < threshold``,
+    ``0.01``). This is calculated as ``abs(disphz/vfps - 1) < threshold``,
     where ``vfps`` is the speed-adjusted video FPS, and ``disphz`` the
     display refresh rate. (The speed-adjusted video FPS is roughly equal to
     the normal video FPS, but with slowdown and speedup applied. This matters
     if you use ``--video-sync=display-resample`` to make video run synchronously
     to the display FPS, or if you change the ``speed`` property.)
 
-    The default is intended to almost always enable interpolation if the
-    playback rate is even slightly different from the display refresh rate. But
-    note that if you use e.g. ``--video-sync=display-vdrop``, small deviations
-    in the rate can disable interpolation and introduce a discontinuity every
-    other minute.
+    The default is intended to enable interpolation in scenarios where
+    retiming with the ``--video-sync=display-*`` cannot adjust the speed of
+    the video sufficiently for smooth playback. For example if a video is
+    60.00 FPS and your display refresh rate is 59.94 Hz, interpolation will
+    never be activated, since the mismatch is within 1% of the refresh
+    rate. The default also handles the scenario when mpv cannot determine the
+    container FPS, such as during certain live streams, and may dynamically
+    toggle interpolation on and off. In this scenario, the default would be to
+    not use interpolation but rather to allow ``--video-sync=display-*`` to
+    retime the video to match display refresh rate. See
+    ``--video-sync-max-video-change`` for more information about how mpv
+    will retime video.
+
+    Also note that if you use e.g. ``--video-sync=display-vdrop``, small
+    deviations in the rate can disable interpolation and introduce a
+    discontinuity every other minute.
 
     Set this to ``-1`` to disable this logic.
 
@@ -5263,6 +5356,12 @@ The following video options are currently all specific to ``--vo=gpu`` and
     results, as can missing or incorrect display FPS information (see
     ``--override-display-fps``).
 
+``--vulkan-device=<device name>``
+    The name of the Vulkan device to use for rendering and presentation. Use
+    ``--vulkan-device=help`` to see the list of available devices and their
+    names. If left unspecified, the first enumerated hardware Vulkan device will
+    be used.
+
 ``--vulkan-swap-mode=<mode>``
     Controls the presentation mode of the vulkan swapchain. This is similar
     to the ``--opengl-swapinterval`` option.
@@ -5306,6 +5405,25 @@ The following video options are currently all specific to ``--vo=gpu`` and
     Disable the use of VkEvents, for debugging purposes or for compatibility
     with some older drivers / vulkan portability layers that don't provide
     working VkEvent support.
+
+``--vulkan-display-display=<n>``
+    The index of the display, on the selected Vulkan device, to present on when
+    using the ``displayvk`` GPU context. Use ``--vulkan-display-display=help``
+    to see the list of available displays. If left unspecified, the first
+    enumerated display will be used.
+
+
+``--vulkan-display-mode=<n>``
+    The index of the display mode, of the selected Vulkan display, to use when
+    using the ``displayvk`` GPU context. Use ``--vulkan-display-mode=help``
+    to see the list of available modes. If left unspecified, the first
+    enumerated mode will be used.
+
+``--vulkan-display-plane=<n>``
+    The index of the plane, on the selected Vulkan device, to present on when
+    using the ``displayvk`` GPU context. Use ``--vulkan-display-plane=help``
+    to see the list of available planes. If left unspecified, the first
+    enumerated plane will be used.
 
 ``--d3d11-exclusive-fs=<yes|no>``
     Switches the D3D11 swap chain fullscreen state to 'fullscreen' when
@@ -5388,8 +5506,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     Currently only relevant for ``--gpu-api=d3d11``.
 
 ``--wayland-app-id=<string>``
-    Set the client app id for Wayland-based video output methods. By default, "mpv"
-    is used.
+    Set the client app id for Wayland-based video output methods (default: ``mpv``).
 
 ``--wayland-disable-vsync=<yes|no>``
     Disable vsync for the wayland contexts (default: no). Useful for benchmarking
@@ -5403,7 +5520,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     there are no server side decorations from the compositor.
 
 ``--wayland-edge-pixels-touch=<value>``
-    Defines the size of an edge border (default: 64) to initiate client side
+    Defines the size of an edge border (default: 32) to initiate client side
     resizes events in the wayland contexts with touch events.
 
 ``--spirv-compiler=<compiler>``
@@ -5551,7 +5668,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
         Specifies that this shader should be treated as a compute shader, with
         the block size bw and bh. The compute shader will be dispatched with
         however many blocks are necessary to completely tile over the output.
-        Within each block, there will bw tw*th threads, forming a single work
+        Within each block, there will be tw*th threads, forming a single work
         group. In other words: tw and th specify the work group size, which can
         be different from the block size. So for example, a compute shader with
         bw, bh = 32 and tw, th = 8 running on a 500x500 texture would dispatch
@@ -5684,7 +5801,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
 ``--deband-threshold=<0..4096>``
     The debanding filter's cut-off threshold. Higher numbers increase the
     debanding strength dramatically but progressively diminish image details.
-    (Default 64)
+    (Default 32)
 
 ``--deband-range=<1..64>``
     The debanding filter's initial radius. The radius increases linearly for
@@ -5794,7 +5911,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     Deactivates the automatic graphics switching and forces the dedicated GPU.
     (default: no)
 
-    OS X only.
+    macOS only.
 
 ``--cocoa-cb-sw-renderer=<yes|no|auto>``
     Use the Apple Software Renderer when using cocoa-cb (default: auto). If set
@@ -5803,14 +5920,14 @@ The following video options are currently all specific to ``--vo=gpu`` and
     software renderer, and ``auto`` only falls back to the software renderer
     when the usual pixel format couldn't be created.
 
-    OS X only.
+    macOS only.
 
 ``--cocoa-cb-10bit-context=<yes|no>``
     Creates a 10bit capable pixel format for the context creation (default: yes).
     Instead of 8bit integer framebuffer a 16bit half-float framebuffer is
     requested.
 
-    OS X only.
+    macOS only.
 
 ``--macos-title-bar-appearance=<appearance>``
     Sets the appearance of the title bar (default: auto). Not all combinations
@@ -5891,12 +6008,22 @@ The following video options are currently all specific to ``--vo=gpu`` and
     1000ms since it's possible that Apple or the user changes the system
     defaults. Anything higher than 1000ms though seems too long and shouldn't be
     set anyway.
-    OS X and cocoa-cb only
+    (macOS and cocoa-cb only)
 
 
 ``--macos-app-activation-policy=<regular|accessory|prohibited>``
     Changes the App activation policy. With accessory the mpv icon in the Dock
     can be hidden. (default: regular)
+
+    macOS only.
+
+``--macos-geometry-calculation=<visible|whole>``
+    This changes the rectangle which is used to calculate the screen position
+    and size of the window (default: visible). ``visible`` takes the the menu
+    bar and Dock into account and the window is only positioned/sized within the
+    visible screen frame rectangle, ``whole`` takes the whole screen frame
+    rectangle and ignores the menu bar and Dock. Other previous restrictions
+    still apply, like the window can't be placed on top of the menu bar etc.
 
     macOS only.
 
@@ -5918,7 +6045,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     auto
         auto-select (default)
     cocoa
-        Cocoa/OS X (deprecated, use --vo=libmpv instead)
+        Cocoa/macOS (deprecated, use --vo=libmpv instead)
     win
         Win32/WGL
     winvk
@@ -5943,6 +6070,10 @@ The following video options are currently all specific to ``--vo=gpu`` and
         VK_KHR_wayland_surface
     drm
         DRM/EGL
+    displayvk
+        VK_KHR_display. This backend is roughly the Vukan equivalent of
+        DRM/EGL, allowing for direct rendering via Vulkan without a display
+        manager.
     x11egl
         X11/EGL
     android
@@ -5969,13 +6100,6 @@ The following video options are currently all specific to ``--vo=gpu`` and
         Only allow GLES
     no
         Only allow desktop/core GL
-
-``--opengl-restrict=<version>``
-    Restricts all OpenGL versions above a certain version. Versions are encoded
-    in hundreds, i.e. OpenGL 4.5 -> 450. As an example, --opengl-restrict=300
-    would restrict OpenGL 3.0 and higher, effectively only allowing 2.x
-    contexts. Note that this only imposes a limit on context creation APIs, the
-    actual OpenGL context may still have a higher OpenGL version. (Default: 0)
 
 ``--fbo-format=<fmt>``
     Selects the internal format of textures used for FBOs. The format can
@@ -6013,7 +6137,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     With ambient illuminance of 16 lux, mpv will pick the 1.0 gamma value (no
     boost), and slightly increase the boost up until 1.2 for 256 lux.
 
-    NOTE: Only implemented on OS X.
+    NOTE: Only implemented on macOS.
 
 ``--target-prim=<value>``
     Specifies the primaries of the display. Video colors will be adapted to
@@ -6322,14 +6446,15 @@ The following video options are currently all specific to ``--vo=gpu`` and
     Size of the 3D LUT generated from the ICC profile in each dimension.
     Default is 64x64x64. Sizes may range from 2 to 512.
 
-``--icc-contrast=<0-1000000|inf>``
-    Specifies an upper limit on the target device's contrast ratio. This is
-    detected automatically from the profile if possible, but for some profiles
-    it might be missing, causing the contrast to be assumed as infinite. As a
-    result, video may appear darker than intended. This only affects BT.1886
-    content. The default of 0 means no limit if the detected contrast is less
-    than 100000, and limits to 1000 otherwise. Use ``--icc-contrast=inf`` to
-    preserve the infinite contrast (most likely when using OLED displays).
+``--icc-force-contrast=<no|0-1000000|inf>``
+    Override the target device's detected contrast ratio by a specific value.
+    This is detected automatically from the profile if possible, but for some
+    profiles it might be missing, causing the contrast to be assumed as
+    infinite. As a result, video may appear darker than intended. If this is
+    the case, setting this option might help. This only affects BT.1886
+    content. The default of ``no`` means to use the profile values. The special
+    value ``inf`` causes the BT.1886 curve to be treated as a pure power gamma
+    2.4 function.
 
 ``--blend-subtitles=<yes|video|no>``
     Blend subtitles directly onto upscaled video frames, before interpolation
@@ -6362,13 +6487,13 @@ The following video options are currently all specific to ``--vo=gpu`` and
         black).
     yes
         Try to create a framebuffer with alpha component. This only makes sense
-        if the video contains alpha information (which is extremely rare). May
-        not be supported on all platforms. If alpha framebuffers are
-        unavailable, it silently falls back on a normal framebuffer. Note that
-        if you set the ``--fbo-format`` option to a non-default value, a
-        format with alpha must be specified, or this won't work.
-        Whether this really works depends on the windowing system and desktop
-        environment.
+        if the video contains alpha information (which is extremely rare) or if
+        you make the background color transparent. May not be supported on all
+        platforms. If alpha framebuffers are unavailable, it silently falls
+        back on a normal framebuffer. Note that if you set the ``--fbo-format``
+        option to a non-default value, a format with alpha must be specified,
+        or this won't work. Whether this really works depends on the windowing
+        system and desktop environment.
     no
         Ignore alpha component.
 
@@ -6395,7 +6520,7 @@ The following video options are currently all specific to ``--vo=gpu`` and
     flipping GL front and backbuffers immediately (i.e. it doesn't call it
     in display-sync mode).
 
-    On OSX this is always deactivated because it only causes performance
+    On macOS this is always deactivated because it only causes performance
     problems and other regressions.
 
 ``--gpu-dumb-mode=<yes|no|auto>``
@@ -6530,11 +6655,10 @@ Miscellaneous
                         video. (Although it should have the same effects as
                         ``audio``, the implementation is very different.)
     :display-adrop:     Drop or repeat audio data to compensate desyncing
-                        video. See ``--video-sync-adrop-size``. This mode will
-                        cause severe audio artifacts if the real monitor
-                        refresh rate is too different from the reported or
-                        forced rate. Since mpv 0.33.0, this acts on entire audio
-                        frames, instead of single samples.
+                        video. This mode will cause severe audio artifacts if
+                        the real monitor refresh rate is too different from
+                        the reported or forced rate. Since mpv 0.33.0, this
+                        acts on entire audio frames, instead of single samples.
     :display-desync:    Sync video to display, and let audio play on its own.
     :desync:            Sync video according to system clock, and let audio play
                         on its own.
@@ -6546,6 +6670,9 @@ Miscellaneous
     For example, if this is set to 1, the video FPS is forced to an integer
     multiple of the display FPS, as long as the speed change does not exceed
     the value set by ``--video-sync-max-video-change``.
+
+    See ``--interpolation-threshold`` for how this option affects
+    interpolation.
 
     This is mostly for testing, and the option may be randomly changed in the
     future without notice.
@@ -6654,13 +6781,16 @@ Miscellaneous
     CLI/config file only alias for ``--cover-art-files-append``. Each use of this
     option will add a new external file.
 
-``--cover-art-auto=<no|fuzzy>``
-    Whether to load _external_ cover art automatically (default: fuzzy). Similar
-    to ``--sub-auto`` and ``--audio-file-auto``. However, it's currently limited
-    to picking up a whitelist of "album art" filenames (such as ``cover.jpg``),
-    so currently only the ``fuzzy`` choice is available. In addition, if a video
-    already has tracks (which are not marked as cover art), external cover art
-    will not be loaded.
+``--cover-art-auto=<no|exact|fuzzy|all>``
+    Whether to load _external_ cover art automatically. Similar to
+    ``--sub-auto`` and ``--audio-file-auto``. If a video already has tracks
+    (which are not marked as cover art), external cover art will not be loaded.
+
+    :no:    Don't automatically load cover art.
+    :exact: Load the media filename with an image file extension.
+    :fuzzy: Load all cover art containing the media filename and filenames
+            in an internal whitelist, such as ``cover.jpg`` (default).
+    :all:   Load all images in the current directory.
 
     See ``--cover-art-files`` for details about what constitutes cover art.
 
@@ -6671,8 +6801,9 @@ Miscellaneous
     Automatically load/select external files (default: yes).
 
     If set to ``no``, then do not automatically load external files as specified
-    by ``--sub-auto`` and ``--audio-file-auto``. If external files are forcibly
-    added (like with ``--sub-files``), they will not be auto-selected.
+    by ``--sub-auto``, ``--audio-file-auto`` and ``--cover-art-auto``. If
+    external files are forcibly added (like with ``--sub-files``), they will
+    not be auto-selected.
 
     This does not affect playlist expansion, redirection, or other loading of
     referenced files like with ordered chapters.

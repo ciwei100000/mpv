@@ -2,8 +2,8 @@
 
 # This script simply downloads waf to the current directory
 
-from __future__ import print_function
 import os, sys, stat, hashlib, subprocess
+from urllib.request import urlopen, URLError
 
 WAFRELEASE = "waf-2.0.20"
 WAFURLS    = ["https://waf.io/" + WAFRELEASE,
@@ -20,11 +20,6 @@ if "--no-download" in sys.argv[1:]:
     print("Did not find {} and no download was requested.".format(WAFRELEASE))
     sys.exit(1)
 
-try:
-    from urllib.request import urlopen, URLError
-except:
-    from urllib2 import urlopen, URLError
-
 waf = None
 
 for WAFURL in WAFURLS:
@@ -32,8 +27,8 @@ for WAFURL in WAFURLS:
         print("Downloading {}...".format(WAFURL))
         waf = urlopen(WAFURL).read()
         break
-    except URLError:
-        print("Download failed.")
+    except URLError as err:
+        print("Download failed! ({})".format(err))
 
 if not waf:
     print("Could not download {}.".format(WAFRELEASE))

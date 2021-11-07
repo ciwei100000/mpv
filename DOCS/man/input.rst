@@ -62,8 +62,8 @@ character), or a symbolic name (as printed by ``--input-keylist``).
 command.
 
 ``<command>`` is the command itself. It consists of the command name and
-multiple (or none) commands, all separated by whitespace. String arguments
-need to be quoted with ``"``. Details see ``Flat command syntax``.
+multiple (or none) arguments, all separated by whitespace. String arguments
+should be quoted, typically with ``"``. See ``Flat command syntax``.
 
 You can bind multiple commands to one key. For example:
 
@@ -96,6 +96,12 @@ represented as a single unicode code point (in NFKC form).
 All key names can be combined with the modifiers ``Shift``, ``Ctrl``, ``Alt``,
 ``Meta``. They must be prefixed to the actual key name, where each modifier
 is followed by a ``+`` (for example ``ctrl+q``).
+
+The ``Shift`` modifier requires some attention. For instance ``Shift+2`` should
+usually be specified as key-name ``@`` at ``input.conf``, and similarly the
+combination ``Alt+Shift+2`` is usually ``Alt+@``, etc. Special key names like
+``Shift+LEFT`` work as expected. If in doubt - use ``--input-test`` to check
+how a key/combination is seen by mpv.
 
 Symbolic key names and modifier names are case-insensitive. Unicode key names
 are case-sensitive because input bindings typically respect the shift key.
@@ -162,18 +168,36 @@ a number of other places.
 
 |
 | ``<command>  ::= [<prefixes>] <command_name> (<argument>)*``
-| ``<argument> ::= (<string> | " <quoted_string> ")``
+| ``<argument> ::= (<unquoted> | " <double_quoted> " | ' <single_quoted> ' | `X <custom_quoted> X`)``
 
 ``command_name`` is an unquoted string with the command name itself. See
 `List of Input Commands`_ for a list.
 
-Arguments are separated by whitespace. This applies even to string arguments.
-For this reason, string arguments should be quoted with ``"``. If a string
-argument contains spaces or certain special characters, quoting and possibly
-escaping is mandatory, or the command cannot be parsed correctly.
+Arguments are separated by whitespaces even if the command expects only one
+argument. Arguments with whitespaces or other special characters must be quoted,
+or the command cannot be parsed correctly.
 
-Inside quotes, C-style escaping can be used. JSON escapes according to RFC 8259,
-minus surrogate pair escapes, should be a safe subset that can be used.
+Double quotes interpret JSON/C-style escaping, like ``\t`` or ``\"`` or ``\\``.
+JSON escapes according to RFC 8259, minus surrogate pair escapes. This is the
+only form which allows newlines at the value - as ``\n``.
+
+Single quotes take the content literally, and cannot include the single-quote
+character at the value.
+
+Custom quotes also take the content literally, but are more flexible than single
+quotes. They start with ````` (back-quote) followed by any ASCII character,
+and end at the first occurance of the same pair in reverse order, e.g.
+```-foo-``` or ````bar````. The final pair sequence is not allowed at the
+value - in these examples ``-``` and `````` respectively. In the second
+example the last character of the value also can't be a back-quote.
+
+Mixed quoting at the same argument, like ``'foo'"bar"``, is not supported.
+
+Note that argument parsing and property expansion happen at different stages.
+First, arguments are determined as described above, and then, where applicable,
+properties are expanded - regardless of argument quoting. However, expansion
+can still be prevented with the ``raw`` prefix or ``$>``. See `Input Command
+Prefixes`_ and `Property Expansion`_.
 
 Commands specified as arrays
 ----------------------------
@@ -195,6 +219,9 @@ argument parsers for each argument. The input.conf parser normally handles
 quotes and escaping. The array command APIs mentioned above pass strings
 directly to the argument parsers, or can sidestep them by the ability to pass
 non-string values.
+
+Property expansion is disabled by default for these APIs. This can be changed
+with the ``expand-properties`` prefix. See `Input Command Prefixes`_.
 
 Sometimes commands have string arguments, that in turn are actually parsed by
 other components (e.g. filter strings with ``vf add``) - in these cases, you
@@ -221,6 +248,9 @@ to use APIs that pass arguments as arrays.
 
 Named arguments are not supported in the "flat" input.conf syntax, which means
 you cannot use them for key bindings in input.conf at all.
+
+Property expansion is disabled by default for these APIs. This can be changed
+with the ``expand-properties`` prefix. See `Input Command Prefixes`_.
 
 List of Input Commands
 ----------------------
@@ -313,6 +343,10 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
     ``down`` to set the cycle direction. On overflow, set the property back to
     the minimum, on underflow set it to the maximum. If ``up`` or ``down`` is
     omitted, assume ``up``.
+
+    Whether or not key-repeat is enabled by default depends on the property.
+    Currently properties with continuous values are repeatable by default (like
+    ``volume``), while discrete values are not (like ``osd-level``).
 
 ``multiply <name> <value>``
     Similar to ``add``, but multiplies the property or option with the numeric
@@ -440,6 +474,10 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
         Stop playback and replace the internal playlist with the new one.
     <append>
         Append the new playlist at the end of the current internal playlist.
+    <append-play>
+        Append the new playlist, and if nothing is currently playing, start
+        playback. (Always starts with the new playlist, even if the internal
+        playlist was not empty before running this command.)
 
 ``playlist-clear``
     Clear the playlist, except the currently played file.
@@ -507,9 +545,9 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
         argument list.
 
         The first array entry is either an absolute path to the executable, or
-        a filename with no path components, in which case the ``PATH``
-        environment variable. On Unix, this is equivalent to ``posix_spawnp``
-        and ``execvp`` behavior.
+        a filename with no path components, in which case the executable is
+        searched in the directories in the ``PATH`` environment variable. On
+        Unix, this is equivalent to ``posix_spawnp`` and ``execvp`` behavior.
 
     ``playback_only`` (``MPV_FORMAT_FLAG``)
         Boolean indicating whether the process should be killed when playback
@@ -669,15 +707,29 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
 
     This works by unloading and re-adding the subtitle track.
 
-``sub-step <skip>``
+``sub-step <skip> <flags>``
     Change subtitle timing such, that the subtitle event after the next
     ``<skip>`` subtitle events is displayed. ``<skip>`` can be negative to step
     backwards.
 
-``sub-seek <skip>``
+    Secondary argument:
+
+    primary (default)
+        Steps through the primary subtitles.
+    secondary
+        Steps through the secondary subtitles.
+
+``sub-seek <skip> <flags>``
     Seek to the next (skip set to 1) or the previous (skip set to -1) subtitle.
     This is similar to ``sub-step``, except that it seeks video and audio
     instead of adjusting the subtitle delay.
+
+    Secondary argument:
+
+    primary (default)
+        Seeks through the primary subtitles.
+    secondary
+        Seeks through the secondary subtitles.
 
     For embedded subtitles (like with Matroska), this works only with subtitle
     events that have already been displayed, or are within a short prefetch
@@ -791,8 +843,11 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
 ``audio-reload [<id>]``
     Reload the given audio tracks. See ``sub-reload`` command.
 
-``video-add <url> [<flags> [<title> [<lang>]]]``
-    Load the given video file. See ``sub-add`` command.
+``video-add <url> [<flags> [<title> [<lang> [<albumart>]]]]``
+    Load the given video file. See ``sub-add`` command for common options.
+
+    ``albumart`` (``MPV_FORMAT_FLAG``)
+        If enabled, mpv will load the given video as album art.
 
 ``video-remove [<id>]``
     Remove the given video track. See ``sub-remove`` command.
@@ -801,9 +856,9 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
     Reload the given video tracks. See ``sub-reload`` command.
 
 ``rescan-external-files [<mode>]``
-    Rescan external files according to the current ``--sub-auto`` and
-    ``--audio-file-auto`` settings. This can be used to auto-load external
-    files *after* the file was loaded.
+    Rescan external files according to the current ``--sub-auto``,
+    ``--audio-file-auto`` and ``--cover-art-auto`` settings. This can be used
+    to auto-load external files *after* the file was loaded.
 
     The ``mode`` argument is one of the following:
 
@@ -881,7 +936,7 @@ Input Commands that are Possibly Subject to Change
 
     .. admonition:: Example for input.conf
 
-        - ``a vf set flip`` turn video upside-down on the ``a`` key
+        - ``a vf set vflip`` turn the video upside-down on the ``a`` key
         - ``b vf set ""`` remove all video filters on ``b``
         - ``c vf toggle gradfun`` toggle debanding on ``c``
 
@@ -1161,7 +1216,8 @@ Input Commands that are Possibly Subject to Change
 ``script-message-to <target> [<arg1> [<arg2> [...]]]``
     Same as ``script-message``, but send it only to the client named
     ``<target>``. Each client (scripts etc.) has a unique name. For example,
-    Lua scripts can get their name via ``mp.get_script_name()``.
+    Lua scripts can get their name via ``mp.get_script_name()``. Note that
+    client names only consist of alphanumeric characters and ``_``.
 
     This command has a variable number of arguments, and cannot be used with
     named arguments.
@@ -1173,7 +1229,8 @@ Input Commands that are Possibly Subject to Change
     The argument is the name of the binding.
 
     It can optionally be prefixed with the name of the script, using ``/`` as
-    separator, e.g. ``script-binding scriptname/bindingname``.
+    separator, e.g. ``script-binding scriptname/bindingname``. Note that script
+    names only consist of alphanumeric characters and ``_``.
 
     For completeness, here is how this command works internally. The details
     could change any time. On any matching key event, ``script-message-to``
@@ -1649,7 +1706,9 @@ prefixes can be specified. They are separated by whitespace.
     This is the default for ``input.conf`` commands.
 ``repeatable``
     For some commands, keeping a key pressed doesn't run the command repeatedly.
-    This prefix forces enabling key repeat in any case.
+    This prefix forces enabling key repeat in any case. For a list of commands:
+    the first command determines the repeatability of the whole list (up to and
+    including version 0.33 - a list was always repeatable).
 ``async``
     Allow asynchronous execution (if possible). Note that only a few commands
     will support this (usually this is explicitly documented). Some commands
@@ -1805,6 +1864,9 @@ Property list
 
     .. note:: This is only an estimate. (It's computed from two unreliable
               quantities: fps and possibly rounded timestamps.)
+
+``pid``
+    Process-id of mpv.
 
 ``path``
     Full path of the currently played file. Usually this is exactly the same
@@ -2469,6 +2531,15 @@ Property list
     (or to be exact, the size the video filters output). ``2`` will set the
     double size, ``0.5`` halves the size.
 
+    Note that setting a value identical to its previous value will not resize
+    the window. That's because this property mirrors the ``window-scale``
+    option, and setting an option to its previous value is ignored. If this
+    value is set while the window is in a fullscreen, the multiplier is not
+    applied until the window is taken out of that state. Writing this property
+    to a maximized window can unmaximize the window depending on the OS and
+    window manager. If the window does not unmaximize, the multiplier will be
+    applied if the user unmaximizes the window later.
+
     See ``current-window-scale`` for the value derived from the actual window
     size.
 
@@ -2477,15 +2548,21 @@ Property list
     Before mpv 0.31.0, this returned what ``current-window-scale`` returns now,
     after the window was created.
 
-``current-window-scale``
+``current-window-scale`` (RW)
     The ``window-scale`` value calculated from the current window size. This
     has the same value as ``window-scale`` if the window size was not changed
     since setting the option, and the window size was not restricted in other
-    ways. The property is unavailable if no video is active.
+    ways. If the window is fullscreened, this will return the scale value
+    calculated from the last non-fullscreen size of the window. The property
+    is unavailable if no video is active.
+
+    When setting this property in the fullscreen or maximized state, the behavior
+    is the same as window-scale. In all ther cases, setting the value of this
+    property will always resize the window. This does not affect the value of
+    ``window-scale``.
 
 ``focused``
-    Whether the window has focus. Currently works only on X11, Wayland and
-    macOS.
+    Whether the window has focus. Might not be supported by all VOs.
 
 ``display-names``
     Names of the displays that the mpv window covers. On X11, these
@@ -2516,6 +2593,11 @@ Property list
 ``vsync-jitter``
     Estimated deviation factor of the vsync duration.
 
+``display-width``, ``display-height``
+    The current display's horizontal and vertical resolution in pixels. Whether
+    or not these values update as the mpv window changes displays depends on
+    the windowing backend. It may not be available on all platforms.
+
 ``display-hidpi-scale``
     The HiDPI scale factor as reported by the windowing backend. If no VO is
     active, or if the VO does not report a value, this property is unavailable.
@@ -2531,8 +2613,8 @@ Property list
 
 ``osd-width``, ``osd-height``
     Last known OSD width (can be 0). This is needed if you want to use the
-    ``overlay-add`` command. It gives you the actual OSD size, which can be
-    different from the window size in some cases.
+    ``overlay-add`` command. It gives you the actual OSD/window size (not
+    including decorations drawn by the OS window manager).
 
     Alias to ``osd-dimensions/w`` and ``osd-dimensions/h``.
 
@@ -2602,16 +2684,25 @@ Property list
 
     This property is experimental and might be removed in the future.
 
+``secondary-sub-text``
+    Same as ``sub-text``, but for the secondary subtitles.
+
 ``sub-start``
     The current subtitle start time (in seconds). If there's multiple current
     subtitles, returns the first start time. If no current subtitle is present
     null is returned instead.
+
+``secondary-sub-start``
+    Same as ``sub-start``, but for the secondary subtitles.
 
 ``sub-end``
     The current subtitle end time (in seconds). If there's multiple current
     subtitles, return the last end time. If no current subtitle is present, or
     if it's present but has unknown or incorrect duration, null is returned
     instead.
+
+``secondary-sub-end``
+    Same as ``sub-end``, but for the secondary subtitles.
 
 ``playlist-pos`` (RW)
     Current position on playlist. The first entry is on position 0. Writing to
@@ -2747,10 +2838,15 @@ Property list
     ``track-list/N/lang``
         Track language as identified by the file. Not always available.
 
-    ``track-list/N/albumart``
+    ``track-list/N/image``
         ``yes``/true if this is a video track that consists of a single
-        picture, ``no``/false or unavailable otherwise. This is used for video
-        tracks that are really attached pictures in audio files.
+        picture, ``no``/false or unavailable otherwise. The heuristic used to
+        determine if a stream is an image doesn't attempt to detect images in
+        codecs normally used for videos. Otherwise, it is reliable.
+
+    ``track-list/N/albumart``
+        ``yes``/true if this is an image embedded in an audio file or external
+        cover art, ``no``/false or unavailable otherwise.
 
     ``track-list/N/default``
         ``yes``/true if the track has the default flag set in the file,
@@ -2844,6 +2940,7 @@ Property list
                 "src-id"            MPV_FORMAT_INT64
                 "title"             MPV_FORMAT_STRING
                 "lang"              MPV_FORMAT_STRING
+                "image"             MPV_FORMAT_FLAG
                 "albumart"          MPV_FORMAT_FLAG
                 "default"           MPV_FORMAT_FLAG
                 "forced"            MPV_FORMAT_FLAG
@@ -2879,15 +2976,8 @@ Property list
     For example, ``current-tracks/audio/lang`` returns the current audio track's
     language field (the same value as ``track-list/N/lang``).
 
-    A sub-entry is accessible only if a track of that type is actually selected.
-    Tracks selected via ``--lavfi-complex`` never appear under this property.
-    ``current-tracks`` and ``current-tracks/`` are currently not accessible, and
-    will not return anything.
-
-    Scripts etc. should not use this. They should use ``track-list``, loop over
-    all tracks, and inspect the ``selected`` field to test whether a track is
-    selected (or compare the ``id`` field to the ``video`` / ``audio`` etc.
-    options).
+    If tracks of the requested type are selected via ``--lavfi-complex``, the
+    first one is returned.
 
 ``chapter-list``
     List of chapters, current entry marked. Currently, the raw property value
@@ -2971,13 +3061,14 @@ Property list
 
     .. admonition:: Example
 
-        - ``--osd-status-msg='This is ${osd-ass-cc/0}{\\b1}bold text'``
-        - ``show-text "This is ${osd-ass-cc/0}{\b1}bold text"``
+        - ``--osd-msg3='This is ${osd-ass-cc/0}{\\b1}bold text'``
+        - ``show-text "This is ${osd-ass-cc/0}{\\b1}bold text"``
 
     Any ASS override tags as understood by libass can be used.
 
     Note that you need to escape the ``\`` character, because the string is
-    processed for C escape sequences before passing it to the OSD code.
+    processed for C escape sequences before passing it to the OSD code. See
+    `Flat command syntax`_ for details.
 
     A list of tags can be found here: http://docs.aegisub.org/latest/ASS_Tags/
 
@@ -3353,7 +3444,7 @@ You can access (almost) all options as properties, though there are some
 caveats with some properties (due to historical reasons):
 
 ``vid``, ``aid``, ``sid``
-    While playback is active, these result the actually active tracks. For
+    While playback is active, these return the actually active tracks. For
     example, if you set ``aid=5``, and the currently played file contains no
     audio track with ID 5, the ``aid`` property will return ``no``.
 
@@ -3371,8 +3462,8 @@ caveats with some properties (due to historical reasons):
     the initial filter chain cannot be created.
 
     This behavior changed in mpv 0.31.0. Before this, the new value was rejected
-    *iff* video (for ``vf``) or audio (for ``af``) was active. If playback was
-    not active, the behavior was the same as the current behavior.
+    *iff* a video (for ``vf``) or an audio (for ``af``) track was active. If
+    playback was not active, the behavior was the same as the current one.
 
 ``playlist``
     The property is read-only and returns the current internal playlist. The
@@ -3401,8 +3492,11 @@ command is an exception and not a general rule.)
     ``i show-text "Filename: ${filename}"``
         shows the filename of the current file when pressing the ``i`` key
 
-Within ``input.conf``, property expansion can be inhibited by putting the
-``raw`` prefix in front of commands.
+Whether property expansion is enabled by default depends on which API is used
+(see `Flat command syntax`_, `Commands specified as arrays`_ and `Named
+arguments`_), but it can always be enabled with the ``expand-properties``
+prefix or disabled with the ``raw`` prefix, as described in `Input Command
+Prefixes`_.
 
 The following expansions are supported:
 

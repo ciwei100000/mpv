@@ -22,97 +22,15 @@
 #include "context.h"
 #include "utils.h"
 
-// Generated from presentation-time.xml
-#include "generated/wayland/presentation-time.h"
-
 struct priv {
     struct mpvk_ctx vk;
-};
-
-static const struct wp_presentation_feedback_listener feedback_listener;
-
-static void feedback_sync_output(void *data, struct wp_presentation_feedback *fback,
-                               struct wl_output *output)
-{
-}
-
-static void feedback_presented(void *data, struct wp_presentation_feedback *fback,
-                              uint32_t tv_sec_hi, uint32_t tv_sec_lo,
-                              uint32_t tv_nsec, uint32_t refresh_nsec,
-                              uint32_t seq_hi, uint32_t seq_lo,
-                              uint32_t flags)
-{
-    struct vo_wayland_state *wl = data;
-    vo_wayland_sync_shift(wl);
-
-    if (fback)
-        wp_presentation_feedback_destroy(fback);
-
-    // Very similar to oml_sync_control, in this case we assume that every
-    // time the compositor receives feedback, a buffer swap has been already
-    // been performed.
-    //
-    // Notes:
-    //  - tv_sec_lo + tv_sec_hi is the equivalent of oml's ust
-    //  - seq_lo + seq_hi is the equivalent of oml's msc
-    //  - these values are updated everytime the compositor receives feedback.
-
-    int index = last_available_sync(wl);
-    if (index < 0) {
-        queue_new_sync(wl);
-        index = 0;
-    }
-    int64_t sec = (uint64_t) tv_sec_lo + ((uint64_t) tv_sec_hi << 32);
-    wl->sync[index].ust = sec * 1000000LL + (uint64_t) tv_nsec / 1000;
-    wl->sync[index].msc = (uint64_t) seq_lo + ((uint64_t) seq_hi << 32);
-    wl->sync[index].filled = true;
-}
-
-static void feedback_discarded(void *data, struct wp_presentation_feedback *fback)
-{
-}
-
-static const struct wp_presentation_feedback_listener feedback_listener = {
-    feedback_sync_output,
-    feedback_presented,
-    feedback_discarded,
-};
-
-static const struct wl_callback_listener frame_listener;
-
-static void frame_callback(void *data, struct wl_callback *callback, uint32_t time)
-{
-    struct vo_wayland_state *wl = data;
-
-    if (callback)
-        wl_callback_destroy(callback);
-
-    wl->frame_callback = wl_surface_frame(wl->surface);
-    wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
-
-    if (wl->presentation) {
-        wl->feedback = wp_presentation_feedback(wl->presentation, wl->surface);
-        wp_presentation_feedback_add_listener(wl->feedback, &feedback_listener, wl);
-    }
-
-    wl->frame_wait = false;
-}
-
-static const struct wl_callback_listener frame_listener = {
-    frame_callback,
 };
 
 static bool wayland_vk_start_frame(struct ra_ctx *ctx)
 {
     struct vo_wayland_state *wl = ctx->vo->wl;
-
     bool render = !wl->hidden || wl->opts->disable_vsync;
-
-    if (wl->frame_wait && wl->presentation)
-        vo_wayland_sync_clear(wl);
-
-    if (render)
-        wl->frame_wait = true;
+    wl->frame_wait = true;
 
     return render;
 }
@@ -125,7 +43,7 @@ static void wayland_vk_swap_buffers(struct ra_ctx *ctx)
         vo_wayland_wait_frame(wl);
 
     if (wl->presentation)
-        wayland_sync_swap(wl);
+        vo_wayland_sync_swap(wl);
 }
 
 static void wayland_vk_get_vsync(struct ra_ctx *ctx, struct vo_vsync_info *info)
@@ -189,9 +107,6 @@ static bool wayland_vk_init(struct ra_ctx *ctx)
 
     ra_add_native_resource(ctx->ra, "wl", ctx->vo->wl->display);
 
-    ctx->vo->wl->frame_callback = wl_surface_frame(ctx->vo->wl->surface);
-    wl_callback_add_listener(ctx->vo->wl->frame_callback, &frame_listener, ctx->vo->wl);
-
     return true;
 
 error:
@@ -209,7 +124,6 @@ static bool resize(struct ra_ctx *ctx)
     const int32_t height = wl->scaling * mp_rect_h(wl->geometry);
 
     vo_wayland_set_opaque_region(wl, ctx->opts.want_alpha);
-    wl_surface_set_buffer_scale(wl->surface, wl->scaling);
     return ra_vk_ctx_resize(ctx, width, height);
 }
 

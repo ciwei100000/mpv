@@ -138,7 +138,6 @@ struct format_hack {
     bool use_stream_ids : 1;    // has a meaningful native stream IDs (export it)
     bool fully_read : 1;        // set demuxer.fully_read flag
     bool detect_charset : 1;    // format is a small text file, possibly not UTF8
-    bool image_format : 1;      // expected to contain exactly 1 frame
     // Do not confuse player's position estimation (position is into external
     // segment, with e.g. HLS, player knows about the playlist main file only).
     bool clear_filepos : 1;
@@ -205,8 +204,6 @@ static const struct format_hack format_hacks[] = {
     BLACKLIST("bin"),
     // Useless, does not work with custom streams.
     BLACKLIST("image2"),
-    // Image demuxers ("<name>_pipe" is detected explicitly)
-    {"image2pipe", .image_format = true},
     {0}
 };
 
@@ -227,7 +224,7 @@ typedef struct lavf_priv {
     bool own_stream;
     char *filename;
     struct format_hack format_hack;
-    AVInputFormat *avif;
+    const AVInputFormat *avif;
     int avif_flags;
     AVFormatContext *avfc;
     AVIOContext *pb;
@@ -260,22 +257,20 @@ typedef struct lavf_priv {
 
 static void update_read_stats(struct demuxer *demuxer)
 {
+#if !HAVE_FFMPEG_AVIOCONTEXT_BYTES_READ
+    return;
+#else
     lavf_priv_t *priv = demuxer->priv;
 
     for (int n = 0; n < priv->num_nested; n++) {
         struct nested_stream *nest = &priv->nested[n];
 
-#if !HAVE_FFMPEG_STRICT_ABI
-        // Note: accessing the bytes_read field is not allowed by FFmpeg's API.
-        // This is fully intentional - there is no other way to get this
-        // information (not even by custom I/O, because the connection reuse
-        // mechanism by the HLS demuxer would get disabled).
         int64_t cur = nest->id->bytes_read;
         int64_t new = cur - nest->last_bytes;
         nest->last_bytes = cur;
         demux_report_unbuffered_read_bytes(demuxer, new);
-#endif
     }
+#endif
 }
 
 // At least mp4 has name="mov,mp4,m4a,3gp,3g2,mj2", so we split the name
@@ -443,7 +438,7 @@ static int lavf_check_file(demuxer_t *demuxer, enum demux_check check)
     if (!lavfdopts->allow_mimetype || !mime_type)
         mime_type = "";
 
-    AVInputFormat *forced_format = NULL;
+    const AVInputFormat *forced_format = NULL;
     const char *format = lavfdopts->format;
     if (!format)
         format = s->lavf_type;
@@ -526,11 +521,6 @@ static int lavf_check_file(demuxer_t *demuxer, enum demux_check check)
     if (!priv->avif) {
         MP_VERBOSE(demuxer, "No format found, try lowering probescore or forcing the format.\n");
         return -1;
-    }
-
-    if (bstr_endswith0(bstr0(priv->avif->name), "_pipe")) {
-        MP_VERBOSE(demuxer, "Assuming this is an image format.\n");
-        priv->format_hack.image_format = true;
     }
 
     if (lavfdopts->hacks)
@@ -714,8 +704,17 @@ static void handle_new_stream(demuxer_t *demuxer, int i)
         sh->codec->disp_h = codec->height;
         if (st->avg_frame_rate.num)
             sh->codec->fps = av_q2d(st->avg_frame_rate);
-        if (priv->format_hack.image_format)
+        if (st->nb_frames <= 1 && (
+                sh->attached_picture ||
+                bstr_endswith0(bstr0(priv->avif->name), "_pipe") ||
+                strcmp(priv->avif->name, "alias_pix") == 0 ||
+                strcmp(priv->avif->name, "gif") == 0 ||
+                strcmp(priv->avif->name, "image2pipe") == 0
+            )) {
+            MP_VERBOSE(demuxer, "Assuming this is an image format.\n");
+            sh->image = true;
             sh->codec->fps = priv->mf_fps;
+        }
         sh->codec->par_w = st->sample_aspect_ratio.num;
         sh->codec->par_h = st->sample_aspect_ratio.den;
 
@@ -1354,6 +1353,8 @@ static void demux_close_lavf(demuxer_t *demuxer)
         }
         if (priv->own_stream)
             free_stream(priv->stream);
+        if (priv->av_opts)
+            av_dict_free(&priv->av_opts);
         talloc_free(priv);
         demuxer->priv = NULL;
     }

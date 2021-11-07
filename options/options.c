@@ -46,6 +46,7 @@
 #include "player/core.h"
 #include "player/command.h"
 #include "stream/stream.h"
+#include "demux/demux.h"
 
 #if HAVE_DRM
 #include "video/out/drm_common.h"
@@ -86,6 +87,7 @@ extern const struct m_sub_options ao_conf;
 
 extern const struct m_sub_options opengl_conf;
 extern const struct m_sub_options vulkan_conf;
+extern const struct m_sub_options vulkan_display_conf;
 extern const struct m_sub_options spirv_conf;
 extern const struct m_sub_options d3d11_conf;
 extern const struct m_sub_options d3d11va_conf;
@@ -112,7 +114,8 @@ static const m_option_t mp_vo_opt_list[] = {
     {"ontop-level", OPT_CHOICE(ontop_level, {"window", -1}, {"system", -2},
         {"desktop", -3}), M_RANGE(0, INT_MAX)},
     {"border", OPT_FLAG(border)},
-    {"fit-border", OPT_FLAG(fit_border)},
+    {"fit-border", OPT_FLAG(fit_border),
+     .deprecation_message = "the option is ignored and no longer needed"},
     {"on-all-workspaces", OPT_FLAG(all_workspaces)},
     {"geometry", OPT_GEOMETRY(geometry)},
     {"autofit", OPT_SIZE_BOX(autofit)},
@@ -147,8 +150,10 @@ static const m_option_t mp_vo_opt_list[] = {
         {"no", 0}, {"yes", 1}, {"downscale-big", 2})},
     {"wid", OPT_INT64(WinID)},
     {"screen", OPT_CHOICE(screen_id, {"default", -1}), M_RANGE(0, 32)},
+    {"screen-name", OPT_STRING(screen_name)},
     {"fs-screen", OPT_CHOICE(fsscreen_id, {"all", -2}, {"current", -1}),
         M_RANGE(0, 32)},
+    {"fs-screen-name", OPT_STRING(fsscreen_name)},
     {"keepaspect", OPT_FLAG(keepaspect)},
     {"keepaspect-window", OPT_FLAG(keepaspect_window)},
     {"hidpi-window-scale", OPT_FLAG(hidpi_window_scale)},
@@ -193,6 +198,7 @@ const struct m_sub_options vo_sub_opts = {
         .snap_window = 0,
         .border = 1,
         .fit_border = 1,
+        .appid = "mpv",
         .WinID = -1,
         .window_scale = 1.0,
         .x11_bypass_compositor = 2,
@@ -212,7 +218,9 @@ const struct m_sub_options mp_sub_filter_opts = {
         {"sub-filter-sdh", OPT_FLAG(sub_filter_SDH)},
         {"sub-filter-sdh-harder", OPT_FLAG(sub_filter_SDH_harder)},
         {"sub-filter-regex-enable", OPT_FLAG(rf_enable)},
+        {"sub-filter-regex-plain", OPT_FLAG(rf_plain)},
         {"sub-filter-regex", OPT_STRINGLIST(rf_items)},
+        {"sub-filter-jsre", OPT_STRINGLIST(jsre_items)},
         {"sub-filter-regex-warn", OPT_FLAG(rf_warn)},
         {0}
     },
@@ -232,6 +240,7 @@ const struct m_sub_options mp_subtitle_sub_opts = {
         {"sub-fps", OPT_FLOAT(sub_fps)},
         {"sub-speed", OPT_FLOAT(sub_speed)},
         {"sub-visibility", OPT_FLAG(sub_visibility)},
+        {"secondary-sub-visibility", OPT_FLAG(sec_sub_visibility)},
         {"sub-forced-only", OPT_CHOICE(forced_subs_only,
             {"auto", -1}, {"no", 0}, {"yes", 1})},
         {"stretch-dvd-subs", OPT_FLAG(stretch_dvd_subs)},
@@ -269,11 +278,13 @@ const struct m_sub_options mp_subtitle_sub_opts = {
         {"sub", OPT_SUBSTRUCT(sub_style, sub_style_conf)},
         {"sub-clear-on-seek", OPT_FLAG(sub_clear_on_seek)},
         {"teletext-page", OPT_INT(teletext_page), M_RANGE(1, 999)},
+        {"sub-past-video-end", OPT_FLAG(sub_past_video_end)},
         {0}
     },
     .size = sizeof(OPT_BASE_STRUCT),
     .defaults = &(OPT_BASE_STRUCT){
         .sub_visibility = 1,
+        .sec_sub_visibility = 1,
         .forced_subs_only = -1,
         .sub_pos = 100,
         .sub_speed = 1.0,
@@ -499,7 +510,8 @@ static const m_option_t mp_opts[] = {
 
     {"lavfi-complex", OPT_STRING(lavfi_complex), .flags = UPDATE_LAVFI_COMPLEX},
 
-    {"audio-display", OPT_CHOICE(audio_display, {"no", 0}, {"attachment", 1})},
+    {"audio-display", OPT_CHOICE(audio_display, {"no", 0},
+        {"embedded-first", 1}, {"external-first", 2})},
 
     {"hls-bitrate", OPT_CHOICE(hls_bitrate,
         {"no", -1}, {"min", 0}, {"max", INT_MAX}), M_RANGE(0, INT_MAX)},
@@ -512,9 +524,9 @@ static const m_option_t mp_opts[] = {
 #endif
 
     // demuxer.c - select audio/sub file/demuxer
-    {"demuxer", OPT_STRING(demuxer_name)},
-    {"audio-demuxer", OPT_STRING(audio_demuxer_name)},
-    {"sub-demuxer", OPT_STRING(sub_demuxer_name)},
+    {"demuxer", OPT_STRING(demuxer_name), .help = demuxer_help},
+    {"audio-demuxer", OPT_STRING(audio_demuxer_name), .help = demuxer_help},
+    {"sub-demuxer", OPT_STRING(sub_demuxer_name), .help = demuxer_help},
     {"demuxer-thread", OPT_FLAG(demuxer_thread)},
     {"demuxer-termination-timeout", OPT_DOUBLE(demux_termination_timeout)},
     {"demuxer-cache-wait", OPT_FLAG(demuxer_cache_wait)},
@@ -588,7 +600,7 @@ static const m_option_t mp_opts[] = {
     {"audio-file-auto", OPT_CHOICE(audiofile_auto,
         {"no", -1}, {"exact", 0}, {"fuzzy", 1}, {"all", 2})},
     {"cover-art-auto", OPT_CHOICE(coverart_auto,
-        {"no", -1}, {"fuzzy", 1})},
+        {"no", -1}, {"exact", 0}, {"fuzzy", 1}, {"all", 2})},
 
     {"", OPT_SUBSTRUCT(subs_rend, mp_subtitle_sub_opts)},
     {"", OPT_SUBSTRUCT(subs_filt, mp_sub_filter_opts)},
@@ -620,7 +632,7 @@ static const m_option_t mp_opts[] = {
         {"album", 2}),
         .flags = UPDATE_VOL},
     {"replaygain-preamp", OPT_FLOAT(rgain_preamp), .flags = UPDATE_VOL,
-        M_RANGE(-15, 15)},
+        M_RANGE(-150, 150)},
     {"replaygain-clip", OPT_FLAG(rgain_clip), .flags = UPDATE_VOL},
     {"replaygain-fallback", OPT_FLOAT(rgain_fallback), .flags = UPDATE_VOL,
         M_RANGE(-200, 60)},
@@ -686,6 +698,7 @@ static const m_option_t mp_opts[] = {
         OPT_FLAG(ignore_path_in_watch_later_config)},
     {"watch-later-directory", OPT_STRING(watch_later_directory),
         .flags = M_OPT_FILE},
+    {"watch-later-options", OPT_STRINGLIST(watch_later_options)},
 
     {"ordered-chapters", OPT_FLAG(ordered_chapters)},
     {"ordered-chapters-files", OPT_STRING(ordered_chapters_files),
@@ -775,6 +788,7 @@ static const m_option_t mp_opts[] = {
 
 #if HAVE_VULKAN
     {"", OPT_SUBSTRUCT(vulkan_opts, vulkan_conf)},
+    {"", OPT_SUBSTRUCT(vulkan_display_opts, vulkan_display_conf)},
 #endif
 
 #if HAVE_D3D11
@@ -1028,10 +1042,49 @@ static const struct MPOpts mp_default_opts = {
         "Artist", "Album", "Album_Artist", "Comment", "Composer",
         "Date", "Description", "Genre", "Performer", "Rating",
         "Series", "Title", "Track", "icy-title", "service_name",
+        "Uploader", "Channel_URL",
         NULL
     },
 
     .cuda_device = -1,
+
+    .watch_later_options = (char **)(const char*[]){
+        "osd-level",
+        "speed",
+        "edition",
+        "pause",
+        "volume",
+        "mute",
+        "audio-delay",
+        "fullscreen",
+        "ontop",
+        "border",
+        "gamma",
+        "brightness",
+        "contrast",
+        "saturation",
+        "hue",
+        "deinterlace",
+        "vf",
+        "af",
+        "panscan",
+        "aid",
+        "vid",
+        "sid",
+        "sub-delay",
+        "sub-speed",
+        "sub-pos",
+        "sub-visibility",
+        "sub-scale",
+        "sub-use-margins",
+        "sub-ass-force-margins",
+        "sub-ass-vsfilter-aspect-compat",
+        "sub-ass-override",
+        "ab-loop-a",
+        "ab-loop-b",
+        "video-aspect-override",
+        NULL
+    },
 };
 
 const struct m_sub_options mp_opt_root = {

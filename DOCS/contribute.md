@@ -5,7 +5,7 @@ General
 -------
 
 The main contact for mpv development is IRC, specifically #mpv
-and #mpv-devel on Freenode. Github is used for code review and
+and #mpv-devel on Libera.chat. Github is used for code review and
 long term discussions.
 
 Sending patches
@@ -68,6 +68,11 @@ Write good commit messages
 
   Having a prefix gives context, and is especially useful when trying to find
   a specific change by looking at the history, or when running ``git blame``.
+
+  Sample prefixes: ``vo_gpu: ...``, ``command: ...``, ``DOCS/input: ...``,
+  ``TOOLS/osxbundle: ...``, ``osc.lua: ...``, etc. You can always check the git
+  log for commits which modify specific files to see which prefixes are used.
+
 - The first word after the ``:`` is lower case.
 - Don't end the subject line with a ``.``.
 - Put an empty line between the subject line and the commit message.

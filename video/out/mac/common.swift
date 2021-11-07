@@ -100,6 +100,7 @@ class Common: NSObject {
         }
 
         window.setOnTop(Bool(mpv.opts.ontop), Int(mpv.opts.ontop_level))
+        window.setOnAllWorkspaces(Bool(mpv.opts.all_workspaces))
         window.keepAspect = Bool(mpv.opts.keepaspect_window)
         window.title = title
         window.border = Bool(mpv.opts.border)
@@ -186,8 +187,7 @@ class Common: NSObject {
     func startDisplayLink(_ vo: UnsafeMutablePointer<vo>) {
         CVDisplayLinkCreateWithActiveCGDisplays(&link)
 
-        guard let opts: mp_vo_opts = mpv?.opts,
-              let screen = getScreenBy(id: Int(opts.screen_id)) ?? NSScreen.main,
+        guard let screen = getTargetScreen(forFullscreen: false) ?? NSScreen.main,
               let link = self.link else
         {
             log.sendWarning("Couldn't start DisplayLink, no MPVHelper, Screen or DisplayLink available")
@@ -409,9 +409,27 @@ class Common: NSObject {
         return NSScreen.screens[screenID]
     }
 
+    func getScreenBy(name screenName: String?) -> NSScreen? {
+        for screen in NSScreen.screens {
+            if screen.displayName == screenName {
+                return screen
+            }
+        }
+        return nil
+    }
+
     func getTargetScreen(forFullscreen fs: Bool) -> NSScreen? {
-        let screenID = fs ? (mpv?.opts.fsscreen_id ?? 0) : (mpv?.opts.screen_id ?? 0)
-        return getScreenBy(id: Int(screenID))
+        guard let mpv = mpv else {
+            log.sendWarning("Unexpected nil value in getTargetScreen")
+            return nil
+        }
+
+        let screenID = fs ? mpv.opts.fsscreen_id : mpv.opts.screen_id
+        var name: String?
+        if let screenName = fs ? mpv.opts.fsscreen_name : mpv.opts.screen_name {
+            name = String(cString: screenName)
+        }
+        return getScreenBy(id: Int(screenID)) ?? getScreenBy(name: name)
     }
 
     func getCurrentScreen() -> NSScreen? {
@@ -420,25 +438,34 @@ class Common: NSObject {
                                     NSScreen.main
     }
 
-    func getWindowGeometry(forScreen targetScreen: NSScreen,
+    func getWindowGeometry(forScreen screen: NSScreen,
                            videoOut vo: UnsafeMutablePointer<vo>) -> NSRect {
-        let r = targetScreen.convertRectToBacking(targetScreen.frame)
-        var screenRC: mp_rect = mp_rect(x0: Int32(0),
-                                        y0: Int32(0),
-                                        x1: Int32(r.size.width),
-                                        y1: Int32(r.size.height))
+        let r = screen.convertRectToBacking(screen.frame)
+        let targetFrame = (mpv?.macOpts.macos_geometry_calculation ?? Int32(FRAME_VISIBLE)) == FRAME_VISIBLE
+            ? screen.visibleFrame : screen.frame
+        let rv = screen.convertRectToBacking(targetFrame)
+
+        // convert origin to be relative to target screen
+        var originY = rv.origin.y - r.origin.y
+        let originX = rv.origin.x - r.origin.x
+        // flip the y origin, mp_rect expects the origin at the top-left
+        // macOS' windowing system operates from the bottom-left
+        originY = -(originY + rv.size.height)
+        var screenRC: mp_rect = mp_rect(x0: Int32(originX),
+                                        y0: Int32(originY),
+                                        x1: Int32(originX + rv.size.width),
+                                        y1: Int32(originY + rv.size.height))
 
         var geo: vo_win_geometry = vo_win_geometry()
-        vo_calc_window_geometry2(vo, &screenRC, Double(targetScreen.backingScaleFactor), &geo)
+        vo_calc_window_geometry2(vo, &screenRC, Double(screen.backingScaleFactor), &geo)
+        vo_apply_window_geometry(vo, &geo)
 
-        // flip y coordinates
-        geo.win.y1 = Int32(r.size.height) - geo.win.y1
-        geo.win.y0 = Int32(r.size.height) - geo.win.y0
-
-        let wr = NSMakeRect(CGFloat(geo.win.x0), CGFloat(geo.win.y1),
-                            CGFloat(geo.win.x1 - geo.win.x0),
-                            CGFloat(geo.win.y0 - geo.win.y1))
-        return targetScreen.convertRectFromBacking(wr)
+        let height = CGFloat(geo.win.y1 - geo.win.y0)
+        let width = CGFloat(geo.win.x1 - geo.win.x0)
+        // flip the y origin again
+        let y = CGFloat(-geo.win.y1)
+        let x = CGFloat(geo.win.x0)
+        return screen.convertRectFromBacking(NSMakeRect(x, y, width, height))
     }
 
     func getInitProperties(_ vo: UnsafeMutablePointer<vo>) -> (MPVHelper, NSScreen, NSRect) {
@@ -446,7 +473,7 @@ class Common: NSObject {
             log.sendError("Something went wrong, no MPVHelper was initialized")
             exit(1)
         }
-        guard let targetScreen = getScreenBy(id: Int(mpv.opts.screen_id)) ?? NSScreen.main else {
+        guard let targetScreen = getTargetScreen(forFullscreen: false) ?? NSScreen.main else {
             log.sendError("Something went wrong, no Screen was found")
             exit(1)
         }
@@ -508,42 +535,40 @@ class Common: NSObject {
             events.pointee |= Int32(checkEvents())
             return VO_TRUE
         case VOCTRL_VO_OPTS_CHANGED:
-            var o: UnsafeMutableRawPointer?
-            while mpv.nextChangedOption(property: &o) {
-                guard let opt = o else {
-                    log.sendError("No changed options was retrieved")
-                    return VO_TRUE
-                }
-                if opt == UnsafeMutableRawPointer(&mpv.optsPtr.pointee.border) {
+            var opt: UnsafeMutableRawPointer?
+            while mpv.nextChangedOption(property: &opt) {
+                switch opt {
+                case MPVHelper.getPointer(&mpv.optsPtr.pointee.border):
                     DispatchQueue.main.async {
                         self.window?.border = Bool(mpv.opts.border)
                     }
-                }
-                if opt == UnsafeMutableRawPointer(&mpv.optsPtr.pointee.fullscreen) {
+                case MPVHelper.getPointer(&mpv.optsPtr.pointee.fullscreen):
                     DispatchQueue.main.async {
                         self.window?.toggleFullScreen(nil)
                     }
-                }
-                if opt == UnsafeMutableRawPointer(&mpv.optsPtr.pointee.ontop) ||
-                   opt == UnsafeMutableRawPointer(&mpv.optsPtr.pointee.ontop_level) {
+                case MPVHelper.getPointer(&mpv.optsPtr.pointee.ontop): fallthrough
+                case MPVHelper.getPointer(&mpv.optsPtr.pointee.ontop_level):
                     DispatchQueue.main.async {
                         self.window?.setOnTop(Bool(mpv.opts.ontop), Int(mpv.opts.ontop_level))
                     }
-                }
-                if opt == UnsafeMutableRawPointer(&mpv.optsPtr.pointee.keepaspect_window) {
+                case MPVHelper.getPointer(&mpv.optsPtr.pointee.all_workspaces):
+                    DispatchQueue.main.async {
+                        self.window?.setOnAllWorkspaces(Bool(mpv.opts.all_workspaces))
+                    }
+                case MPVHelper.getPointer(&mpv.optsPtr.pointee.keepaspect_window):
                     DispatchQueue.main.async {
                         self.window?.keepAspect = Bool(mpv.opts.keepaspect_window)
                     }
-                }
-                if opt == UnsafeMutableRawPointer(&mpv.optsPtr.pointee.window_minimized) {
+                case MPVHelper.getPointer(&mpv.optsPtr.pointee.window_minimized):
                     DispatchQueue.main.async {
                         self.window?.setMinimized(Bool(mpv.opts.window_minimized))
                     }
-                }
-                if opt == UnsafeMutableRawPointer(&mpv.optsPtr.pointee.window_maximized) {
+                case MPVHelper.getPointer(&mpv.optsPtr.pointee.window_maximized):
                     DispatchQueue.main.async {
                         self.window?.setMaximized(Bool(mpv.opts.window_maximized))
                     }
+                default:
+                    break
                 }
             }
             return VO_TRUE
@@ -624,6 +649,17 @@ class Common: NSObject {
             SWIFT_TARRAY_STRING_APPEND(nil, &array, &count, nil)
             dnames.pointee = array
             return VO_TRUE
+        case VOCTRL_GET_DISPLAY_RES:
+            guard let screen = getCurrentScreen() else {
+                log.sendWarning("No Screen available to retrieve frame")
+                return VO_NOTAVAIL
+            }
+            let sizeData = data.assumingMemoryBound(to: Int32.self)
+            let size = UnsafeMutableBufferPointer(start: sizeData, count: 2)
+            let frame = screen.convertRectToBacking(screen.frame)
+            size[0] = Int32(frame.size.width)
+            size[1] = Int32(frame.size.height)
+            return VO_TRUE
         case VOCTRL_GET_FOCUSED:
             let focus = data.assumingMemoryBound(to: CBool.self)
             focus.pointee = NSApp.isActive
@@ -653,19 +689,14 @@ class Common: NSObject {
             return
         }
 
-        var o: UnsafeMutableRawPointer?
-        while mpv.nextChangedMacOption(property: &o) {
-            guard let opt = o else {
-                log.sendWarning("Could not retrieve changed mac option")
-                return
-            }
-
+        var opt: UnsafeMutableRawPointer?
+        while mpv.nextChangedMacOption(property: &opt) {
             switch opt {
-            case UnsafeMutableRawPointer(&mpv.macOptsPtr.pointee.macos_title_bar_appearance):
+            case MPVHelper.getPointer(&mpv.macOptsPtr.pointee.macos_title_bar_appearance):
                 titleBar?.set(appearance: Int(mpv.macOpts.macos_title_bar_appearance))
-            case UnsafeMutableRawPointer(&mpv.macOptsPtr.pointee.macos_title_bar_material):
+            case MPVHelper.getPointer(&mpv.macOptsPtr.pointee.macos_title_bar_material):
                 titleBar?.set(material: Int(mpv.macOpts.macos_title_bar_material))
-            case UnsafeMutableRawPointer(&mpv.macOptsPtr.pointee.macos_title_bar_color):
+            case MPVHelper.getPointer(&mpv.macOptsPtr.pointee.macos_title_bar_color):
                 titleBar?.set(color: mpv.macOpts.macos_title_bar_color)
             default:
                 break

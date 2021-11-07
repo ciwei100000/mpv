@@ -21,15 +21,9 @@
 #include "utils.h"
 
 // 0-terminated list of desktop GL versions a backend should try to
-// initialize. The first entry is the most preferred version.
-const int mpgl_preferred_gl_versions[] = {
-    440,
-    430,
-    400,
-    330,
+// initialize. Each entry is the minimum required version.
+const int mpgl_min_required_gl_versions[] = {
     320,
-    310,
-    300,
     210,
     0
 };
@@ -40,19 +34,12 @@ enum {
     FLUSH_AUTO,
 };
 
-enum {
-    GLES_AUTO = 0,
-    GLES_YES,
-    GLES_NO,
-};
-
 struct opengl_opts {
     int use_glfinish;
     int waitvsync;
     int vsync_pattern[2];
     int swapinterval;
     int early_flush;
-    int restrict_version;
     int gles_mode;
 };
 
@@ -64,7 +51,7 @@ const struct m_sub_options opengl_conf = {
         {"opengl-swapinterval", OPT_INT(swapinterval)},
         {"opengl-check-pattern-a", OPT_INT(vsync_pattern[0])},
         {"opengl-check-pattern-b", OPT_INT(vsync_pattern[1])},
-        {"opengl-restrict", OPT_INT(restrict_version)},
+        {"opengl-restrict", OPT_REMOVED(NULL)},
         {"opengl-es", OPT_CHOICE(gles_mode,
             {"auto", GLES_AUTO}, {"yes", GLES_YES}, {"no", GLES_NO})},
         {"opengl-early-flush", OPT_CHOICE(early_flush,
@@ -100,29 +87,17 @@ struct priv {
     int num_vsync_fences;
 };
 
-bool ra_gl_ctx_test_version(struct ra_ctx *ctx, int version, bool es)
+enum gles_mode ra_gl_ctx_get_glesmode(struct ra_ctx *ctx)
 {
-    bool ret;
-    struct opengl_opts *opts;
     void *tmp = talloc_new(NULL);
+    struct opengl_opts *opts;
+    enum gles_mode mode;
+
     opts = mp_get_config_group(tmp, ctx->global, &opengl_conf);
+    mode = opts->gles_mode;
 
-    // Version too high
-    if (opts->restrict_version && version >= opts->restrict_version) {
-        ret = false;
-        goto done;
-    }
-
-    switch (opts->gles_mode) {
-    case GLES_YES:  ret = es;   goto done;
-    case GLES_NO:   ret = !es;  goto done;
-    case GLES_AUTO: ret = true; goto done;
-    default: abort();
-    }
-
-done:
     talloc_free(tmp);
-    return ret;
+    return mode;
 }
 
 void ra_gl_ctx_uninit(struct ra_ctx *ctx)

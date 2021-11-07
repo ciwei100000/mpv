@@ -44,8 +44,6 @@
 #define EGL_PLATFORM_GBM_KHR 0x31D7
 #endif
 
-#define USE_MASTER 0
-
 #ifndef EGL_EXT_platform_base
 typedef EGLDisplay (EGLAPIENTRYP PFNEGLGETPLATFORMDISPLAYEXTPROC)
     (EGLenum platform, void *native_display, const EGLint *attrib_list);
@@ -423,15 +421,11 @@ static void release_vt(void *data)
     struct ra_ctx *ctx = data;
     MP_VERBOSE(ctx->vo, "Releasing VT\n");
     crtc_release(ctx);
-    if (USE_MASTER) {
-        //this function enables support for switching to x, weston etc.
-        //however, for whatever reason, it can be called only by root users.
-        //until things change, this is commented.
-        struct priv *p = ctx->priv;
-        if (drmDropMaster(p->kms->fd)) {
-            MP_WARN(ctx->vo, "Failed to drop DRM master: %s\n",
-                    mp_strerror(errno));
-        }
+
+    const struct priv *p = ctx->priv;
+    if (drmDropMaster(p->kms->fd)) {
+        MP_WARN(ctx->vo, "Failed to drop DRM master: %s\n",
+                mp_strerror(errno));
     }
 }
 
@@ -439,12 +433,11 @@ static void acquire_vt(void *data)
 {
     struct ra_ctx *ctx = data;
     MP_VERBOSE(ctx->vo, "Acquiring VT\n");
-    if (USE_MASTER) {
-        struct priv *p = ctx->priv;
-        if (drmSetMaster(p->kms->fd)) {
-            MP_WARN(ctx->vo, "Failed to acquire DRM master: %s\n",
-                    mp_strerror(errno));
-        }
+
+    const struct priv *p = ctx->priv;
+    if (drmSetMaster(p->kms->fd)) {
+        MP_WARN(ctx->vo, "Failed to acquire DRM master: %s\n",
+                mp_strerror(errno));
     }
 
     crtc_setup(ctx);
@@ -726,11 +719,6 @@ static void drm_egl_get_vsync(struct ra_ctx *ctx, struct vo_vsync_info *info)
 
 static bool drm_egl_init(struct ra_ctx *ctx)
 {
-    if (ctx->opts.probing) {
-        MP_VERBOSE(ctx, "DRM EGL backend can be activated only manually.\n");
-        return false;
-    }
-
     struct priv *p = ctx->priv = talloc_zero(ctx, struct priv);
     p->ev.version = DRM_EVENT_CONTEXT_VERSION;
     p->ev.page_flip_handler = &drm_pflip_cb;
@@ -744,7 +732,9 @@ static bool drm_egl_init(struct ra_ctx *ctx)
     }
 
     MP_VERBOSE(ctx, "Initializing KMS\n");
-    p->kms = kms_create(ctx->log, ctx->vo->opts->drm_opts->drm_connector_spec,
+    p->kms = kms_create(ctx->log,
+                        ctx->vo->opts->drm_opts->drm_device_path,
+                        ctx->vo->opts->drm_opts->drm_connector_spec,
                         ctx->vo->opts->drm_opts->drm_mode_spec,
                         ctx->vo->opts->drm_opts->drm_draw_plane,
                         ctx->vo->opts->drm_opts->drm_drmprime_video_plane,
@@ -878,6 +868,11 @@ static int drm_egl_control(struct ra_ctx *ctx, int *events, int request,
         if (fps <= 0)
             break;
         *(double*)arg = fps;
+        return VO_TRUE;
+    }
+    case VOCTRL_GET_DISPLAY_RES: {
+        ((int *)arg)[0] = p->kms->mode.mode.hdisplay;
+        ((int *)arg)[1] = p->kms->mode.mode.vdisplay;
         return VO_TRUE;
     }
     case VOCTRL_PAUSE:
