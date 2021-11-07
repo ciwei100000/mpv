@@ -1,3 +1,14 @@
+mpv (0.34.0-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream version 0.34.0
+  * debian/patches:
+    - Refresh patches
+    - Remove patches for libplacebo 3.120 support
+  * debian/control: Bump Build-Depends versions with upstream requirements
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 07 Nov 2021 19:23:22 +0100
+
 mpv (0.33.1-1) unstable; urgency=medium
 
   * Team upload
