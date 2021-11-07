@@ -22,7 +22,9 @@ typedef struct mp_vo_opts {
     bool focus_on_open;
 
     int screen_id;
+    char *screen_name;
     int fsscreen_id;
+    char *fsscreen_name;
     char *winname;
     char *appid;
     int x11_netwm;
@@ -71,6 +73,7 @@ typedef struct mp_vo_opts {
 // Subtitle options needed by the subtitle decoders/renderers.
 struct mp_subtitle_opts {
     int sub_visibility;
+    int sec_sub_visibility;
     int sub_pos;
     float sub_delay;
     float sub_fps;
@@ -104,13 +107,16 @@ struct mp_subtitle_opts {
     int ass_justify;
     int sub_clear_on_seek;
     int teletext_page;
+    int sub_past_video_end;
 };
 
 struct mp_sub_filter_opts {
     int sub_filter_SDH;
     int sub_filter_SDH_harder;
     int rf_enable;
+    int rf_plain;
     char **rf_items;
+    char **jsre_items;
     int rf_warn;
 };
 
@@ -248,6 +254,7 @@ typedef struct MPOpts {
     int write_filename_in_watch_later_config;
     int ignore_path_in_watch_later_config;
     char *watch_later_directory;
+    char **watch_later_options;
     int pause;
     int keep_open;
     int keep_open_pause;
@@ -341,6 +348,7 @@ typedef struct MPOpts {
     struct angle_opts *angle_opts;
     struct opengl_opts *opengl_opts;
     struct vulkan_opts *vulkan_opts;
+    struct vulkan_display_opts *vulkan_display_opts;
     struct spirv_opts *spirv_opts;
     struct d3d11_opts *d3d11_opts;
     struct d3d11va_opts *d3d11va_opts;

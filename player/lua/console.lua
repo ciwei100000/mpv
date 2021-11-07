@@ -36,6 +36,8 @@ function detect_platform()
         return 'windows'
     elseif mp.get_property_native('options/macos-force-dedicated-gpu', o) ~= o then
         return 'macos'
+    elseif os.getenv('WAYLAND_DISPLAY') then
+        return 'wayland'
     end
     return 'x11'
 end
@@ -258,7 +260,7 @@ function prev_utf8(str, pos)
     return pos
 end
 
--- Insert a character at the current cursor position (any_unicode, Shift+Enter)
+-- Insert a character at the current cursor position (any_unicode)
 function handle_char_input(c)
     if insert_mode then
         line = line:sub(1, cursor - 1) .. c .. line:sub(next_utf8(line, cursor))
@@ -311,10 +313,13 @@ function clear()
     update()
 end
 
--- Close the REPL if the current line is empty, otherwise do nothing (Ctrl+D)
+-- Close the REPL if the current line is empty, otherwise delete the next
+-- character (Ctrl+D)
 function maybe_exit()
     if line == '' then
         set_active(false)
+    else
+        handle_del()
     end
 end
 
@@ -569,7 +574,7 @@ function go_end()
     update()
 end
 
--- Delete from the cursor to the end of the word (Ctrl+W)
+-- Delete from the cursor to the beginning of the word (Ctrl+Backspace)
 function del_word()
     local before_cur = line:sub(1, cursor - 1)
     local after_cur = line:sub(cursor)
@@ -577,6 +582,18 @@ function del_word()
     before_cur = before_cur:gsub('[^%s]+%s*$', '', 1)
     line = before_cur .. after_cur
     cursor = before_cur:len() + 1
+    update()
+end
+
+-- Delete from the cursor to the end of the word (Ctrl+Del)
+function del_next_word()
+    if cursor > line:len() then return end
+
+    local before_cur = line:sub(1, cursor - 1)
+    local after_cur = line:sub(cursor)
+
+    after_cur = after_cur:gsub('^%s*[^%s]+', '', 1)
+    line = before_cur .. after_cur
     update()
 end
 
@@ -604,6 +621,14 @@ function get_clipboard(clip)
     if platform == 'x11' then
         local res = utils.subprocess({
             args = { 'xclip', '-selection', clip and 'clipboard' or 'primary', '-out' },
+            playback_only = false,
+        })
+        if not res.error then
+            return res.stdout
+        end
+    elseif platform == 'wayland' then
+        local res = utils.subprocess({
+            args = { 'wl-paste', clip and '-n' or  '-np' },
             playback_only = false,
         })
         if not res.error then
@@ -647,7 +672,7 @@ function get_clipboard(clip)
 end
 
 -- Paste text from the window-system's clipboard. 'clip' determines whether the
--- clipboard or the primary selection buffer is used (on X11 only.)
+-- clipboard or the primary selection buffer is used (on X11 and Wayland only.)
 function paste(clip)
     local text = get_clipboard(clip)
     local before_cur = line:sub(1, cursor - 1)
@@ -665,25 +690,37 @@ function get_bindings()
         { 'enter',       handle_enter                           },
         { 'kp_enter',    handle_enter                           },
         { 'shift+enter', function() handle_char_input('\n') end },
+        { 'ctrl+j',      handle_enter                           },
+        { 'ctrl+m',      handle_enter                           },
         { 'bs',          handle_backspace                       },
         { 'shift+bs',    handle_backspace                       },
+        { 'ctrl+h',      handle_backspace                       },
         { 'del',         handle_del                             },
         { 'shift+del',   handle_del                             },
         { 'ins',         handle_ins                             },
         { 'shift+ins',   function() paste(false) end            },
         { 'mbtn_mid',    function() paste(false) end            },
         { 'left',        function() prev_char() end             },
+        { 'ctrl+b',      function() prev_char() end             },
         { 'right',       function() next_char() end             },
+        { 'ctrl+f',      function() next_char() end             },
         { 'up',          function() move_history(-1) end        },
+        { 'ctrl+p',      function() move_history(-1) end        },
         { 'wheel_up',    function() move_history(-1) end        },
         { 'down',        function() move_history(1) end         },
+        { 'ctrl+n',      function() move_history(1) end         },
         { 'wheel_down',  function() move_history(1) end         },
         { 'wheel_left',  function() end                         },
         { 'wheel_right', function() end                         },
         { 'ctrl+left',   prev_word                              },
+        { 'alt+b',       prev_word                              },
         { 'ctrl+right',  next_word                              },
+        { 'alt+f',       next_word                              },
         { 'tab',         complete                               },
+        { 'ctrl+i',      complete                               },
+        { 'ctrl+a',      go_home                                },
         { 'home',        go_home                                },
+        { 'ctrl+e',      go_end                                 },
         { 'end',         go_end                                 },
         { 'pgup',        handle_pgup                            },
         { 'pgdwn',       handle_pgdown                          },
@@ -694,7 +731,10 @@ function get_bindings()
         { 'ctrl+u',      del_to_start                           },
         { 'ctrl+v',      function() paste(true) end             },
         { 'meta+v',      function() paste(true) end             },
+        { 'ctrl+bs',     del_word                               },
         { 'ctrl+w',      del_word                               },
+        { 'ctrl+del',    del_next_word                          },
+        { 'alt+d',       del_next_word                          },
         { 'kp_dec',      function() handle_char_input('.') end  },
     }
 

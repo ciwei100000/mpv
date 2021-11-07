@@ -83,8 +83,7 @@ class CocoaCB: Common {
     }
 
     func updateWindowSize(_ vo: UnsafeMutablePointer<vo>) {
-        guard let opts: mp_vo_opts = mpv?.opts,
-              let targetScreen = getScreenBy(id: Int(opts.screen_id)) ?? NSScreen.main else
+        guard let targetScreen = getTargetScreen(forFullscreen: false) ?? NSScreen.main else
         {
             log.sendWarning("Couldn't update Window size, no Screen available")
             return
@@ -133,11 +132,11 @@ class CocoaCB: Common {
     }
 
     override func windowSetToFullScreen() {
-        layer?.update()
+        layer?.update(force: true)
     }
 
     override func windowSetToWindow() {
-        layer?.update()
+        layer?.update(force: true)
     }
 
     override func windowDidUpdateFrame() {

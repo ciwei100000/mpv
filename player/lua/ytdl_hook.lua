@@ -8,11 +8,12 @@ local o = {
     use_manifests = false,
     all_formats = false,
     force_all_formats = true,
-    ytdl_path = "youtube-dl",
+    ytdl_path = "",
 }
 
 local ytdl = {
-    path = nil,
+    path = "",
+    paths_to_search = {"yt-dlp", "yt-dlp_x86", "youtube-dl"},
     searched = false,
     blacklisted = {}
 }
@@ -37,6 +38,16 @@ function iif(cond, if_true, if_false)
     end
     return if_false
 end
+
+-- youtube-dl JSON name to mpv tag name
+local tag_list = {
+    ["uploader"]        = "uploader",
+    ["channel_url"]     = "channel_url",
+    -- these titles tend to be a bit too long, so hide them on the terminal
+    -- (default --display-tags does not include this name)
+    ["description"]     = "ytdl_description",
+    -- "title" is handled by force-media-title
+}
 
 local safe_protos = Set {
     "http", "https", "ftp", "ftps",
@@ -78,7 +89,13 @@ local function map_codec_to_mpv(codec)
     return nil
 end
 
+local function platform_is_windows()
+    return package.config:sub(1,1) == "\\"
+end
+
 local function exec(args)
+    msg.debug("Running: " .. table.concat(args, " "))
+
     local ret = mp.command_native({name = "subprocess",
                                    args = args,
                                    capture_stdout = true,
@@ -341,6 +358,20 @@ local function as_integer(v, def)
     return def
 end
 
+local function tags_to_edl(json)
+    local tags = {}
+    for json_name, mp_name in pairs(tag_list) do
+        local v = json[json_name]
+        if v then
+            tags[#tags + 1] = mp_name .. "=" .. edl_escape(tostring(v))
+        end
+    end
+    if #tags == 0 then
+        return nil
+    end
+    return "!global_tags," .. table.concat(tags, ",")
+end
+
 -- Convert a format list from youtube-dl to an EDL URL, or plain URL.
 --  json: full json blob by youtube-dl
 --  formats: format list by youtube-dl
@@ -475,6 +506,11 @@ local function formats_to_edl(json, formats, use_all_formats)
     if #streams == 1 and single_url then
         res.url = single_url
     elseif #streams > 0 then
+        local tags = tags_to_edl(json)
+        if tags then
+            -- not a stream; just for the sake of concatenating the EDL string
+            streams[#streams + 1] = tags
+        end
         res.url = "edl://" .. table.concat(streams, ";")
     else
         return nil
@@ -507,7 +543,7 @@ local function add_single_video(json)
 
         if requested_formats then
             for _, track in pairs(requested_formats) do
-                max_bitrate = track.tbr > max_bitrate and
+                max_bitrate = (track.tbr and track.tbr > max_bitrate) and
                     track.tbr or max_bitrate
             end
         elseif json.tbr then
@@ -689,20 +725,6 @@ end
 function run_ytdl_hook(url)
     local start_time = os.clock()
 
-    -- check for youtube-dl in mpv's config dir
-    if not (ytdl.searched) then
-        local exesuf = (package.config:sub(1,1) == '\\') and '.exe' or ''
-        local ytdl_mcd = mp.find_config_file(o.ytdl_path .. exesuf)
-        if ytdl_mcd == nil then
-            msg.verbose("No youtube-dl found with path "..o.ytdl_path..exesuf.." in config directories")
-            ytdl.path = o.ytdl_path
-        else
-            msg.verbose("found youtube-dl at: " .. ytdl_mcd)
-            ytdl.path = ytdl_mcd
-        end
-        ytdl.searched = true
-    end
-
     -- strip ytdl://
     if (url:find("ytdl://") == 1) then
         url = url:sub(8)
@@ -757,37 +779,76 @@ function run_ytdl_hook(url)
     end
     table.insert(command, "--")
     table.insert(command, url)
-    msg.debug("Running: " .. table.concat(command,' '))
-    local es, json, result, aborted = exec(command)
+
+    local es, json, result, aborted
+    if ytdl.searched then
+        es, json, result, aborted = exec(command)
+    else
+        local separator = platform_is_windows() and ";" or ":"
+        if o.ytdl_path:match("[^" .. separator .. "]") then
+            ytdl.paths_to_search = {}
+            for path in o.ytdl_path:gmatch("[^" .. separator .. "]+") do
+                table.insert(ytdl.paths_to_search, path)
+            end
+        end
+
+        for _, path in pairs(ytdl.paths_to_search) do
+            -- search for youtube-dl in mpv's config dir
+            local exesuf = platform_is_windows() and ".exe" or ""
+            local ytdl_cmd = mp.find_config_file(path .. exesuf)
+            if ytdl_cmd then
+                msg.verbose("Found youtube-dl at: " .. ytdl_cmd)
+                ytdl.path = ytdl_cmd
+                command[1] = ytdl.path
+                es, json, result, aborted = exec(command)
+                break
+            else
+                msg.verbose("No youtube-dl found with path " .. path .. exesuf .. " in config directories")
+                command[1] = path
+                es, json, result, aborted = exec(command)
+                if result.error_string == "init" then
+                    msg.verbose("youtube-dl with path " .. path .. exesuf .. " not found in PATH or not enough permissions")
+                else
+                    msg.verbose("Found youtube-dl with path " .. path .. exesuf .. " in PATH")
+                    ytdl.path = path
+                    break
+                end
+            end
+        end
+
+        ytdl.searched = true
+    end
 
     if aborted then
         return
     end
 
-    if (es < 0) or (json == nil) or (json == "") then
+    local parse_err = nil
+
+    if (es < 0) or (json == "") then
+        json = nil
+    elseif json then
+        json, parse_err = utils.parse_json(json)
+    end
+
+    if (json == nil) then
         -- trim our stderr to avoid spurious newlines
         ytdl_err = result.stderr:gsub("^%s*(.-)%s*$", "%1")
         msg.error(ytdl_err)
         local err = "youtube-dl failed: "
         if result.error_string and result.error_string == "init" then
             err = err .. "not found or not enough permissions"
+        elseif parse_err then
+            err = err .. "failed to parse JSON data: " .. parse_err
         elseif not result.killed_by_us then
             err = err .. "unexpected error occurred"
         else
             err = string.format("%s returned '%d'", err, es)
         end
         msg.error(err)
-        if string.find(ytdl_err, "yt%-dl%.org/bug") then
+        if parse_err or string.find(ytdl_err, "yt%-dl%.org/bug") then
             check_version(ytdl.path)
         end
-        return
-    end
-
-    local json, err = utils.parse_json(json)
-
-    if (json == nil) then
-        msg.error("failed to parse JSON data: " .. err)
-        check_version(ytdl.path)
         return
     end
 

@@ -63,19 +63,19 @@ struct priv {
     int opt_pad_x;
     int opt_rows;
     int opt_cols;
+    int opt_clear;
 
     // Internal data
     sixel_output_t *output;
     sixel_dither_t *dither;
     sixel_dither_t *testdither;
     uint8_t        *buffer;
+    bool            skip_frame_draw;
 
-    // The dimensions that will be actually
-    // be used after processing user inputs
-    int top;
-    int left;
-    int width;
-    int height;
+    int left, top;  // image origin cell (1 based)
+    int width, height;  // actual image px size - always reflects dst_rect.
+    int num_cols, num_rows;  // terminal size in cells
+    int canvas_ok;  // whether canvas vo->dwidth and vo->dheight are positive
 
     int previous_histgram_colors;
 
@@ -115,13 +115,18 @@ static int detect_scene_change(struct vo* vo)
 
 }
 
-static void dealloc_dithers_and_buffer(struct vo* vo)
+static void dealloc_dithers_and_buffers(struct vo* vo)
 {
     struct priv* priv = vo->priv;
 
     if (priv->buffer) {
         talloc_free(priv->buffer);
         priv->buffer = NULL;
+    }
+
+    if (priv->frame) {
+        talloc_free(priv->frame);
+        priv->frame = NULL;
     }
 
     if (priv->dither) {
@@ -139,15 +144,15 @@ static SIXELSTATUS prepare_static_palette(struct vo* vo)
 {
     struct priv* priv = vo->priv;
 
-    if (priv->dither) {
-        sixel_dither_set_body_only(priv->dither, 1);
-    } else {
+    if (!priv->dither) {
         priv->dither = sixel_dither_get(BUILTIN_XTERM256);
         if (priv->dither == NULL)
             return SIXEL_FALSE;
 
         sixel_dither_set_diffusion_type(priv->dither, priv->opt_diffuse);
     }
+
+    sixel_dither_set_body_only(priv->dither, 0);
     return SIXEL_OK;
 }
 
@@ -159,7 +164,8 @@ static SIXELSTATUS prepare_dynamic_palette(struct vo *vo)
     /* create histgram and construct color palette
      * with median cut algorithm. */
     status = sixel_dither_initialize(priv->testdither, priv->buffer,
-                                     priv->width, priv->height, 3,
+                                     priv->width, priv->height,
+                                     SIXEL_PIXELFORMAT_RGB888,
                                      LARGE_NORM, REP_CENTER_BOX,
                                      QUALITY_LOW);
     if (SIXEL_FAILED(status))
@@ -179,22 +185,18 @@ static SIXELSTATUS prepare_dynamic_palette(struct vo *vo)
 
         sixel_dither_set_diffusion_type(priv->dither, priv->opt_diffuse);
     } else {
-        if (priv->dither == NULL) {
+        if (priv->dither == NULL)
             return SIXEL_FALSE;
-        }
-        sixel_dither_set_body_only(priv->dither, 1);
     }
 
+    sixel_dither_set_body_only(priv->dither, 0);
     return status;
 }
 
-static void resize(struct vo *vo)
+static void update_canvas_dimensions(struct vo *vo)
 {
     // this function sets the vo canvas size in pixels vo->dwidth, vo->dheight,
-    // and the output scaled size in priv->width, priv->height
-    // and the scaling rectangles in pixels priv->src_rect, priv->dst_rect
-    // as well as image positioning in cells priv->top, priv->left.
-    // no other scaling/rendering size values are required past this point.
+    // and the number of rows and columns available in priv->num_rows/cols
     struct priv *priv   = vo->priv;
     int num_rows        = TERMINAL_FALLBACK_ROWS;
     int num_cols        = TERMINAL_FALLBACK_COLS;
@@ -254,6 +256,19 @@ static void resize(struct vo *vo)
     vo->dheight = total_px_height * (num_rows - 1) / num_rows / 6 * 6;
     vo->dwidth  = total_px_width;
 
+    priv->num_rows = num_rows;
+    priv->num_cols = num_cols;
+
+    priv->canvas_ok = vo->dwidth > 0 && vo->dheight > 0;
+}
+
+static void set_sixel_output_parameters(struct vo *vo)
+{
+    // This function sets output scaled size in priv->width, priv->height
+    // and the scaling rectangles in pixels priv->src_rect, priv->dst_rect
+    // as well as image positioning in cells priv->top, priv->left.
+    struct priv *priv = vo->priv;
+
     vo_get_src_dst_rects(vo, &priv->src_rect, &priv->dst_rect, &priv->osd);
 
     // priv->width and priv->height are the width and height of dst_rect
@@ -265,15 +280,14 @@ static void resize(struct vo *vo)
     // top/left values must be greater than 1. If it is set, then
     // the image will be rendered from there and no further centering is done.
     priv->top  = (priv->opt_top  > 0) ?  priv->opt_top :
-                  num_rows * priv->dst_rect.y0 / vo->dheight + 1;
+                  priv->num_rows * priv->dst_rect.y0 / vo->dheight + 1;
     priv->left = (priv->opt_left > 0) ?  priv->opt_left :
-                  num_cols * priv->dst_rect.x0 / vo->dwidth  + 1;
+                  priv->num_cols * priv->dst_rect.x0 / vo->dwidth  + 1;
 }
 
-static int reconfig(struct vo *vo, struct mp_image_params *params)
+static int update_sixel_swscaler(struct vo *vo, struct mp_image_params *params)
 {
     struct priv *priv = vo->priv;
-    resize(vo);
 
     priv->sws->src = *params;
     priv->sws->src.w = mp_rect_w(priv->src_rect);
@@ -286,6 +300,8 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
         .p_h = 1,
     };
 
+    dealloc_dithers_and_buffers(vo);
+
     priv->frame = mp_image_alloc(IMGFMT, priv->width, priv->height);
     if (!priv->frame)
         return -1;
@@ -293,17 +309,15 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
     if (mp_sws_reinit(priv->sws) < 0)
         return -1;
 
-    printf(ESC_HIDE_CURSOR);
-    printf(ESC_CLEAR_SCREEN);
-    vo->want_redraw = true;
-
-    dealloc_dithers_and_buffer(vo);
-    SIXELSTATUS status = sixel_dither_new(&priv->testdither,
-                                          priv->opt_reqcolors, NULL);
-    if (SIXEL_FAILED(status)) {
-        MP_ERR(vo, "reconfig: Failed to create new dither: %s\n",
-               sixel_helper_format_error(status));
-        return -1;
+    // create testdither only if dynamic palette mode is set
+    if (!priv->opt_fixedpal) {
+        SIXELSTATUS status = sixel_dither_new(&priv->testdither,
+                                              priv->opt_reqcolors, NULL);
+        if (SIXEL_FAILED(status)) {
+            MP_ERR(vo, "update_sixel_swscaler: Failed to create new dither: %s\n",
+                   sixel_helper_format_error(status));
+            return -1;
+        }
     }
 
     priv->buffer =
@@ -312,28 +326,82 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
     return 0;
 }
 
-static void draw_image(struct vo *vo, mp_image_t *mpi)
+static int reconfig(struct vo *vo, struct mp_image_params *params)
 {
     struct priv *priv = vo->priv;
-    struct mp_image src = *mpi;
+    int ret = 0;
+    update_canvas_dimensions(vo);
+    if (priv->canvas_ok) {  // if too small - succeed but skip the rendering
+        set_sixel_output_parameters(vo);
+        ret = update_sixel_swscaler(vo, params);
+    }
+
+    printf(ESC_CLEAR_SCREEN);
+    vo->want_redraw = true;
+
+    return ret;
+}
+
+static void draw_frame(struct vo *vo, struct vo_frame *frame)
+{
+    struct priv *priv = vo->priv;
     SIXELSTATUS status;
+    struct mp_image *mpi = NULL;
 
-    struct mp_rect src_rc = priv->src_rect;
-    src_rc.x0 = MP_ALIGN_DOWN(src_rc.x0, mpi->fmt.align_x);
-    src_rc.y0 = MP_ALIGN_DOWN(src_rc.y0, mpi->fmt.align_y);
-    mp_image_crop_rc(&src, src_rc);
+    int  prev_rows   = priv->num_rows;
+    int  prev_cols   = priv->num_cols;
+    int  prev_height = vo->dheight;
+    int  prev_width  = vo->dwidth;
+    bool resized     = false;
+    update_canvas_dimensions(vo);
+    if (!priv->canvas_ok)
+        return;
 
-    // Downscale the image
-    mp_sws_scale(priv->sws, priv->frame, &src);
+    if (prev_rows != priv->num_rows || prev_cols != priv->num_cols ||
+        prev_width != vo->dwidth || prev_height != vo->dheight)
+    {
+        set_sixel_output_parameters(vo);
+        // Not checking for vo->config_ok because draw_frame is never called
+        // with a failed reconfig.
+        update_sixel_swscaler(vo, vo->params);
+
+        printf(ESC_CLEAR_SCREEN);
+        resized = true;
+    }
+
+    if (frame->repeat && !frame->redraw && !resized) {
+        // Frame is repeated, and no need to update OSD either
+        priv->skip_frame_draw = true;
+        return;
+    } else {
+        // Either frame is new, or OSD has to be redrawn
+        priv->skip_frame_draw = false;
+    }
+
+    // Normal case where we have to draw the frame and the image is not NULL
+    if (frame->current) {
+        mpi = mp_image_new_ref(frame->current);
+        struct mp_rect src_rc = priv->src_rect;
+        src_rc.x0 = MP_ALIGN_DOWN(src_rc.x0, mpi->fmt.align_x);
+        src_rc.y0 = MP_ALIGN_DOWN(src_rc.y0, mpi->fmt.align_y);
+        mp_image_crop_rc(mpi, src_rc);
+
+        // scale/pan to our dest rect
+        mp_sws_scale(priv->sws, priv->frame, mpi);
+    } else {
+        // Image is NULL, so need to clear image and draw OSD
+        mp_image_clear(priv->frame, 0, 0, priv->width, priv->height);
+    }
 
     struct mp_osd_res dim = {
         .w = priv->width,
         .h = priv->height
     };
     osd_draw_on_image(vo->osd, dim, mpi ? mpi->pts : 0, 0, priv->frame);
+
     // Copy from mpv to RGB format as required by libsixel
-    memcpy_pic(priv->buffer, priv->frame->planes[0], priv->width * depth, priv->height,
-               priv->width * depth, priv->frame->stride[0]);
+    memcpy_pic(priv->buffer, priv->frame->planes[0], priv->width * depth,
+               priv->height, priv->width * depth, priv->frame->stride[0]);
 
     // Even if either of these prepare palette functions fail, on re-running them
     // they should try to re-initialize the dithers, so it shouldn't dereference
@@ -346,11 +414,12 @@ static void draw_image(struct vo *vo, mp_image_t *mpi)
     }
 
     if (SIXEL_FAILED(status)) {
-        MP_WARN(vo, "draw_image: prepare_palette returned error: %s\n",
+        MP_WARN(vo, "draw_frame: prepare_palette returned error: %s\n",
                 sixel_helper_format_error(status));
     }
 
-    talloc_free(mpi);
+    if (mpi)
+        talloc_free(mpi);
 }
 
 static int sixel_write(char *data, int size, void *priv)
@@ -361,6 +430,12 @@ static int sixel_write(char *data, int size, void *priv)
 static void flip_page(struct vo *vo)
 {
     struct priv* priv = vo->priv;
+    if (!priv->canvas_ok)
+        return;
+
+    // If frame is repeated and no update required, then we skip encoding
+    if (priv->skip_frame_draw)
+        return;
 
     // Make sure that image and dither are valid before drawing
     if (priv->buffer == NULL || priv->dither == NULL)
@@ -369,8 +444,7 @@ static void flip_page(struct vo *vo)
     // Go to the offset row and column, then display the image
     printf(ESC_GOTOXY, priv->top, priv->left);
     sixel_encode(priv->buffer, priv->width, priv->height,
-                 PIXELFORMAT_RGB888,
-                 priv->dither, priv->output);
+                 depth, priv->dither, priv->output);
     fflush(stdout);
 }
 
@@ -400,17 +474,16 @@ static int preinit(struct vo *vo)
     printf(ESC_USE_GLOBAL_COLOR_REG);
 
     priv->dither = NULL;
-    status = sixel_dither_new(&priv->testdither, priv->opt_reqcolors, NULL);
 
-    if (SIXEL_FAILED(status)) {
-        MP_ERR(vo, "preinit: Failed to create new dither: %s\n",
-               sixel_helper_format_error(status));
-        return -1;
+    // create testdither only if dynamic palette mode is set
+    if (!priv->opt_fixedpal) {
+        status = sixel_dither_new(&priv->testdither, priv->opt_reqcolors, NULL);
+        if (SIXEL_FAILED(status)) {
+            MP_ERR(vo, "preinit: Failed to create new dither: %s\n",
+                   sixel_helper_format_error(status));
+            return -1;
+        }
     }
-
-    resize(vo);
-    priv->buffer =
-        talloc_array(NULL, uint8_t, depth * priv->width * priv->height);
 
     priv->previous_histgram_colors = 0;
 
@@ -424,15 +497,9 @@ static int query_format(struct vo *vo, int format)
 
 static int control(struct vo *vo, uint32_t request, void *data)
 {
-    if (request == VOCTRL_SET_PANSCAN) {
-        if (!reconfig(vo, vo->params)) {
-            return VO_TRUE;
-        } else {
-            return VO_FALSE;
-        }
-    } else {
-        return VO_NOTIMPL;
-    }
+    if (request == VOCTRL_SET_PANSCAN)
+        return (vo->config_ok && !reconfig(vo, vo->params)) ? VO_TRUE : VO_FALSE;
+    return VO_NOTIMPL;
 }
 
 
@@ -442,8 +509,10 @@ static void uninit(struct vo *vo)
 
     printf(ESC_RESTORE_CURSOR);
 
-    printf(ESC_CLEAR_SCREEN);
-    printf(ESC_GOTOXY, 1, 1);
+    if (priv->opt_clear) {
+        printf(ESC_CLEAR_SCREEN);
+        printf(ESC_GOTOXY, 1, 1);
+    }
     fflush(stdout);
 
     if (priv->output) {
@@ -451,24 +520,24 @@ static void uninit(struct vo *vo)
         priv->output = NULL;
     }
 
-    dealloc_dithers_and_buffer(vo);
+    dealloc_dithers_and_buffers(vo);
 }
 
 #define OPT_BASE_STRUCT struct priv
 
 const struct vo_driver video_out_sixel = {
     .name = "sixel",
-    .description = "libsixel",
+    .description = "terminal graphics using sixels",
     .preinit = preinit,
     .query_format = query_format,
     .reconfig = reconfig,
     .control = control,
-    .draw_image = draw_image,
+    .draw_frame = draw_frame,
     .flip_page = flip_page,
     .uninit = uninit,
     .priv_size = sizeof(struct priv),
     .priv_defaults = &(const struct priv) {
-        .opt_diffuse = DIFFUSE_ATKINSON,
+        .opt_diffuse = DIFFUSE_AUTO,
         .opt_width = 0,
         .opt_height = 0,
         .opt_reqcolors = 256,
@@ -480,6 +549,7 @@ const struct vo_driver video_out_sixel = {
         .opt_pad_x = -1,
         .opt_rows = 0,
         .opt_cols = 0,
+        .opt_clear = 1,
     },
     .options = (const m_option_t[]) {
         {"dither", OPT_CHOICE(opt_diffuse,
@@ -503,6 +573,7 @@ const struct vo_driver video_out_sixel = {
         {"pad-x", OPT_INT(opt_pad_x)},
         {"rows", OPT_INT(opt_rows)},
         {"cols", OPT_INT(opt_cols)},
+        {"exit-clear", OPT_FLAG(opt_clear), },
         {0}
     },
     .options_prefix = "vo-sixel",

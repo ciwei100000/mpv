@@ -486,7 +486,6 @@ static const struct gl_functions gl_functions[] = {
 #undef DEF_FN
 #undef DEF_FN_NAME
 
-
 // Fill the GL struct with function pointers and extensions from the current
 // GL context. Called by the backend.
 // get_fn: function to resolve function names

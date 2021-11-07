@@ -253,7 +253,7 @@ Available video output drivers are:
     quality or performance by changing the ``--fbo-format`` option to
     ``rgb16f``, ``rgb32f`` or ``rgb``. Known problems include Mesa/Intel not
     accepting ``rgb16``, Mesa sometimes not being compiled with float texture
-    support, and some OS X setups being very slow with ``rgb16`` but fast
+    support, and some macOS setups being very slow with ``rgb16`` but fast
     with ``rgb32f``. If you have problems, you can also try enabling the
     ``--gpu-dumb-mode=yes`` option.
 
@@ -336,7 +336,7 @@ Available video output drivers are:
 ``tct``
     Color Unicode art video output driver that works on a text console.
     By default depends on support of true color by modern terminals to display
-    the images at full color range, but 256-colors outout is also supported (see
+    the images at full color range, but 256-colors output is also supported (see
     below). On Windows it requires an ansi terminal such as mintty.
 
     Since mpv 0.30.0, you may need to use ``--profile=sw-fast`` to get decent
@@ -413,18 +413,22 @@ Available video output drivers are:
         to take into account padding at the report - this only works correctly
         when the overall padding per axis is smaller than the number of cells.
 
+    ``--vo-sixel-exit-clear=<yes|no>`` (default: yes)
+        Whether or not to clear the terminal on quit. When set to no - the last
+        sixel image stays on screen after quit, with the cursor following it.
+
     Sixel image quality options:
 
     ``--vo-sixel-dither=<algo>``
         Selects the dither algorithm which libsixel should apply.
         Can be one of the below list as per libsixel's documentation.
 
-        auto
-            Choose diffuse type automatically
+        auto (Default)
+            Let libsixel choose the dithering method.
         none
             Don't diffuse
         atkinson
-            Diffuse with Bill Atkinson's method. (Default)
+            Diffuse with Bill Atkinson's method.
         fs
             Diffuse with Floyd-Steinberg method
         jajuni
@@ -444,20 +448,18 @@ Available video output drivers are:
         using ``no`` (at the time of writing) will slow down ``xterm``.
 
     ``--vo-sixel-reqcolors=<colors>`` (default: 256)
-        Set up libsixel to use required number of colors for dynamic palette.
-        This value depends on the terminal emulator as well. Xterm supports
-        256 colors.  Can set this to a lower value for faster performance.
-        This option has no effect if fixed palette is used.
+        Has no effect with fixed palette. Set up libsixel to use required
+        number of colors for dynamic palette. This value depends on the
+        terminal emulator as well. Xterm supports 256 colors. Can set this to
+        a lower value for faster performance.
 
     ``--vo-sixel-threshold=<threshold>`` (default: -1)
-        When using a dynamic palette, defines the threshold to change the
+        Has no effect with fixed palette. Defines the threshold to change the
         palette - as percentage of the number of colors, e.g. 20 will change
         the palette when the number of colors changed by 20%. It's a simple
         measure to reduce the number of palette changes, because it can be slow
-        in some terminals (``xterm``), however, it seems that in ``mlterm`` it
-        causes image corruption. The default (-1) will change the palette
-        on every frame and will have better quality, and no corruption in
-        ``mlterm``.
+        in some terminals (``xterm``). The default (-1) will choose a palette
+        on every frame and will have better quality.
 
 ``image``
     Output each frame into an image file in the current directory. Each file
@@ -496,7 +498,7 @@ Available video output drivers are:
         Specify the directory to save the image files to (default: ``./``).
 
 ``libmpv``
-    For use with libmpv direct embedding. As a special case, on OS X it
+    For use with libmpv direct embedding. As a special case, on macOS it
     is used like a normal VO within mpv (cocoa-cb). Otherwise useless in any
     other contexts.
     (See ``<mpv/render.h>``.)
@@ -550,8 +552,13 @@ Available video output drivers are:
         Select the connector to use (usually this is a monitor.) If ``<name>``
         is empty or ``auto``, mpv renders the output on the first available
         connector. Use ``--drm-connector=help`` to get a list of available
-        connectors. When using multiple graphic cards, use the ``<gpu_number>``
-        argument to disambiguate.
+        connectors. The ``<gpu_number>`` argument can be used to disambiguate
+        multiple graphic cards, but is deprecated in favor of ``--drm-device``.
+        (default: empty)
+
+    ``--drm-device=<path>``
+        Select the DRM device file to use. If specified this overrides automatic
+        card selection and any card number specified ``--drm-connector``.
         (default: empty)
 
     ``--drm-mode=<preferred|highest|N|WxH[@R]>``

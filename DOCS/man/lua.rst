@@ -37,6 +37,12 @@ scripting backend to use for it. For Lua, it is ``.lua``. If the extension is
 not recognized, an error is printed. (If an error happens, the extension is
 either mistyped, or the backend was not compiled into your mpv binary.)
 
+mpv internally loads the script's name by stripping the ``.lua`` extension and
+replacing all nonalphanumeric characters with ``_``. E.g., ``my-tools.lua``
+becomes ``my_tools``. If there are several scripts with the same name, it is
+made unique by appending a number. This is the name returned by
+``mp.get_script_name()``.
+
 Entries with ``.disable`` extension are always ignored.
 
 If a script is a directory (either if a directory is passed to ``--script``,
@@ -474,7 +480,7 @@ The ``mp`` module is preloaded, although it can be loaded manually with
             the timer callback function fn is run).
 
     Note that these are methods, and you have to call them using ``:`` instead
-    of ``.`` (Refer to http://www.lua.org/manual/5.2/manual.html#3.4.9 .)
+    of ``.`` (Refer to https://www.lua.org/manual/5.2/manual.html#3.4.9 .)
 
     Example:
 
@@ -500,11 +506,11 @@ The ``mp`` module is preloaded, although it can be loaded manually with
     Return the name of the current script. The name is usually made of the
     filename of the script, with directory and file extension removed. If
     there are several scripts which would have the same name, it's made unique
-    by appending a number.
+    by appending a number. Any nonalphanumeric characters are replaced with ``_``.
 
     .. admonition:: Example
 
-        The script ``/path/to/fooscript.lua`` becomes ``fooscript``.
+        The script ``/path/to/foo-script.lua`` becomes ``foo_script``.
 
 ``mp.get_script_directory()``
     Return the directory if this is a script packaged as directory (see
@@ -618,7 +624,7 @@ are useful only in special situations.
 
 ``mp.get_osd_size()``
     Returns a tuple of ``osd_width, osd_height, osd_par``. The first two give
-    the size of the OSD in pixels (for video ouputs like ``--vo=xv``, this may
+    the size of the OSD in pixels (for video outputs like ``--vo=xv``, this may
     be "scaled" pixels). The third is the display pixel aspect ratio.
 
     May return invalid/nonsense values if OSD is not initialized yet.
@@ -763,7 +769,7 @@ strictly part of the guaranteed API.
         ``mtime``
             time of last modification
         ``ctime``
-            time of last metadata change (Linux) / time of creation (Windows)
+            time of last metadata change
         ``is_file``
             Whether ``path`` is a regular file (boolean)
         ``is_dir``
@@ -775,7 +781,7 @@ strictly part of the guaranteed API.
     The booleans ``is_file`` and ``is_dir`` are provided as a convenience;
     they can be and are derived from ``mode``.
 
-    On error (eg. path does not exist), ``nil, error`` is returned.
+    On error (e.g. path does not exist), ``nil, error`` is returned.
 
 ``utils.split_path(path)``
     Split a path into directory component and filename component, and return

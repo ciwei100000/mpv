@@ -23,6 +23,7 @@
 
 #include <libswscale/swscale.h>
 
+#include "osdep/endian.h"
 #include "sub/osd.h"
 #include "video/fmt-conversion.h"
 #include "video/mp_image.h"
@@ -72,25 +73,6 @@ static void buffer_destroy(void *p)
     wl_shm_pool_destroy(buf->pool);
     munmap(buf->mpi.planes[0], buf->size);
 }
-
-static const struct wl_callback_listener frame_listener;
-
-static void frame_callback(void *data, struct wl_callback *callback, uint32_t time)
-{
-    struct vo_wayland_state *wl = data;
-
-    if (callback)
-        wl_callback_destroy(callback);
-
-    wl->frame_callback = wl_surface_frame(wl->surface);
-    wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
-
-    wl->frame_wait = false;
-}
-
-static const struct wl_callback_listener frame_listener = {
-    frame_callback,
-};
 
 static int allocate_memfd(size_t size)
 {
@@ -142,10 +124,6 @@ static struct buffer *buffer_create(struct vo *vo, int width, int height)
     if (!buf->buffer)
         goto error4;
     wl_buffer_add_listener(buf->buffer, &buffer_listener, buf);
-    if (!wl->frame_callback) {
-        wl->frame_callback = wl_surface_frame(wl->surface);
-        wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
-    }
 
     close(fd);
     talloc_set_destructor(buf, buffer_destroy);
@@ -207,7 +185,7 @@ static int resize(struct vo *vo)
     vo->dheight = height;
     vo_get_src_dst_rects(vo, &p->src, &p->dst, &p->osd);
     p->sws->dst = (struct mp_image_params) {
-        .imgfmt = IMGFMT_BGR0,
+        .imgfmt = MP_SELECT_LE_BE(IMGFMT_BGR0, IMGFMT_0RGB),
         .w = width,
         .h = height,
         .p_w = 1,
@@ -240,11 +218,11 @@ static void draw_image(struct vo *vo, struct mp_image *src)
     struct priv *p = vo->priv;
     struct vo_wayland_state *wl = vo->wl;
     struct buffer *buf;
-
-    if (wl->hidden)
-        return;
-
+    bool render = !wl->hidden || wl->opts->disable_vsync;
     wl->frame_wait = true;
+
+    if (!render)
+        return;
 
     buf = p->free_buffers;
     if (buf) {
@@ -298,6 +276,19 @@ static void flip_page(struct vo *vo)
 
     if (!wl->opts->disable_vsync)
         vo_wayland_wait_frame(wl);
+
+    if (wl->presentation)
+        vo_wayland_sync_swap(wl);
+}
+
+static void get_vsync(struct vo *vo, struct vo_vsync_info *info)
+{
+    struct vo_wayland_state *wl = vo->wl;
+    if (wl->presentation) {
+        info->vsync_duration = wl->vsync_duration;
+        info->skipped_vsyncs = wl->last_skipped_vsyncs;
+        info->last_queue_display_time = wl->last_queue_display_time;
+    }
 }
 
 static void uninit(struct vo *vo)
@@ -313,11 +304,6 @@ static void uninit(struct vo *vo)
     vo_wayland_uninit(vo);
 }
 
-#define OPT_BASE_STRUCT struct priv
-static const m_option_t options[] = {
-    {0}
-};
-
 const struct vo_driver video_out_wlshm = {
     .description = "Wayland SHM video output (software scaling)",
     .name = "wlshm",
@@ -327,9 +313,9 @@ const struct vo_driver video_out_wlshm = {
     .control = control,
     .draw_image = draw_image,
     .flip_page = flip_page,
+    .get_vsync = get_vsync,
     .wakeup = vo_wayland_wakeup,
     .wait_events = vo_wayland_wait_events,
     .uninit = uninit,
     .priv_size = sizeof(struct priv),
-    .options = options,
 };
