@@ -1,12 +1,181 @@
-Description: Provide waf and related scripts
- Note that, since upstream does not directly provide a compressed waf script,
- there's no need for us to repack the upstream tarball.
+From: Alessandro Ghedini <ghedo@debian.org>
+Date: Tue, 7 Sep 2021 10:50:26 +0200
+Subject: Provide waf and related scripts
+
 Origin: vendor
 Forwarded: not-needed
-Author: Alessandro Ghedini <ghedo@debian.org>
-Author: James Cowgill <jcowgill@debian.org>
 Last-Update: 2017-07-19
 
+Note that, since upstream does not directly provide a compressed waf script,
+there's no need for us to repack the upstream tarball.
+---
+ waf                           | 166 +++++++++
+ waflib/Build.py               | 777 ++++++++++++++++++++++++++++++++++++++++
+ waflib/ConfigSet.py           | 165 +++++++++
+ waflib/Configure.py           | 368 +++++++++++++++++++
+ waflib/Context.py             | 406 +++++++++++++++++++++
+ waflib/Errors.py              |  39 ++
+ waflib/Logs.py                | 203 +++++++++++
+ waflib/Node.py                | 478 +++++++++++++++++++++++++
+ waflib/Options.py             | 200 +++++++++++
+ waflib/Runner.py              | 350 ++++++++++++++++++
+ waflib/Scripting.py           | 403 +++++++++++++++++++++
+ waflib/Task.py                | 771 ++++++++++++++++++++++++++++++++++++++++
+ waflib/TaskGen.py             | 471 ++++++++++++++++++++++++
+ waflib/Tools/__init__.py      |   4 +
+ waflib/Tools/ar.py            |  13 +
+ waflib/Tools/asm.py           |  23 ++
+ waflib/Tools/bison.py         |  28 ++
+ waflib/Tools/c.py             |  26 ++
+ waflib/Tools/c_aliases.py     |  60 ++++
+ waflib/Tools/c_config.py      | 805 ++++++++++++++++++++++++++++++++++++++++++
+ waflib/Tools/c_osx.py         | 121 +++++++
+ waflib/Tools/c_preproc.py     | 672 +++++++++++++++++++++++++++++++++++
+ waflib/Tools/c_tests.py       | 152 ++++++++
+ waflib/Tools/ccroot.py        | 479 +++++++++++++++++++++++++
+ waflib/Tools/clang.py         |  20 ++
+ waflib/Tools/clangxx.py       |  20 ++
+ waflib/Tools/compiler_c.py    |  44 +++
+ waflib/Tools/compiler_cxx.py  |  44 +++
+ waflib/Tools/compiler_d.py    |  41 +++
+ waflib/Tools/compiler_fc.py   |  43 +++
+ waflib/Tools/cs.py            | 113 ++++++
+ waflib/Tools/cxx.py           |  26 ++
+ waflib/Tools/d.py             |  54 +++
+ waflib/Tools/d_config.py      |  52 +++
+ waflib/Tools/d_scan.py        | 136 +++++++
+ waflib/Tools/dbus.py          |  29 ++
+ waflib/Tools/dmd.py           |  51 +++
+ waflib/Tools/errcheck.py      | 175 +++++++++
+ waflib/Tools/fc.py            | 108 ++++++
+ waflib/Tools/fc_config.py     | 299 ++++++++++++++++
+ waflib/Tools/fc_scan.py       |  64 ++++
+ waflib/Tools/flex.py          |  38 ++
+ waflib/Tools/g95.py           |  54 +++
+ waflib/Tools/gas.py           |  12 +
+ waflib/Tools/gcc.py           | 104 ++++++
+ waflib/Tools/gdc.py           |  35 ++
+ waflib/Tools/gfortran.py      |  71 ++++
+ waflib/Tools/glib2.py         | 242 +++++++++++++
+ waflib/Tools/gnu_dirs.py      |  66 ++++
+ waflib/Tools/gxx.py           | 104 ++++++
+ waflib/Tools/icc.py           |  20 ++
+ waflib/Tools/icpc.py          |  20 ++
+ waflib/Tools/ifort.py         | 303 ++++++++++++++++
+ waflib/Tools/intltool.py      | 101 ++++++
+ waflib/Tools/irixcc.py        |  51 +++
+ waflib/Tools/javaw.py         | 299 ++++++++++++++++
+ waflib/Tools/ldc2.py          |  36 ++
+ waflib/Tools/lua.py           |  18 +
+ waflib/Tools/md5_tstamp.py    |  24 ++
+ waflib/Tools/msvc.py          | 704 ++++++++++++++++++++++++++++++++++++
+ waflib/Tools/nasm.py          |  16 +
+ waflib/Tools/nobuild.py       |  11 +
+ waflib/Tools/perl.py          |  85 +++++
+ waflib/Tools/python.py        | 410 +++++++++++++++++++++
+ waflib/Tools/qt5.py           | 497 ++++++++++++++++++++++++++
+ waflib/Tools/ruby.py          |  97 +++++
+ waflib/Tools/suncc.py         |  48 +++
+ waflib/Tools/suncxx.py        |  48 +++
+ waflib/Tools/tex.py           | 327 +++++++++++++++++
+ waflib/Tools/vala.py          | 218 ++++++++++++
+ waflib/Tools/waf_unit_test.py | 172 +++++++++
+ waflib/Tools/winres.py        |  52 +++
+ waflib/Tools/xlc.py           |  44 +++
+ waflib/Tools/xlcxx.py         |  44 +++
+ waflib/Utils.py               | 615 ++++++++++++++++++++++++++++++++
+ waflib/__init__.py            |   4 +
+ waflib/ansiterm.py            | 238 +++++++++++++
+ waflib/extras/__init__.py     |   4 +
+ waflib/extras/compat15.py     | 305 ++++++++++++++++
+ waflib/fixpy2.py              |  47 +++
+ waflib/processor.py           |  55 +++
+ 81 files changed, 14138 insertions(+)
+ create mode 100644 waf
+ create mode 100644 waflib/Build.py
+ create mode 100644 waflib/ConfigSet.py
+ create mode 100644 waflib/Configure.py
+ create mode 100644 waflib/Context.py
+ create mode 100644 waflib/Errors.py
+ create mode 100644 waflib/Logs.py
+ create mode 100644 waflib/Node.py
+ create mode 100644 waflib/Options.py
+ create mode 100644 waflib/Runner.py
+ create mode 100644 waflib/Scripting.py
+ create mode 100644 waflib/Task.py
+ create mode 100644 waflib/TaskGen.py
+ create mode 100644 waflib/Tools/__init__.py
+ create mode 100644 waflib/Tools/ar.py
+ create mode 100644 waflib/Tools/asm.py
+ create mode 100644 waflib/Tools/bison.py
+ create mode 100644 waflib/Tools/c.py
+ create mode 100644 waflib/Tools/c_aliases.py
+ create mode 100644 waflib/Tools/c_config.py
+ create mode 100644 waflib/Tools/c_osx.py
+ create mode 100644 waflib/Tools/c_preproc.py
+ create mode 100644 waflib/Tools/c_tests.py
+ create mode 100644 waflib/Tools/ccroot.py
+ create mode 100644 waflib/Tools/clang.py
+ create mode 100644 waflib/Tools/clangxx.py
+ create mode 100644 waflib/Tools/compiler_c.py
+ create mode 100644 waflib/Tools/compiler_cxx.py
+ create mode 100644 waflib/Tools/compiler_d.py
+ create mode 100644 waflib/Tools/compiler_fc.py
+ create mode 100644 waflib/Tools/cs.py
+ create mode 100644 waflib/Tools/cxx.py
+ create mode 100644 waflib/Tools/d.py
+ create mode 100644 waflib/Tools/d_config.py
+ create mode 100644 waflib/Tools/d_scan.py
+ create mode 100644 waflib/Tools/dbus.py
+ create mode 100644 waflib/Tools/dmd.py
+ create mode 100644 waflib/Tools/errcheck.py
+ create mode 100644 waflib/Tools/fc.py
+ create mode 100644 waflib/Tools/fc_config.py
+ create mode 100644 waflib/Tools/fc_scan.py
+ create mode 100644 waflib/Tools/flex.py
+ create mode 100644 waflib/Tools/g95.py
+ create mode 100644 waflib/Tools/gas.py
+ create mode 100644 waflib/Tools/gcc.py
+ create mode 100644 waflib/Tools/gdc.py
+ create mode 100644 waflib/Tools/gfortran.py
+ create mode 100644 waflib/Tools/glib2.py
+ create mode 100644 waflib/Tools/gnu_dirs.py
+ create mode 100644 waflib/Tools/gxx.py
+ create mode 100644 waflib/Tools/icc.py
+ create mode 100644 waflib/Tools/icpc.py
+ create mode 100644 waflib/Tools/ifort.py
+ create mode 100644 waflib/Tools/intltool.py
+ create mode 100644 waflib/Tools/irixcc.py
+ create mode 100644 waflib/Tools/javaw.py
+ create mode 100644 waflib/Tools/ldc2.py
+ create mode 100644 waflib/Tools/lua.py
+ create mode 100644 waflib/Tools/md5_tstamp.py
+ create mode 100644 waflib/Tools/msvc.py
+ create mode 100644 waflib/Tools/nasm.py
+ create mode 100644 waflib/Tools/nobuild.py
+ create mode 100644 waflib/Tools/perl.py
+ create mode 100644 waflib/Tools/python.py
+ create mode 100644 waflib/Tools/qt5.py
+ create mode 100644 waflib/Tools/ruby.py
+ create mode 100644 waflib/Tools/suncc.py
+ create mode 100644 waflib/Tools/suncxx.py
+ create mode 100644 waflib/Tools/tex.py
+ create mode 100644 waflib/Tools/vala.py
+ create mode 100644 waflib/Tools/waf_unit_test.py
+ create mode 100644 waflib/Tools/winres.py
+ create mode 100644 waflib/Tools/xlc.py
+ create mode 100644 waflib/Tools/xlcxx.py
+ create mode 100644 waflib/Utils.py
+ create mode 100644 waflib/__init__.py
+ create mode 100644 waflib/ansiterm.py
+ create mode 100644 waflib/extras/__init__.py
+ create mode 100644 waflib/extras/compat15.py
+ create mode 100644 waflib/fixpy2.py
+ create mode 100644 waflib/processor.py
+
+diff --git a/waf b/waf
+new file mode 100644
+index 0000000..158e0cf
 --- /dev/null
 +++ b/waf
 @@ -0,0 +1,166 @@
@@ -176,6 +345,9 @@ Last-Update: 2017-07-19
 +	from waflib import Scripting
 +	Scripting.waf_entry_point(cwd, VERSION, wafdir)
 +
+diff --git a/waflib/Build.py b/waflib/Build.py
+new file mode 100644
+index 0000000..44c640a
 --- /dev/null
 +++ b/waflib/Build.py
 @@ -0,0 +1,777 @@
@@ -956,6 +1128,9 @@ Last-Update: 2017-07-19
 +		if not self.all_envs:
 +			self.load_envs()
 +		self.recurse([self.run_dir])
+diff --git a/waflib/ConfigSet.py b/waflib/ConfigSet.py
+new file mode 100644
+index 0000000..8212586
 --- /dev/null
 +++ b/waflib/ConfigSet.py
 @@ -0,0 +1,165 @@
@@ -1124,6 +1299,9 @@ Last-Update: 2017-07-19
 +		self.undo_stack.pop(-1)
 +	def revert(self):
 +		self.table=self.undo_stack.pop(-1)
+diff --git a/waflib/Configure.py b/waflib/Configure.py
+new file mode 100644
+index 0000000..0e16fd2
 --- /dev/null
 +++ b/waflib/Configure.py
 @@ -0,0 +1,368 @@
@@ -1495,6 +1673,9 @@ Last-Update: 2017-07-19
 +	else:
 +		self.end_msg(self.ret_msg(kw['okmsg'],kw),**kw)
 +	return ret
+diff --git a/waflib/Context.py b/waflib/Context.py
+new file mode 100644
+index 0000000..b583930
 --- /dev/null
 +++ b/waflib/Context.py
 @@ -0,0 +1,406 @@
@@ -1904,6 +2085,9 @@ Last-Update: 2017-07-19
 +	finally:
 +		if not with_sys_path:
 +			sys.path+=back_path
+diff --git a/waflib/Errors.py b/waflib/Errors.py
+new file mode 100644
+index 0000000..3ef76fc
 --- /dev/null
 +++ b/waflib/Errors.py
 @@ -0,0 +1,39 @@
@@ -1946,6 +2130,9 @@ Last-Update: 2017-07-19
 +	pass
 +class TaskNotReady(WafError):
 +	pass
+diff --git a/waflib/Logs.py b/waflib/Logs.py
+new file mode 100644
+index 0000000..4a1f7f8
 --- /dev/null
 +++ b/waflib/Logs.py
 @@ -0,0 +1,203 @@
@@ -2152,6 +2339,9 @@ Last-Update: 2017-07-19
 +		pass
 +def pprint(col,msg,label='',sep='\n'):
 +	info('%s%s%s %s',colors(col),msg,colors.NORMAL,label,extra={'terminator':sep})
+diff --git a/waflib/Node.py b/waflib/Node.py
+new file mode 100644
+index 0000000..dc979d6
 --- /dev/null
 +++ b/waflib/Node.py
 @@ -0,0 +1,478 @@
@@ -2633,6 +2823,9 @@ Last-Update: 2017-07-19
 +pickle_lock=Utils.threading.Lock()
 +class Nod3(Node):
 +	pass
+diff --git a/waflib/Options.py b/waflib/Options.py
+new file mode 100644
+index 0000000..b61c60a
 --- /dev/null
 +++ b/waflib/Options.py
 @@ -0,0 +1,200 @@
@@ -2836,6 +3029,9 @@ Last-Update: 2017-07-19
 +		super(OptionsContext,self).execute()
 +		self.parse_args()
 +		Utils.alloc_process_pool(options.jobs)
+diff --git a/waflib/Runner.py b/waflib/Runner.py
+new file mode 100644
+index 0000000..c6480a3
 --- /dev/null
 +++ b/waflib/Runner.py
 @@ -0,0 +1,350 @@
@@ -3189,6 +3385,9 @@ Last-Update: 2017-07-19
 +				raise Errors.WafError('Task dependency cycle in "run_after" constraints: %s'%''.join(lst))
 +		for x in tasks:
 +			visit(x,[])
+diff --git a/waflib/Scripting.py b/waflib/Scripting.py
+new file mode 100644
+index 0000000..f7a3809
 --- /dev/null
 +++ b/waflib/Scripting.py
 @@ -0,0 +1,403 @@
@@ -3595,6 +3794,9 @@ Last-Update: 2017-07-19
 +			return execute_method(self)
 +	return execute
 +Build.BuildContext.execute=autoconfigure(Build.BuildContext.execute)
+diff --git a/waflib/Task.py b/waflib/Task.py
+new file mode 100644
+index 0000000..400910f
 --- /dev/null
 +++ b/waflib/Task.py
 @@ -0,0 +1,771 @@
@@ -4369,6 +4571,9 @@ Last-Update: 2017-07-19
 +	cls.sig_explicit_deps=sig_explicit_deps
 +	return cls
 +TaskBase=Task
+diff --git a/waflib/TaskGen.py b/waflib/TaskGen.py
+new file mode 100644
+index 0000000..b857eec
 --- /dev/null
 +++ b/waflib/TaskGen.py
 @@ -0,0 +1,471 @@
@@ -4843,6 +5048,9 @@ Last-Update: 2017-07-19
 +		if inst_to:
 +			self.install_task=self.add_install_files(install_to=inst_to,install_from=b,chmod=getattr(self,'chmod',Utils.O644))
 +	self.source=[]
+diff --git a/waflib/Tools/__init__.py b/waflib/Tools/__init__.py
+new file mode 100644
+index 0000000..55e850d
 --- /dev/null
 +++ b/waflib/Tools/__init__.py
 @@ -0,0 +1,4 @@
@@ -4850,6 +5058,9 @@ Last-Update: 2017-07-19
 +# encoding: utf-8
 +# WARNING! Do not edit! https://waf.io/book/index.html#_obtaining_the_waf_file
 +
+diff --git a/waflib/Tools/ar.py b/waflib/Tools/ar.py
+new file mode 100644
+index 0000000..5921ce1
 --- /dev/null
 +++ b/waflib/Tools/ar.py
 @@ -0,0 +1,13 @@
@@ -4866,6 +5077,9 @@ Last-Update: 2017-07-19
 +	conf.add_os_flags('ARFLAGS')
 +	if not conf.env.ARFLAGS:
 +		conf.env.ARFLAGS=['rcs']
+diff --git a/waflib/Tools/asm.py b/waflib/Tools/asm.py
+new file mode 100644
+index 0000000..d6a6d45
 --- /dev/null
 +++ b/waflib/Tools/asm.py
 @@ -0,0 +1,23 @@
@@ -4892,6 +5106,9 @@ Last-Update: 2017-07-19
 +	pass
 +def configure(conf):
 +	conf.env.ASMPATH_ST='-I%s'
+diff --git a/waflib/Tools/bison.py b/waflib/Tools/bison.py
+new file mode 100644
+index 0000000..146921f
 --- /dev/null
 +++ b/waflib/Tools/bison.py
 @@ -0,0 +1,28 @@
@@ -4923,6 +5140,9 @@ Last-Update: 2017-07-19
 +def configure(conf):
 +	conf.find_program('bison',var='BISON')
 +	conf.env.BISONFLAGS=['-d']
+diff --git a/waflib/Tools/c.py b/waflib/Tools/c.py
+new file mode 100644
+index 0000000..7c794f1
 --- /dev/null
 +++ b/waflib/Tools/c.py
 @@ -0,0 +1,26 @@
@@ -4952,6 +5172,9 @@ Last-Update: 2017-07-19
 +	inst_to='${LIBDIR}'
 +class cstlib(stlink_task):
 +	pass
+diff --git a/waflib/Tools/c_aliases.py b/waflib/Tools/c_aliases.py
+new file mode 100644
+index 0000000..b1c1031
 --- /dev/null
 +++ b/waflib/Tools/c_aliases.py
 @@ -0,0 +1,60 @@
@@ -5015,6 +5238,9 @@ Last-Update: 2017-07-19
 +def objects(bld,*k,**kw):
 +	set_features(kw,'objects')
 +	return bld(*k,**kw)
+diff --git a/waflib/Tools/c_config.py b/waflib/Tools/c_config.py
+new file mode 100644
+index 0000000..6347171
 --- /dev/null
 +++ b/waflib/Tools/c_config.py
 @@ -0,0 +1,805 @@
@@ -5823,6 +6049,9 @@ Last-Update: 2017-07-19
 +		self.env.revert()
 +	else:
 +		self.env.commit()
+diff --git a/waflib/Tools/c_osx.py b/waflib/Tools/c_osx.py
+new file mode 100644
+index 0000000..847b433
 --- /dev/null
 +++ b/waflib/Tools/c_osx.py
 @@ -0,0 +1,121 @@
@@ -5947,6 +6176,9 @@ Last-Update: 2017-07-19
 +		context=getattr(self,'context',{})
 +		txt=txt.format(**context)
 +		self.outputs[0].write(txt)
+diff --git a/waflib/Tools/c_preproc.py b/waflib/Tools/c_preproc.py
+new file mode 100644
+index 0000000..8781b73
 --- /dev/null
 +++ b/waflib/Tools/c_preproc.py
 @@ -0,0 +1,672 @@
@@ -6622,6 +6854,9 @@ Last-Update: 2017-07-19
 +	tmp=c_parser(nodepaths)
 +	tmp.start(task.inputs[0],task.env)
 +	return(tmp.nodes,tmp.names)
+diff --git a/waflib/Tools/c_tests.py b/waflib/Tools/c_tests.py
+new file mode 100644
+index 0000000..30b9f38
 --- /dev/null
 +++ b/waflib/Tools/c_tests.py
 @@ -0,0 +1,152 @@
@@ -6777,6 +7012,9 @@ Last-Update: 2017-07-19
 +		return tmp[0]
 +	self.check(fragment=ENDIAN_FRAGMENT,features='c grep_for_endianness',msg='Checking for endianness',define='ENDIANNESS',tmp=tmp,okmsg=check_msg)
 +	return tmp[0]
+diff --git a/waflib/Tools/ccroot.py b/waflib/Tools/ccroot.py
+new file mode 100644
+index 0000000..bb807ec
 --- /dev/null
 +++ b/waflib/Tools/ccroot.py
 @@ -0,0 +1,479 @@
@@ -7259,6 +7497,9 @@ Last-Update: 2017-07-19
 +			else:
 +				lst.append(os.path.normpath(os.path.join(base,x)))
 +		self.env[var]=lst
+diff --git a/waflib/Tools/clang.py b/waflib/Tools/clang.py
+new file mode 100644
+index 0000000..9379f5a
 --- /dev/null
 +++ b/waflib/Tools/clang.py
 @@ -0,0 +1,20 @@
@@ -7282,6 +7523,9 @@ Last-Update: 2017-07-19
 +	conf.cc_load_tools()
 +	conf.cc_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Tools/clangxx.py b/waflib/Tools/clangxx.py
+new file mode 100644
+index 0000000..fc97135
 --- /dev/null
 +++ b/waflib/Tools/clangxx.py
 @@ -0,0 +1,20 @@
@@ -7305,6 +7549,9 @@ Last-Update: 2017-07-19
 +	conf.cxx_load_tools()
 +	conf.cxx_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Tools/compiler_c.py b/waflib/Tools/compiler_c.py
+new file mode 100644
+index 0000000..ee607be
 --- /dev/null
 +++ b/waflib/Tools/compiler_c.py
 @@ -0,0 +1,44 @@
@@ -7352,6 +7599,9 @@ Last-Update: 2017-07-19
 +	cc_compiler_opts.add_option('--check-c-compiler',default=None,help='list of C compilers to try [%s]'%test_for_compiler,dest="check_c_compiler")
 +	for x in test_for_compiler.split():
 +		opt.load('%s'%x)
+diff --git a/waflib/Tools/compiler_cxx.py b/waflib/Tools/compiler_cxx.py
+new file mode 100644
+index 0000000..cbd267f
 --- /dev/null
 +++ b/waflib/Tools/compiler_cxx.py
 @@ -0,0 +1,44 @@
@@ -7399,6 +7649,9 @@ Last-Update: 2017-07-19
 +	cxx_compiler_opts.add_option('--check-cxx-compiler',default=None,help='list of C++ compilers to try [%s]'%test_for_compiler,dest="check_cxx_compiler")
 +	for x in test_for_compiler.split():
 +		opt.load('%s'%x)
+diff --git a/waflib/Tools/compiler_d.py b/waflib/Tools/compiler_d.py
+new file mode 100644
+index 0000000..2ca7e26
 --- /dev/null
 +++ b/waflib/Tools/compiler_d.py
 @@ -0,0 +1,41 @@
@@ -7443,6 +7696,9 @@ Last-Update: 2017-07-19
 +	d_compiler_opts.add_option('--check-d-compiler',default=None,help='list of D compilers to try [%s]'%test_for_compiler,dest='check_d_compiler')
 +	for x in test_for_compiler.split():
 +		opt.load('%s'%x)
+diff --git a/waflib/Tools/compiler_fc.py b/waflib/Tools/compiler_fc.py
+new file mode 100644
+index 0000000..8b23a2b
 --- /dev/null
 +++ b/waflib/Tools/compiler_fc.py
 @@ -0,0 +1,43 @@
@@ -7489,6 +7745,9 @@ Last-Update: 2017-07-19
 +	fortran_compiler_opts.add_option('--check-fortran-compiler',default=None,help='list of Fortran compiler to try [%s]'%test_for_compiler,dest="check_fortran_compiler")
 +	for x in test_for_compiler.split():
 +		opt.load('%s'%x)
+diff --git a/waflib/Tools/cs.py b/waflib/Tools/cs.py
+new file mode 100644
+index 0000000..df73c94
 --- /dev/null
 +++ b/waflib/Tools/cs.py
 @@ -0,0 +1,113 @@
@@ -7605,6 +7864,9 @@ Last-Update: 2017-07-19
 +@conf
 +def read_csshlib(self,name,paths=[]):
 +	return self(name=name,features='fake_lib',lib_paths=paths,lib_type='csshlib')
+diff --git a/waflib/Tools/cxx.py b/waflib/Tools/cxx.py
+new file mode 100644
+index 0000000..e63ad8b
 --- /dev/null
 +++ b/waflib/Tools/cxx.py
 @@ -0,0 +1,26 @@
@@ -7634,6 +7896,9 @@ Last-Update: 2017-07-19
 +	inst_to='${LIBDIR}'
 +class cxxstlib(stlink_task):
 +	pass
+diff --git a/waflib/Tools/d.py b/waflib/Tools/d.py
+new file mode 100644
+index 0000000..6d1c3c6
 --- /dev/null
 +++ b/waflib/Tools/d.py
 @@ -0,0 +1,54 @@
@@ -7691,6 +7956,9 @@ Last-Update: 2017-07-19
 +		if not node:
 +			raise Errors.WafError('file %r not found on d obj'%i[0])
 +		self.create_task('d_header',node,node.change_ext('.di'))
+diff --git a/waflib/Tools/d_config.py b/waflib/Tools/d_config.py
+new file mode 100644
+index 0000000..3b4bdf0
 --- /dev/null
 +++ b/waflib/Tools/d_config.py
 @@ -0,0 +1,52 @@
@@ -7746,6 +8014,9 @@ Last-Update: 2017-07-19
 +	ret=self.check_cc(features='d dprogram',fragment=DLIB,compile_filename='test.d',execute=execute,define_ret=True)
 +	if execute:
 +		self.env.DLIBRARY=ret.strip()
+diff --git a/waflib/Tools/d_scan.py b/waflib/Tools/d_scan.py
+new file mode 100644
+index 0000000..09ccfa9
 --- /dev/null
 +++ b/waflib/Tools/d_scan.py
 @@ -0,0 +1,136 @@
@@ -7885,6 +8156,9 @@ Last-Update: 2017-07-19
 +	nodes=gruik.nodes
 +	names=gruik.names
 +	return(nodes,names)
+diff --git a/waflib/Tools/dbus.py b/waflib/Tools/dbus.py
+new file mode 100644
+index 0000000..c54ab7a
 --- /dev/null
 +++ b/waflib/Tools/dbus.py
 @@ -0,0 +1,29 @@
@@ -7917,6 +8191,9 @@ Last-Update: 2017-07-19
 +	shell=True
 +def configure(conf):
 +	conf.find_program('dbus-binding-tool',var='DBUS_BINDING_TOOL')
+diff --git a/waflib/Tools/dmd.py b/waflib/Tools/dmd.py
+new file mode 100644
+index 0000000..2711628
 --- /dev/null
 +++ b/waflib/Tools/dmd.py
 @@ -0,0 +1,51 @@
@@ -7971,6 +8248,9 @@ Last-Update: 2017-07-19
 +	conf.d_platform_flags()
 +	if str(conf.env.D).find('ldc')>-1:
 +		conf.common_flags_ldc()
+diff --git a/waflib/Tools/errcheck.py b/waflib/Tools/errcheck.py
+new file mode 100644
+index 0000000..f993e58
 --- /dev/null
 +++ b/waflib/Tools/errcheck.py
 @@ -0,0 +1,175 @@
@@ -8149,6 +8429,9 @@ Last-Update: 2017-07-19
 +	ConfigSet.ConfigSet.__getattr__=_getattr
 +def options(opt):
 +	enhance_lib()
+diff --git a/waflib/Tools/fc.py b/waflib/Tools/fc.py
+new file mode 100644
+index 0000000..7e63b7c
 --- /dev/null
 +++ b/waflib/Tools/fc.py
 @@ -0,0 +1,108 @@
@@ -8260,6 +8543,9 @@ Last-Update: 2017-07-19
 +			bld.to_log('out: %s\n'%bld.out)
 +		if bld.err:
 +			bld.to_log('err: %s\n'%bld.err)
+diff --git a/waflib/Tools/fc_config.py b/waflib/Tools/fc_config.py
+new file mode 100644
+index 0000000..d0d4c45
 --- /dev/null
 +++ b/waflib/Tools/fc_config.py
 @@ -0,0 +1,299 @@
@@ -8562,6 +8848,9 @@ Last-Update: 2017-07-19
 +		self.env.revert()
 +	else:
 +		self.env.commit()
+diff --git a/waflib/Tools/fc_scan.py b/waflib/Tools/fc_scan.py
+new file mode 100644
+index 0000000..c07a22d
 --- /dev/null
 +++ b/waflib/Tools/fc_scan.py
 @@ -0,0 +1,64 @@
@@ -8629,6 +8918,9 @@ Last-Update: 2017-07-19
 +		if not found:
 +			if not filename in self.names:
 +				self.names.append(filename)
+diff --git a/waflib/Tools/flex.py b/waflib/Tools/flex.py
+new file mode 100644
+index 0000000..1f1620e
 --- /dev/null
 +++ b/waflib/Tools/flex.py
 @@ -0,0 +1,38 @@
@@ -8670,6 +8962,9 @@ Last-Update: 2017-07-19
 +	conf.env.FLEXFLAGS=['-t']
 +	if re.search(r"\\msys\\[0-9.]+\\bin\\flex.exe$",conf.env.FLEX[0]):
 +		conf.env.FLEX_MSYS=True
+diff --git a/waflib/Tools/g95.py b/waflib/Tools/g95.py
+new file mode 100644
+index 0000000..b62adcd
 --- /dev/null
 +++ b/waflib/Tools/g95.py
 @@ -0,0 +1,54 @@
@@ -8727,6 +9022,9 @@ Last-Update: 2017-07-19
 +	conf.fc_add_flags()
 +	conf.g95_flags()
 +	conf.g95_modifier_platform()
+diff --git a/waflib/Tools/gas.py b/waflib/Tools/gas.py
+new file mode 100644
+index 0000000..4817c23
 --- /dev/null
 +++ b/waflib/Tools/gas.py
 @@ -0,0 +1,12 @@
@@ -8742,6 +9040,9 @@ Last-Update: 2017-07-19
 +	conf.env.ASLNK_TGT_F=['-o']
 +	conf.find_ar()
 +	conf.load('asm')
+diff --git a/waflib/Tools/gcc.py b/waflib/Tools/gcc.py
+new file mode 100644
+index 0000000..12afcc6
 --- /dev/null
 +++ b/waflib/Tools/gcc.py
 @@ -0,0 +1,104 @@
@@ -8849,6 +9150,9 @@ Last-Update: 2017-07-19
 +	conf.cc_add_flags()
 +	conf.link_add_flags()
 +	conf.check_gcc_o_space()
+diff --git a/waflib/Tools/gdc.py b/waflib/Tools/gdc.py
+new file mode 100644
+index 0000000..c809930
 --- /dev/null
 +++ b/waflib/Tools/gdc.py
 @@ -0,0 +1,35 @@
@@ -8887,6 +9191,9 @@ Last-Update: 2017-07-19
 +	conf.load('d')
 +	conf.common_flags_gdc()
 +	conf.d_platform_flags()
+diff --git a/waflib/Tools/gfortran.py b/waflib/Tools/gfortran.py
+new file mode 100644
+index 0000000..47d005a
 --- /dev/null
 +++ b/waflib/Tools/gfortran.py
 @@ -0,0 +1,71 @@
@@ -8961,6 +9268,9 @@ Last-Update: 2017-07-19
 +	conf.gfortran_flags()
 +	conf.gfortran_modifier_platform()
 +	conf.check_gfortran_o_space()
+diff --git a/waflib/Tools/glib2.py b/waflib/Tools/glib2.py
+new file mode 100644
+index 0000000..ba5a71e
 --- /dev/null
 +++ b/waflib/Tools/glib2.py
 @@ -0,0 +1,242 @@
@@ -9206,6 +9516,9 @@ Last-Update: 2017-07-19
 +def options(opt):
 +	gr=opt.add_option_group('Installation directories')
 +	gr.add_option('--gsettingsschemadir',help='GSettings schema location [DATADIR/glib-2.0/schemas]',default='',dest='GSETTINGSSCHEMADIR')
+diff --git a/waflib/Tools/gnu_dirs.py b/waflib/Tools/gnu_dirs.py
+new file mode 100644
+index 0000000..21a6288
 --- /dev/null
 +++ b/waflib/Tools/gnu_dirs.py
 @@ -0,0 +1,66 @@
@@ -9275,6 +9588,9 @@ Last-Update: 2017-07-19
 +		str_default=default
 +		str_help='%s [%s]'%(help,re.sub(r'\$\{([^}]+)\}',r'\1',str_default))
 +		dirs_options.add_option(option_name,help=str_help,default='',dest=name.upper())
+diff --git a/waflib/Tools/gxx.py b/waflib/Tools/gxx.py
+new file mode 100644
+index 0000000..1ba1393
 --- /dev/null
 +++ b/waflib/Tools/gxx.py
 @@ -0,0 +1,104 @@
@@ -9382,6 +9698,9 @@ Last-Update: 2017-07-19
 +	conf.cxx_add_flags()
 +	conf.link_add_flags()
 +	conf.check_gcc_o_space('cxx')
+diff --git a/waflib/Tools/icc.py b/waflib/Tools/icc.py
+new file mode 100644
+index 0000000..bffd7d1
 --- /dev/null
 +++ b/waflib/Tools/icc.py
 @@ -0,0 +1,20 @@
@@ -9405,6 +9724,9 @@ Last-Update: 2017-07-19
 +	conf.cc_load_tools()
 +	conf.cc_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Tools/icpc.py b/waflib/Tools/icpc.py
+new file mode 100644
+index 0000000..f7bdb0f
 --- /dev/null
 +++ b/waflib/Tools/icpc.py
 @@ -0,0 +1,20 @@
@@ -9428,6 +9750,9 @@ Last-Update: 2017-07-19
 +	conf.cxx_load_tools()
 +	conf.cxx_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Tools/ifort.py b/waflib/Tools/ifort.py
+new file mode 100644
+index 0000000..2cbae10
 --- /dev/null
 +++ b/waflib/Tools/ifort.py
 @@ -0,0 +1,303 @@
@@ -9734,6 +10059,9 @@ Last-Update: 2017-07-19
 +		man_node=out_node.parent.find_or_declare(out_node.name+'.manifest')
 +		self.link_task.outputs.append(man_node)
 +		self.env.DO_MANIFEST=True
+diff --git a/waflib/Tools/intltool.py b/waflib/Tools/intltool.py
+new file mode 100644
+index 0000000..d799402
 --- /dev/null
 +++ b/waflib/Tools/intltool.py
 @@ -0,0 +1,101 @@
@@ -9838,6 +10166,9 @@ Last-Update: 2017-07-19
 +	conf.find_intltool_merge()
 +	if conf.env.CC or conf.env.CXX:
 +		conf.check(header_name='locale.h')
+diff --git a/waflib/Tools/irixcc.py b/waflib/Tools/irixcc.py
+new file mode 100644
+index 0000000..06099ff
 --- /dev/null
 +++ b/waflib/Tools/irixcc.py
 @@ -0,0 +1,51 @@
@@ -9892,6 +10223,9 @@ Last-Update: 2017-07-19
 +	conf.cc_load_tools()
 +	conf.cc_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Tools/javaw.py b/waflib/Tools/javaw.py
+new file mode 100644
+index 0000000..8b7ab2a
 --- /dev/null
 +++ b/waflib/Tools/javaw.py
 @@ -0,0 +1,299 @@
@@ -10194,6 +10528,9 @@ Last-Update: 2017-07-19
 +			break
 +	else:
 +		conf.fatal('could not find lib jvm in %r (see config.log)'%libDirs)
+diff --git a/waflib/Tools/ldc2.py b/waflib/Tools/ldc2.py
+new file mode 100644
+index 0000000..40d435e
 --- /dev/null
 +++ b/waflib/Tools/ldc2.py
 @@ -0,0 +1,36 @@
@@ -10233,6 +10570,9 @@ Last-Update: 2017-07-19
 +	conf.load('d')
 +	conf.common_flags_ldc2()
 +	conf.d_platform_flags()
+diff --git a/waflib/Tools/lua.py b/waflib/Tools/lua.py
+new file mode 100644
+index 0000000..7c6a682
 --- /dev/null
 +++ b/waflib/Tools/lua.py
 @@ -0,0 +1,18 @@
@@ -10254,6 +10594,9 @@ Last-Update: 2017-07-19
 +	color='PINK'
 +def configure(conf):
 +	conf.find_program('luac',var='LUAC')
+diff --git a/waflib/Tools/md5_tstamp.py b/waflib/Tools/md5_tstamp.py
+new file mode 100644
+index 0000000..0d0faa0
 --- /dev/null
 +++ b/waflib/Tools/md5_tstamp.py
 @@ -0,0 +1,24 @@
@@ -10281,6 +10624,9 @@ Last-Update: 2017-07-19
 +	return ret
 +h_file.__doc__=Node.Node.h_file.__doc__
 +Node.Node.h_file=h_file
+diff --git a/waflib/Tools/msvc.py b/waflib/Tools/msvc.py
+new file mode 100644
+index 0000000..662fa61
 --- /dev/null
 +++ b/waflib/Tools/msvc.py
 @@ -0,0 +1,704 @@
@@ -10988,6 +11334,9 @@ Last-Update: 2017-07-19
 +@after_method('propagate_uselib_vars')
 +def make_windows_app(self):
 +	make_winapp(self,'WINAPI_FAMILY_DESKTOP_APP')
+diff --git a/waflib/Tools/nasm.py b/waflib/Tools/nasm.py
+new file mode 100644
+index 0000000..a107298
 --- /dev/null
 +++ b/waflib/Tools/nasm.py
 @@ -0,0 +1,16 @@
@@ -11007,6 +11356,9 @@ Last-Update: 2017-07-19
 +	conf.env.ASLNK_TGT_F=['-o']
 +	conf.load('asm')
 +	conf.env.ASMPATH_ST='-I%s'+os.sep
+diff --git a/waflib/Tools/nobuild.py b/waflib/Tools/nobuild.py
+new file mode 100644
+index 0000000..beb2217
 --- /dev/null
 +++ b/waflib/Tools/nobuild.py
 @@ -0,0 +1,11 @@
@@ -11021,6 +11373,9 @@ Last-Update: 2017-07-19
 +			x.write('')
 +	for(name,cls)in Task.classes.items():
 +		cls.run=run
+diff --git a/waflib/Tools/perl.py b/waflib/Tools/perl.py
+new file mode 100644
+index 0000000..ee86113
 --- /dev/null
 +++ b/waflib/Tools/perl.py
 @@ -0,0 +1,85 @@
@@ -11109,6 +11464,9 @@ Last-Update: 2017-07-19
 +def options(opt):
 +	opt.add_option('--with-perl-binary',type='string',dest='perlbinary',help='Specify alternate perl binary',default=None)
 +	opt.add_option('--with-perl-archdir',type='string',dest='perlarchdir',help='Specify directory where to install arch specific files',default=None)
+diff --git a/waflib/Tools/python.py b/waflib/Tools/python.py
+new file mode 100644
+index 0000000..3b7947f
 --- /dev/null
 +++ b/waflib/Tools/python.py
 @@ -0,0 +1,410 @@
@@ -11522,6 +11880,9 @@ Last-Update: 2017-07-19
 +	pyopt.add_option('--python',dest="python",help='python binary to be used [Default: %s]'%sys.executable)
 +	pyopt.add_option('--pythondir',dest='pythondir',help='Installation path for python modules (py, platform-independent .py and .pyc files)')
 +	pyopt.add_option('--pythonarchdir',dest='pythonarchdir',help='Installation path for python extension (pyext, platform-dependent .so or .dylib files)')
+diff --git a/waflib/Tools/qt5.py b/waflib/Tools/qt5.py
+new file mode 100644
+index 0000000..6f5f136
 --- /dev/null
 +++ b/waflib/Tools/qt5.py
 @@ -0,0 +1,497 @@
@@ -12022,6 +12383,9 @@ Last-Update: 2017-07-19
 +		opt.add_option('--'+i,type='string',default='',dest=i)
 +	opt.add_option('--translate',action='store_true',help='collect translation strings',dest='trans_qt5',default=False)
 +	opt.add_option('--qtextralibs',type='string',default='',dest='qtextralibs',help='additional qt libraries on the system to add to default ones, comma separated')
+diff --git a/waflib/Tools/ruby.py b/waflib/Tools/ruby.py
+new file mode 100644
+index 0000000..887234f
 --- /dev/null
 +++ b/waflib/Tools/ruby.py
 @@ -0,0 +1,97 @@
@@ -12122,6 +12486,9 @@ Last-Update: 2017-07-19
 +	opt.add_option('--with-ruby-archdir',type='string',dest='rubyarchdir',help='Specify directory where to install arch specific files')
 +	opt.add_option('--with-ruby-libdir',type='string',dest='rubylibdir',help='Specify alternate ruby library path')
 +	opt.add_option('--with-ruby-binary',type='string',dest='rubybinary',help='Specify alternate ruby binary')
+diff --git a/waflib/Tools/suncc.py b/waflib/Tools/suncc.py
+new file mode 100644
+index 0000000..676c884
 --- /dev/null
 +++ b/waflib/Tools/suncc.py
 @@ -0,0 +1,48 @@
@@ -12173,6 +12540,9 @@ Last-Update: 2017-07-19
 +	conf.cc_load_tools()
 +	conf.cc_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Tools/suncxx.py b/waflib/Tools/suncxx.py
+new file mode 100644
+index 0000000..0047098
 --- /dev/null
 +++ b/waflib/Tools/suncxx.py
 @@ -0,0 +1,48 @@
@@ -12224,6 +12594,9 @@ Last-Update: 2017-07-19
 +	conf.cxx_load_tools()
 +	conf.cxx_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Tools/tex.py b/waflib/Tools/tex.py
+new file mode 100644
+index 0000000..3a208d8
 --- /dev/null
 +++ b/waflib/Tools/tex.py
 @@ -0,0 +1,327 @@
@@ -12554,6 +12927,9 @@ Last-Update: 2017-07-19
 +		except self.errors.ConfigurationError:
 +			pass
 +	v.DVIPSFLAGS='-Ppdf'
+diff --git a/waflib/Tools/vala.py b/waflib/Tools/vala.py
+new file mode 100644
+index 0000000..2f5a30d
 --- /dev/null
 +++ b/waflib/Tools/vala.py
 @@ -0,0 +1,218 @@
@@ -12775,6 +13151,9 @@ Last-Update: 2017-07-19
 +	opt.load('gnu_dirs')
 +	valaopts=opt.add_option_group('Vala Compiler Options')
 +	valaopts.add_option('--vala-target-glib',default=None,dest='vala_target_glib',metavar='MAJOR.MINOR',help='Target version of glib for Vala GObject code generation')
+diff --git a/waflib/Tools/waf_unit_test.py b/waflib/Tools/waf_unit_test.py
+new file mode 100644
+index 0000000..af07b44
 --- /dev/null
 +++ b/waflib/Tools/waf_unit_test.py
 @@ -0,0 +1,172 @@
@@ -12950,6 +13329,9 @@ Last-Update: 2017-07-19
 +	opt.add_option('--clear-failed',action='store_true',default=False,help='Force failed unit tests to run again next time',dest='clear_failed_tests')
 +	opt.add_option('--testcmd',action='store',default=False,dest='testcmd',help='Run the unit tests using the test-cmd string example "--testcmd="valgrind --error-exitcode=1 %s" to run under valgrind')
 +	opt.add_option('--dump-test-scripts',action='store_true',default=False,help='Create python scripts to help debug tests',dest='dump_test_scripts')
+diff --git a/waflib/Tools/winres.py b/waflib/Tools/winres.py
+new file mode 100644
+index 0000000..ecb362b
 --- /dev/null
 +++ b/waflib/Tools/winres.py
 @@ -0,0 +1,52 @@
@@ -13005,6 +13387,9 @@ Last-Update: 2017-07-19
 +			conf.find_program('windres',var='WINRC',path_list=v.PATH)
 +			v.WINRC_TGT_F='-o'
 +			v.WINRC_SRC_F='-i'
+diff --git a/waflib/Tools/xlc.py b/waflib/Tools/xlc.py
+new file mode 100644
+index 0000000..a86010d
 --- /dev/null
 +++ b/waflib/Tools/xlc.py
 @@ -0,0 +1,44 @@
@@ -13052,6 +13437,9 @@ Last-Update: 2017-07-19
 +	conf.cc_load_tools()
 +	conf.cc_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Tools/xlcxx.py b/waflib/Tools/xlcxx.py
+new file mode 100644
+index 0000000..8a081b6
 --- /dev/null
 +++ b/waflib/Tools/xlcxx.py
 @@ -0,0 +1,44 @@
@@ -13099,6 +13487,9 @@ Last-Update: 2017-07-19
 +	conf.cxx_load_tools()
 +	conf.cxx_add_flags()
 +	conf.link_add_flags()
+diff --git a/waflib/Utils.py b/waflib/Utils.py
+new file mode 100644
+index 0000000..924d1f1
 --- /dev/null
 +++ b/waflib/Utils.py
 @@ -0,0 +1,615 @@
@@ -13717,6 +14108,9 @@ Last-Update: 2017-07-19
 +if os.environ.get('WAF_NO_PREFORK')or sys.platform=='cli'or not sys.executable:
 +	run_process=run_regular_process
 +	get_process=alloc_process_pool=nada
+diff --git a/waflib/__init__.py b/waflib/__init__.py
+new file mode 100644
+index 0000000..55e850d
 --- /dev/null
 +++ b/waflib/__init__.py
 @@ -0,0 +1,4 @@
@@ -13724,6 +14118,9 @@ Last-Update: 2017-07-19
 +# encoding: utf-8
 +# WARNING! Do not edit! https://waf.io/book/index.html#_obtaining_the_waf_file
 +
+diff --git a/waflib/ansiterm.py b/waflib/ansiterm.py
+new file mode 100644
+index 0000000..1d8bc78
 --- /dev/null
 +++ b/waflib/ansiterm.py
 @@ -0,0 +1,238 @@
@@ -13965,6 +14362,9 @@ Last-Update: 2017-07-19
 +			pass
 +		else:
 +			get_term_cols=fun
+diff --git a/waflib/extras/__init__.py b/waflib/extras/__init__.py
+new file mode 100644
+index 0000000..55e850d
 --- /dev/null
 +++ b/waflib/extras/__init__.py
 @@ -0,0 +1,4 @@
@@ -13972,6 +14372,9 @@ Last-Update: 2017-07-19
 +# encoding: utf-8
 +# WARNING! Do not edit! https://waf.io/book/index.html#_obtaining_the_waf_file
 +
+diff --git a/waflib/extras/compat15.py b/waflib/extras/compat15.py
+new file mode 100644
+index 0000000..fb4e578
 --- /dev/null
 +++ b/waflib/extras/compat15.py
 @@ -0,0 +1,305 @@
@@ -14280,6 +14683,9 @@ Last-Update: 2017-07-19
 +	k=[repl.get(key,key)for key in k]
 +	return TaskGen.before_method(*k)
 +TaskGen.before=before
+diff --git a/waflib/fixpy2.py b/waflib/fixpy2.py
+new file mode 100644
+index 0000000..9aa8418
 --- /dev/null
 +++ b/waflib/fixpy2.py
 @@ -0,0 +1,47 @@
@@ -14330,6 +14736,9 @@ Last-Update: 2017-07-19
 +@subst('Context.py')
 +def r5(code):
 +	return code.replace("('Execution failure: %s'%str(e),ex=e)","('Execution failure: %s'%str(e),ex=e),None,sys.exc_info()[2]")
+diff --git a/waflib/processor.py b/waflib/processor.py
+new file mode 100644
+index 0000000..10f7c1b
 --- /dev/null
 +++ b/waflib/processor.py
 @@ -0,0 +1,55 @@
