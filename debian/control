@@ -22,6 +22,7 @@ Build-Depends:
  libdvdnav-dev,
  libegl1-mesa-dev [linux-any],
  libgbm-dev,
+ libffmpeg-nvenc-dev [amd64 arm64 i386],
  libgl1-mesa-dev,
  libjack-dev,
  libjpeg-dev,
@@ -62,6 +63,7 @@ Package: mpv
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Recommends: xdg-utils, youtube-dl (>= 2014.11.26)
+Suggests: libcuda1 [amd64 armf64 i386]
 Multi-Arch: foreign
 Description: video player based on MPlayer/mplayer2
  mpv is a movie player based on MPlayer and mplayer2. It supports a wide
