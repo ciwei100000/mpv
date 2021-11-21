@@ -1,3 +1,12 @@
+mpv (0.34.0-2) unstable; urgency=medium
+
+  * Team upload
+  * debian/control:
+    - Add Build-Depends on libffmpeg-nvenc-dev
+    - Add Suggests on libcuda1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 21 Nov 2021 20:56:13 +0100
+
 mpv (0.34.0-1) unstable; urgency=medium
 
   * Team upload
