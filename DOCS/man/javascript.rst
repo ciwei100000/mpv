@@ -58,7 +58,7 @@ Language features - ECMAScript 5
 The scripting backend which mpv currently uses is MuJS - a compatible minimal
 ES5 interpreter. As such, ``String.substring`` is implemented for instance,
 while the common but non-standard ``String.substr`` is not. Please consult the
-MuJS pages on language features and platform support - http://mujs.com .
+MuJS pages on language features and platform support - https://mujs.com .
 
 Unsupported Lua APIs and their JS alternatives
 ----------------------------------------------
@@ -139,6 +139,8 @@ success, ``fn`` is called always a-sync, ``error`` is empty string on success.
 
 ``mp.get_script_name()``
 
+``mp.get_script_directory()``
+
 ``mp.osd_message(text [,duration])``
 
 ``mp.get_wakeup_pipe()``
@@ -177,7 +179,8 @@ success, ``fn`` is called always a-sync, ``error`` is empty string on success.
 
 ``mp.utils.readdir(path [, filter])`` (LE)
 
-``mp.utils.file_info(path)`` (LE)
+``mp.utils.file_info(path)`` (LE) Note: like lua - this does NOT expand
+meta-paths like ``~~/foo`` (other JS file functions do expand meta paths).
 
 ``mp.utils.split_path(path)``
 
@@ -187,9 +190,11 @@ success, ``fn`` is called always a-sync, ``error`` is empty string on success.
 
 ``mp.utils.subprocess_detached(t)``
 
+``mp.utils.get_env_list()``
+
 ``mp.utils.getpid()`` (LE)
 
-``mp.add_hook(type, priority, fn)``
+``mp.add_hook(type, priority, fn(hook))``
 
 ``mp.options.read_options(obj [, identifier [, on_update]])`` (types:
 string/boolean/number)
@@ -217,7 +222,8 @@ Additional utilities
 
 ``mp.utils.get_user_path(path)``
     Expands (mpv) meta paths like ``~/x``, ``~~/y``, ``~~desktop/z`` etc.
-    ``read_file``, ``write_file`` and ``require`` already use this internaly.
+    ``read_file``, ``write_file``, ``append_file`` and ``require`` already use
+    this internally.
 
 ``mp.utils.read_file(fname [,max])``
     Returns the content of file ``fname`` as string. If ``max`` is provided and
@@ -228,7 +234,12 @@ Additional utilities
     prefixed with ``file://`` as simple protection against accidental arguments
     switch, e.g. ``mp.utils.write_file("file://~/abc.txt", "hello world")``.
 
-Note: ``read_file`` and ``write_file`` throw on errors, allow text content only.
+``mp.utils.append_file(fname, str)``
+    Same as ``mp.utils.write_file`` if the file ``fname`` does not exist. If it
+    does exist then append instead of overwrite.
+
+Note: ``read_file``, ``write_file`` and ``append_file`` throw on errors, allow
+text content only.
 
 ``mp.get_time_ms()``
     Same as ``mp.get_time()`` but in ms instead of seconds.
@@ -300,25 +311,41 @@ do work. In general, this is for mpv modules and not a node.js replacement.
 A ``.js`` file extension is always added to ``id``, e.g. ``require("./foo")``
 will load the file ``./foo.js`` and return its ``exports`` object.
 
-An id is relative (to the script which ``require``'d it) if it starts with
-``./`` or ``../``. Otherwise, it's considered a "top-level id" (CommonJS term).
+An id which starts with ``./`` or ``../`` is relative to the script or module
+which ``require`` it. Otherwise it's considered a top-level id (CommonJS term).
 
-Top level id is evaluated as absolute filesystem path if possible, e.g. ``/x/y``
-or ``~/x``. Otherwise, it's considered a global module id and searched at
-``scripts/modules.js/`` in mpv config dirs - in normal config search order. E.g.
-``require("x")`` is searched as file ``x.js`` at those dirs, and id ``foo/x`` is
-searched as file ``x.js`` inside dir ``foo`` at those dirs.
+Top-level id is evaluated as absolute filesystem path if possible, e.g. ``/x/y``
+or ``~/x``. Otherwise it's considered a global module id and searched according
+to ``mp.module_paths`` in normal array order, e.g. ``require("x")`` tries to
+load ``x.js`` at one of the array paths, and id ``foo/x`` tries to load ``x.js``
+inside dir ``foo`` at one of the paths.
 
-Search paths for global module id's are at the array ``mp.module_paths``, which
-is searched in order. Initially it contains one item: ``~~/scripts/modules.js``
-such that it behaves as described above. Modifying it will affect future
-``require`` calls with global module id's which are not already loaded/cached.
+The ``mp.module_paths`` array is empty by default except for scripts which are
+loaded as a directory where it contains one item - ``<directory>/modules/`` .
+The array may be updated from a script (or using custom init - see below) which
+will affect future calls to ``require`` for global module id's which are not
+already loaded/cached.
 
 No ``global`` variable, but a module's ``this`` at its top lexical scope is the
 global object - also in strict mode. If you have a module which needs ``global``
 as the global object, you could do ``this.global = this;`` before ``require``.
 
 Functions and variables declared at a module don't pollute the global object.
+
+Custom initialization
+---------------------
+
+After mpv initializes the JavaScript environment for a script but before it
+loads the script - it tries to run the file ``init.js`` at the root of the mpv
+configuration directory. Code at this file can update the environment further
+for all scripts. E.g. if it contains ``mp.module_paths.push("/foo")`` then
+``require`` at all scripts will search global module id's also at ``/foo``
+(do NOT do ``mp.module_paths = ["/foo"];`` because this will remove existing
+paths - like ``<script-dir>/modules`` for scripts which load from a directory).
+
+The custom-init file is ignored if mpv is invoked with ``--no-config``.
+
+Before mpv 0.34, the file name was ``.init.js`` (with dot) at the same dir.
 
 The event loop
 --------------

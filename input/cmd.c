@@ -336,11 +336,34 @@ static int pctx_read_token(struct parse_ctx *ctx, bstr *out)
             return -1;
         }
         if (!bstr_eatstart0(&ctx->str, "\"")) {
-            MP_ERR(ctx, "Unterminated quotes: ...>%.*s<.\n", BSTR_P(start));
+            MP_ERR(ctx, "Unterminated double quote: ...>%.*s<.\n", BSTR_P(start));
             return -1;
         }
         return 1;
     }
+    if (bstr_eatstart0(&ctx->str, "'")) {
+        int next = bstrchr(ctx->str, '\'');
+        if (next < 0) {
+            MP_ERR(ctx, "Unterminated single quote: ...>%.*s<.\n", BSTR_P(start));
+            return -1;
+        }
+        *out = bstr_splice(ctx->str, 0, next);
+        ctx->str = bstr_cut(ctx->str, next+1);
+        return 1;
+    }
+    if (ctx->start.len > 1 && bstr_eatstart0(&ctx->str, "`")) {
+        char endquote[2] = {ctx->str.start[0], '`'};
+        ctx->str = bstr_cut(ctx->str, 1);
+        int next = bstr_find(ctx->str, (bstr){endquote, 2});
+        if (next < 0) {
+            MP_ERR(ctx, "Unterminated custom quote: ...>%.*s<.\n", BSTR_P(start));
+            return -1;
+        }
+        *out = bstr_splice(ctx->str, 0, next);
+        ctx->str = bstr_cut(ctx->str, next+2);
+        return 1;
+    }
+
     return read_token(ctx->str, &ctx->str, out) ? 1 : 0;
 }
 
@@ -544,6 +567,15 @@ mp_cmd_t *mp_cmd_clone(mp_cmd_t *cmd)
     return ret;
 }
 
+static int get_arg_count(const struct mp_cmd_def *cmd)
+{
+    for (int i = MP_CMD_DEF_MAX_ARGS - 1; i >= 0; i--) {
+        if (cmd->args[i].type)
+            return i + 1;
+    }
+    return 0;
+}
+
 void mp_cmd_dump(struct mp_log *log, int msgl, char *header, struct mp_cmd *cmd)
 {
     if (!mp_msg_test(log, msgl))
@@ -555,7 +587,9 @@ void mp_cmd_dump(struct mp_log *log, int msgl, char *header, struct mp_cmd *cmd)
         return;
     }
     mp_msg(log, msgl, "%s, flags=%d, args=[", cmd->name, cmd->flags);
+    int argc = get_arg_count(cmd->def);
     for (int n = 0; n < cmd->nargs; n++) {
+        const char *argname = cmd->def->args[MPMIN(n, argc - 1)].name;
         char *s = m_option_print(cmd->args[n].type, &cmd->args[n].v);
         if (n)
             mp_msg(log, msgl, ", ");
@@ -565,7 +599,7 @@ void mp_cmd_dump(struct mp_log *log, int msgl, char *header, struct mp_cmd *cmd)
         };
         char *esc = NULL;
         json_write(&esc, &node);
-        mp_msg(log, msgl, "%s", esc ? esc : "<error>");
+        mp_msg(log, msgl, "%s=%s", argname, esc ? esc : "<error>");
         talloc_free(esc);
         talloc_free(s);
     }
@@ -574,8 +608,10 @@ void mp_cmd_dump(struct mp_log *log, int msgl, char *header, struct mp_cmd *cmd)
 
 bool mp_input_is_repeatable_cmd(struct mp_cmd *cmd)
 {
-    return (cmd->def->allow_auto_repeat) || cmd->def == &mp_cmd_list ||
-           (cmd->flags & MP_ALLOW_REPEAT);
+    if (cmd->def == &mp_cmd_list && cmd->args[0].v.p)
+        cmd = cmd->args[0].v.p;  // list - only 1st cmd is considered
+
+    return (cmd->def->allow_auto_repeat) || (cmd->flags & MP_ALLOW_REPEAT);
 }
 
 bool mp_input_is_scalable_cmd(struct mp_cmd *cmd)

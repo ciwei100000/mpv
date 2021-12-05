@@ -42,6 +42,16 @@
 #define EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT     0x00000001
 #define EGL_CONTEXT_OPENGL_FORWARD_COMPATIBLE   0x31B1
 #define EGL_OPENGL_ES3_BIT                      0x00000040
+typedef intptr_t EGLAttrib;
+#endif
+
+// Not every EGL provider (like RPI) has these.
+#ifndef EGL_CONTEXT_FLAGS_KHR
+#define EGL_CONTEXT_FLAGS_KHR EGL_NONE
+#endif
+
+#ifndef EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR
+#define EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR 0
 #endif
 
 struct mp_egl_config_attr {
@@ -60,6 +70,7 @@ static const struct mp_egl_config_attr mp_egl_attribs[] = {
     MP_EGL_ATTRIB(EGL_COLOR_BUFFER_TYPE),
     MP_EGL_ATTRIB(EGL_CONFIG_CAVEAT),
     MP_EGL_ATTRIB(EGL_CONFORMANT),
+    MP_EGL_ATTRIB(EGL_NATIVE_VISUAL_ID),
 };
 
 static void dump_egl_config(struct mp_log *log, int msgl, EGLDisplay display,
@@ -69,16 +80,29 @@ static void dump_egl_config(struct mp_log *log, int msgl, EGLDisplay display,
         const char *name = mp_egl_attribs[n].name;
         EGLint v = -1;
         if (eglGetConfigAttrib(display, config, mp_egl_attribs[n].attrib, &v)) {
-            mp_msg(log, msgl, "  %s=%d\n", name, v);
+            mp_msg(log, msgl, "  %s=0x%x\n", name, v);
         } else {
             mp_msg(log, msgl, "  %s=<error>\n", name);
         }
     }
 }
 
-// es_version: 0 (core), 2 or 3
+static void *mpegl_get_proc_address(void *ctx, const char *name)
+{
+    void *p = eglGetProcAddress(name);
+#if defined(__GLIBC__) && HAVE_LIBDL
+    // Some crappy ARM/Linux things do not provide EGL 1.5, so above call does
+    // not necessarily return function pointers for core functions. Try to get
+    // them from a loaded GLES lib. As POSIX leaves RTLD_DEFAULT "reserved",
+    // use it only with glibc.
+    if (!p)
+        p = dlsym(RTLD_DEFAULT, name);
+#endif
+    return p;
+}
+
 static bool create_context(struct ra_ctx *ctx, EGLDisplay display,
-                           int es_version, struct mpegl_cb cb,
+                           bool es, struct mpegl_cb cb,
                            EGLContext *out_context, EGLConfig *out_config)
 {
     int msgl = ctx->opts.probing ? MSGL_V : MSGL_FATAL;
@@ -87,23 +111,14 @@ static bool create_context(struct ra_ctx *ctx, EGLDisplay display,
     EGLint rend;
     const char *name;
 
-    switch (es_version) {
-    case 0:
+    if (!es) {
         api = EGL_OPENGL_API;
         rend = EGL_OPENGL_BIT;
         name = "Desktop OpenGL";
-        break;
-    case 2:
+    } else {
         api = EGL_OPENGL_ES_API;
-        rend = EGL_OPENGL_ES2_BIT;
-        name = "GLES 2.x";
-        break;
-    case 3:
-        api = EGL_OPENGL_ES_API;
-        rend = EGL_OPENGL_ES3_BIT;
-        name = "GLES 3.x";
-        break;
-    default: abort();
+        rend = EGL_OPENGL_ES2_BIT | EGL_OPENGL_ES3_BIT;
+        name = "GLES 2.x +";
     }
 
     MP_VERBOSE(ctx, "Trying to create %s context.\n", name);
@@ -155,29 +170,19 @@ static bool create_context(struct ra_ctx *ctx, EGLDisplay display,
     MP_DBG(ctx, "Chosen EGLConfig:\n");
     dump_egl_config(ctx->log, MSGL_DEBUG, display, config);
 
+    int ctx_flags = ctx->opts.debug ? EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR : 0;
     EGLContext *egl_ctx = NULL;
 
-    if (es_version) {
-        if (!ra_gl_ctx_test_version(ctx, MPGL_VER(es_version, 0), true))
-            return false;
-
-        EGLint attrs[] = {
-            EGL_CONTEXT_CLIENT_VERSION, es_version,
-            EGL_NONE
-        };
-
-        egl_ctx = eglCreateContext(display, config, EGL_NO_CONTEXT, attrs);
-    } else {
-        for (int n = 0; mpgl_preferred_gl_versions[n]; n++) {
-            int ver = mpgl_preferred_gl_versions[n];
-            if (!ra_gl_ctx_test_version(ctx, ver, false))
-                continue;
+    if (!es) {
+        for (int n = 0; mpgl_min_required_gl_versions[n]; n++) {
+            int ver = mpgl_min_required_gl_versions[n];
 
             EGLint attrs[] = {
                 EGL_CONTEXT_MAJOR_VERSION, MPGL_VER_GET_MAJOR(ver),
                 EGL_CONTEXT_MINOR_VERSION, MPGL_VER_GET_MINOR(ver),
                 EGL_CONTEXT_OPENGL_PROFILE_MASK,
                     ver >= 320 ? EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT : 0,
+                EGL_CONTEXT_FLAGS_KHR, ctx_flags,
                 EGL_NONE
             };
 
@@ -185,13 +190,17 @@ static bool create_context(struct ra_ctx *ctx, EGLDisplay display,
             if (egl_ctx)
                 break;
         }
+    }
+    if (!egl_ctx) {
+        // Fallback for EGL 1.4 without EGL_KHR_create_context or GLES
+        // Add the context flags only for GLES - GL has been attempted above
+        EGLint attrs[] = {
+            EGL_CONTEXT_CLIENT_VERSION, 2,
+            es ? EGL_CONTEXT_FLAGS_KHR : EGL_NONE, ctx_flags,
+            EGL_NONE
+        };
 
-        if (!egl_ctx && ra_gl_ctx_test_version(ctx, 140, false)) {
-            // Fallback for EGL 1.4 without EGL_KHR_create_context.
-            EGLint attrs[] = { EGL_NONE };
-
-            egl_ctx = eglCreateContext(display, config, EGL_NO_CONTEXT, attrs);
-        }
+        egl_ctx = eglCreateContext(display, config, EGL_NO_CONTEXT, attrs);
     }
 
     if (!egl_ctx) {
@@ -231,11 +240,15 @@ bool mpegl_create_context_cb(struct ra_ctx *ctx, EGLDisplay display,
     MP_VERBOSE(ctx, "EGL_VERSION=%s\nEGL_VENDOR=%s\nEGL_CLIENT_APIS=%s\n",
                STR_OR_ERR(version), STR_OR_ERR(vendor), STR_OR_ERR(apis));
 
-    int es[] = {0, 3, 2}; // preference order
-    for (int i = 0; i < MP_ARRAY_SIZE(es); i++) {
-        if (create_context(ctx, display, es[i], cb, out_context, out_config))
-            return true;
-    }
+    enum gles_mode mode = ra_gl_ctx_get_glesmode(ctx);
+
+    if ((mode == GLES_NO || mode == GLES_AUTO) &&
+        create_context(ctx, display, false, cb, out_context, out_config))
+        return true;
+
+    if ((mode == GLES_YES || mode == GLES_AUTO) &&
+        create_context(ctx, display, true, cb, out_context, out_config))
+        return true;
 
     int msgl = ctx->opts.probing ? MSGL_V : MSGL_ERR;
     MP_MSG(ctx, msgl, "Could not create a GL context.\n");
@@ -248,20 +261,6 @@ static int GLAPIENTRY swap_interval(int interval)
     if (!display)
         return 1;
     return !eglSwapInterval(display, interval);
-}
-
-static void *mpegl_get_proc_address(void *ctx, const char *name)
-{
-    void *p = eglGetProcAddress(name);
-#if defined(__GLIBC__) && HAVE_LIBDL
-    // Some crappy ARM/Linux things do not provide EGL 1.5, so above call does
-    // not necessarily return function pointers for core functions. Try to get
-    // them from a loaded GLES lib. As POSIX leaves RTLD_DEFAULT "reserved",
-    // use it only with glibc.
-    if (!p)
-        p = dlsym(RTLD_DEFAULT, name);
-#endif
-    return p;
 }
 
 // Load gl version and function pointers into *gl.

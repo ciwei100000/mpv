@@ -26,6 +26,8 @@
 
 #include "mpv_talloc.h"
 
+#include "config.h"
+#include "options/m_config.h"
 #include "options/options.h"
 #include "common/common.h"
 #include "common/msg.h"
@@ -43,9 +45,12 @@ struct sd_ass_priv {
     struct ass_track *shadow_track; // for --sub-ass=no rendering
     bool is_converted;
     struct lavc_conv *converter;
+    struct sd_filter **filters;
+    int num_filters;
+    bool clear_once;
     bool on_top;
     struct mp_ass_packer *packer;
-    struct sub_bitmap *bs;
+    struct sub_bitmap_copy_cache *copy_cache;
     char last_text[500];
     struct mp_image_params video_params;
     struct mp_image_params last_params;
@@ -56,6 +61,18 @@ struct sd_ass_priv {
 
 static void mangle_colors(struct sd *sd, struct sub_bitmaps *parts);
 static void fill_plaintext(struct sd *sd, double pts);
+
+static const struct sd_filter_functions *const filters[] = {
+    // Note: list order defines filter order.
+    &sd_filter_sdh,
+#if HAVE_POSIX
+    &sd_filter_regex,
+#endif
+#if HAVE_JAVASCRIPT
+    &sd_filter_jsre,
+#endif
+    NULL,
+};
 
 // Add default styles, if the track does not have any styles yet.
 // Apply style overrides if the user provides any.
@@ -86,6 +103,7 @@ static const char *const font_mimetypes[] = {
     "application/vnd.ms-opentype",
     "application/x-font-ttf",
     "application/x-font", // probably incorrect
+    "application/font-sfnt",
     "font/collection",
     "font/otf",
     "font/sfnt",
@@ -130,6 +148,43 @@ static void add_subtitle_fonts(struct sd *sd)
     }
 }
 
+static void filters_destroy(struct sd *sd)
+{
+    struct sd_ass_priv *ctx = sd->priv;
+
+    for (int n = 0; n < ctx->num_filters; n++) {
+        struct sd_filter *ft = ctx->filters[n];
+        if (ft->driver->uninit)
+            ft->driver->uninit(ft);
+        talloc_free(ft);
+    }
+    ctx->num_filters = 0;
+}
+
+static void filters_init(struct sd *sd)
+{
+    struct sd_ass_priv *ctx = sd->priv;
+
+    filters_destroy(sd);
+
+    for (int n = 0; filters[n]; n++) {
+        struct sd_filter *ft = talloc_ptrtype(ctx, ft);
+        *ft = (struct sd_filter){
+            .global = sd->global,
+            .log = sd->log,
+            .opts = mp_get_config_group(ft, sd->global, &mp_sub_filter_opts),
+            .driver = filters[n],
+            .codec = "ass",
+            .event_format = ctx->ass_track->event_format,
+        };
+        if (ft->driver->init(ft)) {
+            MP_TARRAY_APPEND(ctx, ctx->filters, ctx->num_filters, ft);
+        } else {
+            talloc_free(ft);
+        }
+    }
+}
+
 static void enable_output(struct sd *sd, bool enable)
 {
     struct sd_ass_priv *ctx = sd->priv;
@@ -146,27 +201,10 @@ static void enable_output(struct sd *sd, bool enable)
     }
 }
 
-static int init(struct sd *sd)
+static void assobjects_init(struct sd *sd)
 {
+    struct sd_ass_priv *ctx = sd->priv;
     struct mp_subtitle_opts *opts = sd->opts;
-    struct sd_ass_priv *ctx = talloc_zero(sd, struct sd_ass_priv);
-    sd->priv = ctx;
-
-    char *extradata = sd->codec->extradata;
-    int extradata_size = sd->codec->extradata_size;
-
-    if (strcmp(sd->codec->codec, "ass") != 0) {
-        ctx->is_converted = true;
-        ctx->converter = lavc_conv_create(sd->log, sd->codec->codec, extradata,
-                                          extradata_size);
-        if (!ctx->converter)
-            return -1;
-        extradata = lavc_conv_get_extradata(ctx->converter);
-        extradata_size = extradata ? strlen(extradata) : 0;
-
-        if (strcmp(sd->codec->codec, "eia_608") == 0)
-            ctx->duration_unknown = 1;
-    }
 
     ctx->ass_library = mp_ass_init(sd->global, sd->log);
     ass_set_extract_fonts(ctx->ass_library, opts->use_embedded_fonts);
@@ -184,6 +222,12 @@ static int init(struct sd *sd)
     ctx->shadow_track->PlayResY = 288;
     mp_ass_add_default_styles(ctx->shadow_track, opts);
 
+    char *extradata = sd->codec->extradata;
+    int extradata_size = sd->codec->extradata_size;
+    if (ctx->converter) {
+        extradata = lavc_conv_get_extradata(ctx->converter);
+        extradata_size = extradata ? strlen(extradata) : 0;
+    }
     if (extradata)
         ass_process_codec_private(ctx->ass_track, extradata, extradata_size);
 
@@ -194,10 +238,69 @@ static int init(struct sd *sd)
 #endif
 
     enable_output(sd, true);
+}
+
+static void assobjects_destroy(struct sd *sd)
+{
+    struct sd_ass_priv *ctx = sd->priv;
+
+    ass_free_track(ctx->ass_track);
+    ass_free_track(ctx->shadow_track);
+    enable_output(sd, false);
+    ass_library_done(ctx->ass_library);
+}
+
+static int init(struct sd *sd)
+{
+    struct sd_ass_priv *ctx = talloc_zero(sd, struct sd_ass_priv);
+    sd->priv = ctx;
+
+    // Note: accept "null" as alias for "ass", so EDL delay_open subtitle
+    //       streams work.
+    if (strcmp(sd->codec->codec, "ass") != 0 &&
+        strcmp(sd->codec->codec, "null") != 0)
+    {
+        ctx->is_converted = true;
+        ctx->converter = lavc_conv_create(sd->log, sd->codec->codec,
+                                          sd->codec->extradata,
+                                          sd->codec->extradata_size);
+        if (!ctx->converter)
+            return -1;
+
+        if (strcmp(sd->codec->codec, "eia_608") == 0)
+            ctx->duration_unknown = 1;
+    }
+
+    assobjects_init(sd);
+    filters_init(sd);
 
     ctx->packer = mp_ass_packer_alloc(ctx);
 
     return 0;
+}
+
+// Note: pkt is not necessarily a fully valid refcounted packet.
+static void filter_and_add(struct sd *sd, struct demux_packet *pkt)
+{
+    struct sd_ass_priv *ctx = sd->priv;
+    struct demux_packet *orig_pkt = pkt;
+
+    for (int n = 0; n < ctx->num_filters; n++) {
+        struct sd_filter *ft = ctx->filters[n];
+        struct demux_packet *npkt = ft->driver->filter(ft, pkt);
+        if (pkt != npkt && pkt != orig_pkt)
+            talloc_free(pkt);
+        pkt = npkt;
+        if (!pkt)
+            return;
+    }
+
+    ass_process_chunk(ctx->ass_track, pkt->buffer, pkt->len,
+                      llrint(pkt->pts * 1000),
+                      llrint(pkt->duration * 1000));
+
+    if (pkt != orig_pkt)
+        talloc_free(pkt);
 }
 
 // Test if the packet with the given file position (used as unique ID) was
@@ -247,15 +350,13 @@ static void decode(struct sd *sd, struct demux_packet *packet)
         }
 
         for (int n = 0; r && r[n]; n++) {
-            char *ass_line = r[n];
-            if (sd->opts->sub_filter_SDH)
-                ass_line = filter_SDH(sd, track->event_format, 0, ass_line, 0);
-            if (ass_line)
-                ass_process_chunk(track, ass_line, strlen(ass_line),
-                                  llrint(sub_pts * 1000),
-                                  llrint(sub_duration * 1000));
-            if (sd->opts->sub_filter_SDH)
-                talloc_free(ass_line);
+            struct demux_packet pkt2 = {
+                .pts = sub_pts,
+                .duration = sub_duration,
+                .buffer = r[n],
+                .len = strlen(r[n]),
+            };
+            filter_and_add(sd, &pkt2);
         }
         if (ctx->duration_unknown) {
             for (int n = 0; n < track->n_events - 1; n++) {
@@ -268,18 +369,7 @@ static void decode(struct sd *sd, struct demux_packet *packet)
     } else {
         // Note that for this packet format, libass has an internal mechanism
         // for discarding duplicate (already seen) packets.
-        char *ass_line = packet->buffer;
-        int ass_len = packet->len;
-        if (sd->opts->sub_filter_SDH) {
-            ass_line = filter_SDH(sd, track->event_format, 1, ass_line, ass_len);
-            ass_len = ass_line ? strlen(ass_line) : 0;
-        }
-        if (ass_line)
-            ass_process_chunk(track, ass_line, ass_len,
-                              llrint(packet->pts * 1000),
-                              llrint(packet->duration * 1000));
-        if (sd->opts->sub_filter_SDH)
-            talloc_free(ass_line);
+        filter_and_add(sd, packet);
     }
 }
 
@@ -331,13 +421,11 @@ static void configure_ass(struct sd *sd, struct mp_osd_res *dim,
     ass_set_shaper(priv, opts->ass_shaper);
     int set_force_flags = 0;
     if (total_override)
-        set_force_flags |= ASS_OVERRIDE_BIT_STYLE | ASS_OVERRIDE_BIT_FONT_SIZE;
+        set_force_flags |= ASS_OVERRIDE_BIT_STYLE | ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE;
     if (opts->ass_style_override == 4) // 'scale'
-        set_force_flags |= ASS_OVERRIDE_BIT_FONT_SIZE;
-#if LIBASS_VERSION >= 0x01201001
+        set_force_flags |= ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE;
     if (converted)
         set_force_flags |= ASS_OVERRIDE_BIT_ALIGNMENT;
-#endif
 #ifdef ASS_JUSTIFY_AUTO
     if ((converted || opts->ass_style_override) && opts->ass_justify)
         set_force_flags |= ASS_OVERRIDE_BIT_JUSTIFY;
@@ -431,8 +519,8 @@ static long long find_timestamp(struct sd *sd, double pts)
 
 #undef END
 
-static void get_bitmaps(struct sd *sd, struct mp_osd_res dim, int format,
-                        double pts, struct sub_bitmaps *res)
+static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
+                                       int format, double pts)
 {
     struct sd_ass_priv *ctx = sd->priv;
     struct mp_subtitle_opts *opts = sd->opts;
@@ -441,9 +529,16 @@ static void get_bitmaps(struct sd *sd, struct mp_osd_res dim, int format,
     bool converted = ctx->is_converted || no_ass;
     ASS_Track *track = no_ass ? ctx->shadow_track : ctx->ass_track;
     ASS_Renderer *renderer = ctx->ass_renderer;
+    struct sub_bitmaps *res = &(struct sub_bitmaps){0};
 
     if (pts == MP_NOPTS_VALUE || !renderer)
-        return;
+        goto done;
+
+    // Currently no supported text sub formats support a distinction between forced
+    // and unforced lines, so we just assume everything's unforced and discard everything.
+    // If we ever see a format that makes this distinction, we can add support here.
+    if (opts->forced_subs_only_current)
+        goto done;
 
     double scale = dim.display_par;
     if (!converted && (!opts->ass_style_override ||
@@ -477,14 +572,14 @@ static void get_bitmaps(struct sd *sd, struct mp_osd_res dim, int format,
     ASS_Image *imgs = ass_render_frame(renderer, track, ts, &changed);
     mp_ass_packer_pack(ctx->packer, &imgs, 1, changed, format, res);
 
-    if (!converted && res->num_parts > 0) {
-        // mangle_colors() modifies the color field, so copy the thing.
-        MP_TARRAY_GROW(ctx, ctx->bs, res->num_parts);
-        memcpy(ctx->bs, res->parts, sizeof(ctx->bs[0]) * res->num_parts);
-        res->parts = ctx->bs;
+done:
+    // mangle_colors() modifies the color field, so copy the thing _before_.
+    res = sub_bitmaps_copy(&ctx->copy_cache, res);
 
+    if (!converted && res)
         mangle_colors(sd, res);
-    }
+
+    return res;
 }
 
 struct buf {
@@ -559,7 +654,7 @@ static bool is_whitespace_only(char *s, int len)
     return true;
 }
 
-static char *get_text(struct sd *sd, double pts)
+static char *get_text_buf(struct sd *sd, double pts, enum sd_text_type type)
 {
     struct sd_ass_priv *ctx = sd->priv;
     ASS_Track *track = ctx->ass_track;
@@ -575,7 +670,13 @@ static char *get_text(struct sd *sd, double pts)
         if (ipts >= event->Start && ipts < event->Start + event->Duration) {
             if (event->Text) {
                 int start = b.len;
-                ass_to_plaintext(&b, event->Text);
+                if (type == SD_TEXT_TYPE_PLAIN) {
+                    ass_to_plaintext(&b, event->Text);
+                } else {
+                    char *t = event->Text;
+                    while (*t)
+                        append(&b, *t++);
+                }
                 if (is_whitespace_only(&b.start[start], b.len - start)) {
                     b.len = start;
                 } else {
@@ -591,6 +692,11 @@ static char *get_text(struct sd *sd, double pts)
         b.start[b.len - 1] = '\0';
 
     return ctx->last_text;
+}
+
+static char *get_text(struct sd *sd, double pts, enum sd_text_type type)
+{
+    return talloc_strdup(NULL, get_text_buf(sd, pts, type));
 }
 
 static struct sd_times get_times(struct sd *sd, double pts)
@@ -629,7 +735,7 @@ static void fill_plaintext(struct sd *sd, double pts)
 
     ass_flush_events(track);
 
-    char *text = get_text(sd, pts);
+    char *text = get_text_buf(sd, pts, SD_TEXT_TYPE_PLAIN);
     if (!text)
         return;
 
@@ -664,10 +770,11 @@ static void fill_plaintext(struct sd *sd, double pts)
 static void reset(struct sd *sd)
 {
     struct sd_ass_priv *ctx = sd->priv;
-    if (sd->opts->sub_clear_on_seek || ctx->duration_unknown) {
+    if (sd->opts->sub_clear_on_seek || ctx->duration_unknown || ctx->clear_once) {
         ass_flush_events(ctx->ass_track);
         ctx->num_seen_packets = 0;
         sd->preload_ok = false;
+        ctx->clear_once = false;
     }
     if (ctx->converter)
         lavc_conv_reset(ctx->converter);
@@ -677,12 +784,11 @@ static void uninit(struct sd *sd)
 {
     struct sd_ass_priv *ctx = sd->priv;
 
+    filters_destroy(sd);
     if (ctx->converter)
         lavc_conv_uninit(ctx->converter);
-    ass_free_track(ctx->ass_track);
-    ass_free_track(ctx->shadow_track);
-    enable_output(sd, false);
-    ass_library_done(ctx->ass_library);
+    assobjects_destroy(sd);
+    talloc_free(ctx->copy_cache);
 }
 
 static int control(struct sd *sd, enum sd_ctrl cmd, void *arg)
@@ -704,6 +810,19 @@ static int control(struct sd *sd, enum sd_ctrl cmd, void *arg)
     case SD_CTRL_SET_TOP:
         ctx->on_top = *(bool *)arg;
         return CONTROL_OK;
+    case SD_CTRL_UPDATE_OPTS: {
+        int flags = (uintptr_t)arg;
+        if (flags & UPDATE_SUB_FILT) {
+            filters_destroy(sd);
+            filters_init(sd);
+            ctx->clear_once = true; // allow reloading on seeks
+        }
+        if (flags & UPDATE_SUB_HARD) {
+            assobjects_destroy(sd);
+            assobjects_init(sd);
+        }
+        return CONTROL_OK;
+    }
     default:
         return CONTROL_UNKNOWN;
     }
@@ -828,4 +947,38 @@ static void mangle_colors(struct sd *sd, struct sub_bitmaps *parts)
         mp_map_fixp_color(&vs2rgb, 8, yuv, 8, rgb);
         sb->libass.color = MP_ASS_RGBA(rgb[0], rgb[1], rgb[2], a);
     }
+}
+
+int sd_ass_fmt_offset(const char *evt_fmt)
+{
+    // "Text" is always last (as it's arbitrary content in buf), e.g. format:
+    // "Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+    int n = 0;
+    while (evt_fmt && (evt_fmt = strchr(evt_fmt, ',')))
+         evt_fmt++, n++;
+    return n-1;  // buffer is without the format's Start/End, with ReadOrder
+}
+
+bstr sd_ass_pkt_text(struct sd_filter *ft, struct demux_packet *pkt, int offset)
+{
+    // e.g. pkt->buffer ("4" is ReadOrder): "4,0,Default,,0,0,0,,fifth line"
+    bstr txt = {(char *)pkt->buffer, pkt->len}, t0 = txt;
+    while (offset-- > 0) {
+        int n = bstrchr(txt, ',');
+        if (n < 0) {  // shouldn't happen
+            MP_WARN(ft, "Malformed event '%.*s'\n", BSTR_P(t0));
+            return (bstr){NULL, 0};
+        }
+        txt = bstr_cut(txt, n+1);
+    }
+    return txt;
+}
+
+bstr sd_ass_to_plaintext(char *out, size_t out_siz, const char *in)
+{
+    struct buf b = {out, out_siz, 0};
+    ass_to_plaintext(&b, in);
+    if (b.len < out_siz)
+        out[b.len] = 0;
+    return (bstr){out, b.len};
 }

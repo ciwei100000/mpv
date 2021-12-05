@@ -88,7 +88,6 @@ struct vdpctx {
 
     int                                force_yuv;
     struct mp_vdpau_mixer             *video_mixer;
-    int                                deint;
     int                                pullup;
     float                              denoise;
     float                              sharpen;
@@ -479,7 +478,17 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
     VdpStatus vdp_st;
 
     if (!check_preemption(vo))
-        return -1;
+    {
+        /*
+         * When prempted, leave the reconfig() immediately
+         * without reconfiguring the vo_window and without
+         * initializing the vdpau objects. When recovered
+         * from preemption, if there is a difference between
+         * the VD thread parameters and the VO thread parameters
+         * the reconfig() is triggered again.
+         */
+        return 0;
+    }
 
     VdpChromaType chroma_type = VDP_CHROMA_TYPE_420;
     mp_vdpau_get_format(params->imgfmt, &chroma_type, NULL);
@@ -1061,8 +1070,6 @@ static void checked_resize(struct vo *vo)
 
 static int control(struct vo *vo, uint32_t request, void *data)
 {
-    struct vdpctx *vc = vo->priv;
-
     check_preemption(vo);
 
     switch (request) {
@@ -1079,9 +1086,6 @@ static int control(struct vo *vo, uint32_t request, void *data)
         if (!status_ok(vo))
             return false;
         *(struct mp_image **)data = get_window_screenshot(vo);
-        return true;
-    case VOCTRL_GET_PREF_DEINT:
-        *(int *)data = vc->deint;
         return true;
     }
 
@@ -1115,26 +1119,23 @@ const struct vo_driver video_out_vdpau = {
     .uninit = uninit,
     .priv_size = sizeof(struct vdpctx),
     .options = (const struct m_option []){
-        OPT_INTRANGE("deint", deint, 0, -4, 4),
-        OPT_FLAG("chroma-deint", chroma_deint, 0, OPTDEF_INT(1)),
-        OPT_FLAG("pullup", pullup, 0),
-        OPT_FLOATRANGE("denoise", denoise, 0, 0, 1),
-        OPT_FLOATRANGE("sharpen", sharpen, 0, -1, 1),
-        OPT_INTRANGE("hqscaling", hqscaling, 0, 0, 9),
-        OPT_FLOAT("fps", user_fps, 0),
-        OPT_FLAG("composite-detect", composite_detect, 0, OPTDEF_INT(1)),
-        OPT_INT("queuetime-windowed", flip_offset_window, 0, OPTDEF_INT(50)),
-        OPT_INT("queuetime-fs", flip_offset_fs, 0, OPTDEF_INT(50)),
-        OPT_INTRANGE("output-surfaces", num_output_surfaces, 0,
-                     2, MAX_OUTPUT_SURFACES, OPTDEF_INT(3)),
-        OPT_COLOR("colorkey", colorkey, 0,
-                  .defval = &(const struct m_color) {
-                      .r = 2, .g = 5, .b = 7, .a = 255,
-                  }),
-        OPT_FLAG("force-yuv", force_yuv, 0),
-        OPT_REPLACED("queuetime_windowed", "queuetime-windowed"),
-        OPT_REPLACED("queuetime_fs", "queuetime-fs"),
-        OPT_REPLACED("output_surfaces", "output-surfaces"),
+        {"chroma-deint", OPT_FLAG(chroma_deint), OPTDEF_INT(1)},
+        {"pullup", OPT_FLAG(pullup)},
+        {"denoise", OPT_FLOAT(denoise), M_RANGE(0, 1)},
+        {"sharpen", OPT_FLOAT(sharpen), M_RANGE(-1, 1)},
+        {"hqscaling", OPT_INT(hqscaling), M_RANGE(0, 9)},
+        {"fps", OPT_FLOAT(user_fps)},
+        {"composite-detect", OPT_FLAG(composite_detect), OPTDEF_INT(1)},
+        {"queuetime-windowed", OPT_INT(flip_offset_window), OPTDEF_INT(50)},
+        {"queuetime-fs", OPT_INT(flip_offset_fs), OPTDEF_INT(50)},
+        {"output-surfaces", OPT_INT(num_output_surfaces),
+            M_RANGE(2, MAX_OUTPUT_SURFACES), OPTDEF_INT(3)},
+        {"colorkey", OPT_COLOR(colorkey),
+            .defval = &(const struct m_color){.r = 2, .g = 5, .b = 7, .a = 255}},
+        {"force-yuv", OPT_FLAG(force_yuv)},
+        {"queuetime_windowed", OPT_REPLACED("queuetime-windowed")},
+        {"queuetime_fs", OPT_REPLACED("queuetime-fs")},
+        {"output_surfaces", OPT_REPLACED("output-surfaces")},
         {NULL},
     },
     .options_prefix = "vo-vdpau",

@@ -14,8 +14,7 @@ in the list.
 
     See ``--ao=help`` for a list of compiled-in audio output drivers. The
     driver ``--ao=alsa`` is preferred. ``--ao=pulse`` is preferred on systems
-    where PulseAudio is used. On BSD systems, ``--ao=oss`` or ``--ao=sndio``
-    may work (the latter being experimental).
+    where PulseAudio is used. On BSD systems, ``--ao=oss`` is preferred.
 
 Available audio output drivers are:
 
@@ -38,15 +37,6 @@ Available audio output drivers are:
 
 ``oss``
     OSS audio output driver
-
-    The following global options are supported by this audio output:
-
-    ``--oss-mixer-device``
-        Sets the audio mixer device (default: ``/dev/mixer``).
-    ``--oss-mixer-channel``
-        Sets the audio mixer channel (default: ``pcm``). Other valid values
-        include **vol, pcm, line**. For a complete list of options look for
-        ``SOUND_DEVICE_NAMES`` in ``/usr/include/linux/soundcard.h``.
 
 ``jack``
     JACK (Jack Audio Connection Kit) audio output driver.
@@ -78,8 +68,8 @@ Available audio output drivers are:
         mode is probably not very useful, other than for debugging or when used
         with fixed setups.
 
-``coreaudio`` (Mac OS X only)
-    Native Mac OS X audio output driver using AudioUnits and the CoreAudio
+``coreaudio`` (macOS only)
+    Native macOS audio output driver using AudioUnits and the CoreAudio
     sound server.
 
     Automatically redirects to ``coreaudio_exclusive`` when playing compressed
@@ -105,12 +95,12 @@ Available audio output drivers are:
         extreme care.
 
 
-``coreaudio_exclusive`` (Mac OS X only)
-    Native Mac OS X audio output driver using direct device access and
+``coreaudio_exclusive`` (macOS only)
+    Native macOS audio output driver using direct device access and
     exclusive mode (bypasses the sound server).
 
 ``openal``
-    OpenAL audio output driver
+    OpenAL audio output driver. This is broken and does not work.
 
     ``--openal-num-buffers=<2-128>``
         Specify the number of audio buffers to use. Lower values are better for
@@ -173,10 +163,6 @@ Available audio output drivers are:
         obtained exact buffer size. A value of 0 selects the sound system
         default.
 
-    ``--sdl-bufcnt=<count>``
-        Sets the number of extra audio buffers in mpv. Usually needs not be
-        changed.
-
 ``null``
     Produces no audio output but maintains video playback speed. You can use
     ``--ao=null --ao-null-untimed`` for benchmarking.
@@ -232,22 +218,6 @@ Available audio output drivers are:
         Append to the file, instead of overwriting it. Always use this with the
         ``no-waveheader`` option - with ``waveheader`` it's broken, because
         it will write a WAVE header every time the file is opened.
-
-``rsound``
-    Audio output to an RSound daemon. Use ``--audio-device=rsound/<hostname>``
-    to set the host name (with ``<hostname>`` replaced, without the ``< >``).
-
-    .. note:: Completely useless, unless you intend to run RSound. Not to be
-              confused with RoarAudio, which is something completely
-              different.
-
-``sndio``
-    Audio output to the OpenBSD sndio sound system
-
-    .. note:: Experimental. There are known bugs and issues.
-
-    (Note: only supports mono, stereo, 4.0, 5.1 and 7.1 channel
-    layouts.)
 
 ``wasapi``
     Audio output to the Windows Audio Session API.

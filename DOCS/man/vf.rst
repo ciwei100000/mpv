@@ -60,7 +60,7 @@ libavfilter bridge.
 .. note::
 
     To get a full list of available video filters, see ``--vf=help`` and
-    http://ffmpeg.org/ffmpeg-filters.html .
+    https://ffmpeg.org/ffmpeg-filters.html .
 
     Also, keep in mind that most actual filters are available via the ``lavfi``
     wrapper, which gives you access to most of libavfilter's filters. This
@@ -310,7 +310,7 @@ Available mpv-only filters are:
 
     ``<stereo-in>``
         Set the stereo mode the video is assumed to be encoded in. Use
-        ``--vf format:stereo-in=help`` to list all available modes. Check with
+        ``--vf=format:stereo-in=help`` to list all available modes. Check with
         the ``stereo3d`` filter documentation to see what the names mean.
 
     ``<stereo-out>``
@@ -321,6 +321,10 @@ Available mpv-only filters are:
         Set the rotation the video is assumed to be encoded with in degrees.
         The special value ``-1`` uses the input format.
 
+    ``<w>``, ``<h>``
+        If not 0, perform conversion to the given size. Ignored if
+        ``convert=yes`` is not set.
+
     ``<dw>``, ``<dh>``
         Set the display size. Note that setting the display size such that
         the video is scaled in both directions instead of just changing the
@@ -330,6 +334,18 @@ Available mpv-only filters are:
         Set the display aspect ratio of the video frame. This is a float,
         but values such as ``[16:9]`` can be passed too (``[...]`` for quoting
         to prevent the option parser from interpreting the ``:`` character).
+
+    ``<force-scaler=auto|zimg|sws>``
+        Force a specific scaler backend, if applicable. This is a debug option
+        and could go away any time.
+
+    ``<alpha=auto|straight|premul>``
+        Set the kind of alpha the video uses. Undefined effect if the image
+        format has no alpha channel (could be ignored or cause an error,
+        depending on how mpv internals evolve). Setting this may or may not
+        cause downstream image processing to treat alpha differently, depending
+        on support. With ``convert`` and zimg used, this will convert the alpha.
+        libswscale and other FFmpeg components completely ignore this.
 
 ``lavfi=graph[:sws-flags[:o=opts]]``
     Filter video using FFmpeg's libavfilter.
@@ -373,7 +389,7 @@ Available mpv-only filters are:
         option gives the flags which should be passed to libswscale. This
         option is numeric and takes a bit-wise combination of ``SWS_`` flags.
 
-        See ``http://git.videolan.org/?p=ffmpeg.git;a=blob;f=libswscale/swscale.h``.
+        See ``https://git.videolan.org/?p=ffmpeg.git;a=blob;f=libswscale/swscale.h``.
 
     ``<o>``
         Set AVFilterGraph options. These should be documented by FFmpeg.
@@ -582,7 +598,7 @@ Available mpv-only filters are:
 
     ``reversal-bug=<yes|no>``
         :no:  Use the API as it was interpreted by older Mesa drivers. While
-              this interpretation was more obvious and inuitive, it was
+              this interpretation was more obvious and intuitive, it was
               apparently wrong, and not shared by Intel driver developers.
         :yes: Use Intel interpretation of surface forward and backwards
               references (default). This is what Intel drivers and newer Mesa
@@ -722,7 +738,7 @@ Available mpv-only filters are:
         which leads to lost frames.
 
     ``print=yes|no``
-        Print computed fingerprints the the terminal (default: no). This is
+        Print computed fingerprints to the terminal (default: no). This is
         mostly for testing and such. Scripts should use ``vf-metadata`` to
         read information from this filter instead.
 

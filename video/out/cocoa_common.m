@@ -163,7 +163,7 @@ static void disable_power_management(struct vo_cocoa_state *s)
 }
 
 static const char macosx_icon[] =
-#include "osdep/macosx_icon.inc"
+#include "generated/TOOLS/osxbundle/mpv.app/Contents/Resources/icon.icns.inc"
 ;
 
 static void set_application_icon(NSApplication *app)
@@ -395,8 +395,10 @@ void vo_cocoa_init(struct vo *vo)
     cocoa_add_event_monitor(vo);
 
     if (!s->embedded) {
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-        set_application_icon(NSApp);
+        run_on_main_thread(vo, ^{
+            [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+            set_application_icon(NSApp);
+        });
     }
 }
 

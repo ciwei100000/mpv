@@ -1,3 +1,5 @@
+image: Visual Studio 2019
+
 branches:
   only:
     - master
@@ -15,14 +17,12 @@ shallow_clone: true
 test: off
 
 install:
-  # Support for Ada and Objective-C was removed from MSYS2. GCC won't update if
-  # these packages are installed.
-  - >-
-    C:\msys64\usr\bin\pacman -R --noconfirm --noprogressbar
-    mingw-w64-i686-gcc-ada mingw-w64-i686-gcc-objc mingw-w64-x86_64-gcc-ada
-    mingw-w64-x86_64-gcc-objc
+  # Disable checking disk space to speed up install time
+  - C:\msys64\usr\bin\sed -i 's/^CheckSpace/#CheckSpace/g' /etc/pacman.conf
   # Update core packages
   - C:\msys64\usr\bin\pacman -Syyuu --noconfirm --noprogressbar --ask=20
+  # Explicitly kill any remaining msys2 processes after core update
+  - taskkill /f /fi "MODULES eq msys-2.0.dll"
   # Update non-core packages
   - C:\msys64\usr\bin\pacman -Suu --noconfirm --noprogressbar --ask=20
   # Install required MSYS2 packages

@@ -21,7 +21,7 @@
 
 * [Wiki](https://github.com/mpv-player/mpv/wiki)
 * [FAQ][FAQ]
-* [Manual](http://mpv.io/manual/master/)
+* [Manual](https://mpv.io/manual/master/)
 
 
 ## Overview
@@ -49,12 +49,11 @@ Releases can be found on the [release list][releases].
   output methods can help (such as `--vo=xv` on Linux), but this use is not
   recommended or supported.
 
-
 ## Downloads
 
 
 For semi-official builds and third-party packages please see
-[mpv.io/installation](http://mpv.io/installation/).
+[mpv.io/installation](https://mpv.io/installation/).
 
 ## Changelog
 
@@ -86,10 +85,10 @@ detect it, the file `build/config.log` may contain information about the
 reasons for the failure.
 
 NOTE: To avoid cluttering the output with unreadable spam, `--help` only shows
-one of the two switches for each option. If the option is autodetected by
-default, the `--disable-***` switch is printed; if the option is disabled by
-default, the `--enable-***` switch is printed. Either way, you can use
-`--enable-***` or `--disable-**` regardless of what is printed by `--help`.
+one of the two switches for each option. If the option is autodetected or
+enabled by default, the `--disable-***` switch is printed; if the option is
+disabled by default, the `--enable-***` switch is printed. Either way, you can
+use `--enable-***` or `--disable-**` regardless of what is printed by `--help`.
 
 To build the software you can use `./waf build`: the result of the compilation
 will be located in `build/mpv`. You can use `./waf install` to install mpv
@@ -122,9 +121,9 @@ Libass dependencies (when building libass):
 
 - gcc or clang, yasm on x86 and x86_64
 - fribidi, freetype, fontconfig development headers (for libass)
-- harfbuzz (optional, required for correct rendering of combining characters,
-  particularly for correct rendering of non-English text on OSX, and
-  Arabic/Indic scripts on any platform)
+- harfbuzz (required for correct rendering of combining characters, particularly
+  for correct rendering of non-English text on OSX, and Arabic/Indic scripts on
+  any platform)
 
 FFmpeg dependencies (when building FFmpeg):
 
@@ -182,7 +181,7 @@ changes come and talk to us on IRC before you start working on them. It will
 make code review easier for both parties later on.
 
 You can check [the wiki](https://github.com/mpv-player/mpv/wiki/Stuff-to-do)
-or the [issue tracker](https://github.com/mpv-player/mpv/issues?q=is%3Aopen+is%3Aissue+label%3A%22feature+request%22)
+or the [issue tracker](https://github.com/mpv-player/mpv/issues?q=is%3Aopen+is%3Aissue+label%3Ameta%3Afeature-request)
 for ideas on what you could contribute with.
 
 ## License
@@ -202,8 +201,8 @@ see the [FAQ][FAQ].
 Most activity happens on the IRC channel and the github issue tracker.
 
 - **GitHub issue tracker**: [issue tracker][issue-tracker] (report bugs here)
-- **User IRC Channel**: `#mpv` on `irc.freenode.net`
-- **Developer IRC Channel**: `#mpv-devel` on `irc.freenode.net`
+- **User IRC Channel**: `#mpv` on `irc.libera.chat`
+- **Developer IRC Channel**: `#mpv-devel` on `irc.libera.chat`
 
 [FAQ]: https://github.com/mpv-player/mpv/wiki/FAQ
 [releases]: https://github.com/mpv-player/mpv/releases

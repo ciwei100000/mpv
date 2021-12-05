@@ -21,15 +21,9 @@
 #include "utils.h"
 
 // 0-terminated list of desktop GL versions a backend should try to
-// initialize. The first entry is the most preferred version.
-const int mpgl_preferred_gl_versions[] = {
-    440,
-    430,
-    400,
-    330,
+// initialize. Each entry is the minimum required version.
+const int mpgl_min_required_gl_versions[] = {
     320,
-    310,
-    300,
     210,
     0
 };
@@ -40,39 +34,32 @@ enum {
     FLUSH_AUTO,
 };
 
-enum {
-    GLES_AUTO = 0,
-    GLES_YES,
-    GLES_NO,
-};
-
 struct opengl_opts {
     int use_glfinish;
     int waitvsync;
     int vsync_pattern[2];
     int swapinterval;
     int early_flush;
-    int restrict_version;
     int gles_mode;
 };
 
 #define OPT_BASE_STRUCT struct opengl_opts
 const struct m_sub_options opengl_conf = {
     .opts = (const struct m_option[]) {
-        OPT_FLAG("opengl-glfinish", use_glfinish, 0),
-        OPT_FLAG("opengl-waitvsync", waitvsync, 0),
-        OPT_INT("opengl-swapinterval", swapinterval, 0),
-        OPT_INTPAIR("opengl-check-pattern", vsync_pattern, 0),
-        OPT_INT("opengl-restrict", restrict_version, 0),
-        OPT_CHOICE("opengl-es", gles_mode, 0,
-                ({"auto", GLES_AUTO}, {"yes", GLES_YES}, {"no", GLES_NO})),
-        OPT_CHOICE("opengl-early-flush", early_flush, 0,
-                ({"no", FLUSH_NO}, {"yes", FLUSH_YES}, {"auto", FLUSH_AUTO})),
-
-        OPT_REPLACED("opengl-debug", "gpu-debug"),
-        OPT_REPLACED("opengl-sw", "gpu-sw"),
-        OPT_REPLACED("opengl-vsync-fences", "swapchain-depth"),
-        OPT_REPLACED("opengl-backend", "gpu-context"),
+        {"opengl-glfinish", OPT_FLAG(use_glfinish)},
+        {"opengl-waitvsync", OPT_FLAG(waitvsync)},
+        {"opengl-swapinterval", OPT_INT(swapinterval)},
+        {"opengl-check-pattern-a", OPT_INT(vsync_pattern[0])},
+        {"opengl-check-pattern-b", OPT_INT(vsync_pattern[1])},
+        {"opengl-restrict", OPT_REMOVED(NULL)},
+        {"opengl-es", OPT_CHOICE(gles_mode,
+            {"auto", GLES_AUTO}, {"yes", GLES_YES}, {"no", GLES_NO})},
+        {"opengl-early-flush", OPT_CHOICE(early_flush,
+            {"no", FLUSH_NO}, {"yes", FLUSH_YES}, {"auto", FLUSH_AUTO})},
+        {"opengl-debug", OPT_REPLACED("gpu-debug")},
+        {"opengl-sw", OPT_REPLACED("gpu-sw")},
+        {"opengl-vsync-fences", OPT_REPLACED("swapchain-depth")},
+        {"opengl-backend", OPT_REPLACED("gpu-context")},
         {0},
     },
     .defaults = &(const struct opengl_opts) {
@@ -100,29 +87,17 @@ struct priv {
     int num_vsync_fences;
 };
 
-bool ra_gl_ctx_test_version(struct ra_ctx *ctx, int version, bool es)
+enum gles_mode ra_gl_ctx_get_glesmode(struct ra_ctx *ctx)
 {
-    bool ret;
-    struct opengl_opts *opts;
     void *tmp = talloc_new(NULL);
+    struct opengl_opts *opts;
+    enum gles_mode mode;
+
     opts = mp_get_config_group(tmp, ctx->global, &opengl_conf);
+    mode = opts->gles_mode;
 
-    // Version too high
-    if (opts->restrict_version && version >= opts->restrict_version) {
-        ret = false;
-        goto done;
-    }
-
-    switch (opts->gles_mode) {
-    case GLES_YES:  ret = es;   goto done;
-    case GLES_NO:   ret = !es;  goto done;
-    case GLES_AUTO: ret = true; goto done;
-    default: abort();
-    }
-
-done:
     talloc_free(tmp);
-    return ret;
+    return mode;
 }
 
 void ra_gl_ctx_uninit(struct ra_ctx *ctx)
@@ -134,6 +109,10 @@ void ra_gl_ctx_uninit(struct ra_ctx *ctx)
         talloc_free(ctx->swapchain);
         ctx->swapchain = NULL;
     }
+
+    // Clean up any potentially left-over debug callback
+    if (ctx->ra)
+        ra_gl_set_debug(ctx->ra, false);
 
     ra_free(&ctx->ra);
 }

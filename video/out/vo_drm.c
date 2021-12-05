@@ -45,7 +45,6 @@
 
 #define BYTES_PER_PIXEL 4
 #define BITS_PER_PIXEL 32
-#define USE_MASTER 0
 
 struct framebuffer {
     uint32_t width;
@@ -255,25 +254,19 @@ static void release_vt(void *data)
 {
     struct vo *vo = data;
     crtc_release(vo);
-    if (USE_MASTER) {
-        //this function enables support for switching to x, weston etc.
-        //however, for whatever reason, it can be called only by root users.
-        //until things change, this is commented.
-        struct priv *p = vo->priv;
-        if (drmDropMaster(p->kms->fd)) {
-            MP_WARN(vo, "Failed to drop DRM master: %s\n", mp_strerror(errno));
-        }
+
+    const struct priv *p = vo->priv;
+    if (drmDropMaster(p->kms->fd)) {
+        MP_WARN(vo, "Failed to drop DRM master: %s\n", mp_strerror(errno));
     }
 }
 
 static void acquire_vt(void *data)
 {
     struct vo *vo = data;
-    if (USE_MASTER) {
-        struct priv *p = vo->priv;
-        if (drmSetMaster(p->kms->fd)) {
-            MP_WARN(vo, "Failed to acquire DRM master: %s\n", mp_strerror(errno));
-        }
+    const struct priv *p = vo->priv;
+    if (drmSetMaster(p->kms->fd)) {
+        MP_WARN(vo, "Failed to acquire DRM master: %s\n", mp_strerror(errno));
     }
 
     crtc_setup(vo);
@@ -322,8 +315,7 @@ static int reconfig(struct vo *vo, struct mp_image_params *params)
     p->cur_frame = mp_image_alloc(p->imgfmt, p->screen_w, p->screen_h);
     mp_image_params_guess_csp(&p->sws->dst);
     mp_image_set_params(p->cur_frame, &p->sws->dst);
-    p->cur_frame[0].w = p->screen_w;
-    p->cur_frame[0].h = p->screen_h;
+    mp_image_set_size(p->cur_frame, p->screen_w, p->screen_h);
 
     talloc_free(p->cur_frame_cropped);
     p->cur_frame_cropped = mp_image_new_dummy_ref(p->cur_frame);
@@ -574,6 +566,7 @@ static int preinit(struct vo *vo)
     }
 
     p->kms = kms_create(vo->log,
+                        vo->opts->drm_opts->drm_device_path,
                         vo->opts->drm_opts->drm_connector_spec,
                         vo->opts->drm_opts->drm_mode_spec,
                         0, 0, false);
@@ -655,6 +648,11 @@ static int control(struct vo *vo, uint32_t request, void *arg)
         *(double*)arg = fps;
         return VO_TRUE;
     }
+    case VOCTRL_GET_DISPLAY_RES: {
+        ((int *)arg)[0] = p->kms->mode.mode.hdisplay;
+        ((int *)arg)[1] = p->kms->mode.mode.vdisplay;
+        return VO_TRUE;
+    }
     case VOCTRL_PAUSE:
         vo->want_redraw = true;
         p->paused = true;
@@ -674,7 +672,7 @@ static int control(struct vo *vo, uint32_t request, void *arg)
 
 const struct vo_driver video_out_drm = {
     .name = "drm",
-    .description = "Direct Rendering Manager",
+    .description = "Direct Rendering Manager (software scaling)",
     .preinit = preinit,
     .query_format = query_format,
     .reconfig = reconfig,

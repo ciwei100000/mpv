@@ -5,7 +5,7 @@ General
 -------
 
 The main contact for mpv development is IRC, specifically #mpv
-and #mpv-devel on Freenode. Github is used for code review and
+and #mpv-devel on Libera.chat. Github is used for code review and
 long term discussions.
 
 Sending patches
@@ -68,6 +68,11 @@ Write good commit messages
 
   Having a prefix gives context, and is especially useful when trying to find
   a specific change by looking at the history, or when running ``git blame``.
+
+  Sample prefixes: ``vo_gpu: ...``, ``command: ...``, ``DOCS/input: ...``,
+  ``TOOLS/osxbundle: ...``, ``osc.lua: ...``, etc. You can always check the git
+  log for commits which modify specific files to see which prefixes are used.
+
 - The first word after the ``:`` is lower case.
 - Don't end the subject line with a ``.``.
 - Put an empty line between the subject line and the commit message.
@@ -99,6 +104,22 @@ Split changes into multiple commits
 - Splitting changes does _not_ mean that you should make them as fine-grained
   as possible. Commits should form logical steps in development. The way you
   split changes is important for code review and analyzing bugs.
+
+Always squash fixup commits when making changes to pull requests
+----------------------------------------------------------------
+
+- If you make fixup commits to your pull request, you should generally squash
+  them with "git rebase -i". We prefer to have pull requests in a merge
+  ready state.
+- We don't squash-merge (nor do we use github's feature that does this) because
+  pull requests with multiple commits are perfectly legitimate, and the only
+  thing that makes sense in non-trivial cases.
+- With complex pull requests, it *may* make sense to keep them separate, but
+  they should be clearly marked as such. Reviewing commits is generally easier
+  with fixups squashed.
+- Reviewers are encouraged to look at individual commits instead of github's
+  "changes from all commits" view (which just encourages bad git and review
+  practices).
 
 Touching user-visible parts may require updating the mpv docs
 -------------------------------------------------------------
@@ -222,7 +243,10 @@ General coding
 Code of Conduct
 ---------------
 
-We have one, but the document describing it got lost accidentally.
+Please note that this project is released with a Contributor Code of Conduct.
+By participating in this project you agree to abide by its terms.
+The Contributor Code of Conduct can be found here:
+https://www.contributor-covenant.org/version/2/0/code_of_conduct/
 
 Rules for git push access
 -------------------------

@@ -1,3 +1,51 @@
+mpv (0.34.0-2) unstable; urgency=medium
+
+  * Team upload
+  * debian/control:
+    - Add Build-Depends on libffmpeg-nvenc-dev
+    - Add Suggests on libcuda1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 21 Nov 2021 20:56:13 +0100
+
+mpv (0.34.0-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream version 0.34.0
+  * debian/patches:
+    - Refresh patches
+    - Remove patches for libplacebo 3.120 support
+  * debian/control: Bump Build-Depends versions with upstream requirements
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 07 Nov 2021 19:23:22 +0100
+
+mpv (0.33.1-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release (Closes: #982249)
+  * debian/control:
+    - Bump debhelper compat to 13
+    - Bump Standards-Version
+    - Add new build dependencies:
+      + libmujs-dev (Closes: #956480)
+      + libzimg-dev
+      + libsixel-dev
+      + libplacebo-dev
+      + libvulkan-dev
+      + spirv-cross
+      + libspirv-cross-c-shared-dev
+    - Remove unused build dependencies (support removed upstream):
+      + libsmbclient-dev (Closes: #834022)
+      + libsndio-dev
+    - Remove version constraints in B-D already satisfied in bullseye
+  * debian/patches:
+    - Apply upstream patches to support libplacebo 3.120
+    - Refresh patches
+  * libmpv1.symbols: Add new symbols
+  * debian/rules: Honor number of parallel jobs
+  * debian/copyright: Update copyright for new upstream release
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Tue, 07 Sep 2021 11:38:01 +0200
+
 mpv (0.32.0-3-nonfree) unstable; urgency=medium
 
   * Merge branch 'debian/master' into ciwei100000

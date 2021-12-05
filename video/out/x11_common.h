@@ -20,14 +20,11 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <pthread.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
-#include "osdep/atomic.h"
-#include "osdep/semaphore.h"
-
 #include "common/common.h"
+#include "osdep/atomic.h"
 
 #include "config.h"
 #if !HAVE_GPL
@@ -75,10 +72,6 @@ struct vo_x11_state {
     bool screensaver_enabled;
     bool dpms_touched;
     double screensaver_time_last;
-    pthread_t screensaver_thread;
-    bool screensaver_thread_running;
-    sem_t screensaver_sem;
-    atomic_bool screensaver_terminate;
 
     XIM xim;
     XIC xic;
@@ -117,6 +110,10 @@ struct vo_x11_state {
      * fullscreen off. */
     bool size_changed_during_fs;
     bool pos_changed_during_fs;
+
+    /* The geometry/autofit option was changed while the window was maximized.
+     * Wait until the state changes to resize. */
+    bool pending_geometry_change;
 
     XComposeStatus compose_status;
 

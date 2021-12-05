@@ -43,7 +43,8 @@ pl next
     =============   ================================================
 
 title
-    | Displays current media-title, filename, or custom title
+    | Displays current media-title, filename, custom title, or target chapter
+      name while hovering the seekbar.
 
     =============   ================================================
     left-click      show playlist position and length and full title
@@ -179,11 +180,12 @@ Configurable Options
 ``seekbarkeyframes``
     Default: yes
 
-    Controls the mode used to seek when dragging the seekbar. By default,
-    keyframes are used. If set to false, exact seeking on mouse drags
-    will be used instead. Keyframes are preferred, but exact seeks may be
-    useful in cases where keyframes cannot be found. Note that using exact
-    seeks can potentially make mouse dragging much slower.
+    Controls the mode used to seek when dragging the seekbar. If set to ``yes``,
+    default seeking mode is used (usually keyframes, but player defaults and
+    heuristics can change it to exact). If set to ``no``, exact seeking on
+    mouse drags will be used instead. Keyframes are preferred, but exact seeks
+    may be useful in cases where keyframes cannot be found. Note that using
+    exact seeks can potentially make mouse dragging much slower.
 
 ``seekrangestyle``
     Default: inverted
@@ -328,7 +330,8 @@ Configurable Options
     within the areas not covered by the osc (``yes``). If this option is set,
     the osc may overwrite the ``--video-margin-ratio-*`` options, even if the
     user has set them. (It will not overwrite them if all of them are set to
-    default values.)
+    default values.) Additionally, ``visibility`` must be set to ``always``.
+    Otherwise, this option does nothing.
 
     Currently, this is supported for the ``bottombar`` and ``topbar`` layout
     only. The other layouts do not change if this option is set. Separately,
@@ -372,6 +375,12 @@ Configurable Options
     Default: no
 
     Set to ``yes`` to reduce festivity (i.e. disable santa hat in December.)
+
+``livemarkers``
+    Default: yes
+
+    Update chapter markers positions on duration changes, e.g. live streams.
+    The updates are unoptimized - consider disabling it on very low-end systems.
 
 Script Commands
 ~~~~~~~~~~~~~~~

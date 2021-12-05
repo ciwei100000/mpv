@@ -2,6 +2,7 @@ libmpv.so.1 libmpv1 #MINVER#
 * Build-Depends-Package: libmpv-dev
  mpv_abort_async_command@Base 0.30.0
  mpv_client_api_version@Base 0.4.0
+ mpv_client_id@Base 0.33.1
  mpv_client_name@Base 0.4.0
  mpv_command@Base 0.4.0
  mpv_command_async@Base 0.4.0
@@ -16,6 +17,7 @@ libmpv.so.1 libmpv1 #MINVER#
  mpv_detach_destroy@Base 0.4.0
  mpv_error_string@Base 0.4.0
  mpv_event_name@Base 0.4.0
+ mpv_event_to_node@Base 0.33.1
  mpv_free@Base 0.4.0
  mpv_free_node_contents@Base 0.4.0
  mpv_get_property@Base 0.4.0

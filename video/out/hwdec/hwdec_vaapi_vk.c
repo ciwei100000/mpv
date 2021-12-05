@@ -15,11 +15,15 @@
  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <errno.h>
+#include <unistd.h>
+
 #include "config.h"
 #include "hwdec_vaapi.h"
 #include "video/out/placebo/ra_pl.h"
+#include "video/out/placebo/utils.h"
 
-static bool vaapi_vk_map(struct ra_hwdec_mapper *mapper)
+static bool vaapi_vk_map(struct ra_hwdec_mapper *mapper, bool probing)
 {
     struct priv *p = mapper->priv;
     const struct pl_gpu *gpu = ra_pl_get(mapper->ra);
@@ -40,6 +44,24 @@ static bool vaapi_vk_map(struct ra_hwdec_mapper *mapper)
         int fd = p->desc.objects[id].fd;
         uint32_t size = p->desc.objects[id].size;
         uint32_t offset = p->desc.layers[n].offset[0];
+        uint32_t pitch = p->desc.layers[n].pitch[0];
+
+        // AMD drivers do not return the size in the surface description, so we
+        // need to query it manually.
+        if (size == 0) {
+            size = lseek(fd, 0, SEEK_END);
+            if (size == -1) {
+                MP_ERR(mapper, "Cannot obtain size of object with fd %d: %s\n",
+                       fd, mp_strerror(errno));
+                return false;
+            }
+            off_t err = lseek(fd, 0, SEEK_SET);
+            if (err == -1) {
+                MP_ERR(mapper, "Failed to reset offset for fd %d: %s\n",
+                       fd, mp_strerror(errno));
+                return false;
+            }
+        }
 
         struct pl_tex_params tex_params = {
             .w = mp_image_plane_w(&p->layout, n),
@@ -47,8 +69,6 @@ static bool vaapi_vk_map(struct ra_hwdec_mapper *mapper)
             .d = 0,
             .format = format->priv,
             .sampleable = true,
-            .sample_mode = format->linear_filter ? PL_TEX_SAMPLE_LINEAR
-                                                    : PL_TEX_SAMPLE_NEAREST,
             .import_handle = PL_HANDLE_DMA_BUF,
             .shared_mem = (struct pl_shared_mem) {
                 .handle = {
@@ -56,10 +76,14 @@ static bool vaapi_vk_map(struct ra_hwdec_mapper *mapper)
                 },
                 .size = size,
                 .offset = offset,
+                .drm_format_mod = p->desc.objects[id].drm_format_modifier,
+                .stride_w = pitch,
             },
         };
 
+        mppl_ctx_set_log(gpu->ctx, mapper->ra->log, probing);
         const struct pl_tex *pltex = pl_tex_create(gpu, &tex_params);
+        mppl_ctx_set_log(gpu->ctx, mapper->ra->log, false);
         if (!pltex) {
             return false;
         }

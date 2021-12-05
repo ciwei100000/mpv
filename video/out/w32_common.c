@@ -69,6 +69,7 @@ typedef enum MONITOR_DPI_TYPE {
 struct w32_api {
     HRESULT (WINAPI *pGetDpiForMonitor)(HMONITOR, MONITOR_DPI_TYPE, UINT*, UINT*);
     BOOL (WINAPI *pImmDisableIME)(DWORD);
+    BOOL (WINAPI *pAdjustWindowRectExForDpi)(LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle, UINT dpi);
 };
 
 struct vo_w32_state {
@@ -96,20 +97,24 @@ struct vo_w32_state {
     // Has the window seen a WM_DESTROY? If so, don't call DestroyWindow again.
     bool destroyed;
 
+    bool focused;
+
     // whether the window position and size were intialized
     bool window_bounds_initialized;
 
     bool current_fs;
     bool toggle_fs; // whether the current fullscreen state needs to be switched
 
-    RECT windowrc; // currently known window rect
-    RECT prev_windowrc; // last non-fullscreen window rect
+    // Note: maximized state doesn't involve nor modify windowrc
+    RECT windowrc; // currently known normal/fullscreen window client rect
+    RECT prev_windowrc; // saved normal window client rect while in fullscreen
 
     // video size
     uint32_t o_dwidth;
     uint32_t o_dheight;
 
     int dpi;
+    double dpi_scale;
 
     bool disable_screensaver;
     bool cursor_visible;
@@ -127,7 +132,13 @@ struct vo_w32_state {
     // UTF-16 decoding state for WM_CHAR and VK_PACKET
     int high_surrogate;
 
-    // Whether to fit the window on screen on next window state updating
+    // Fit the window to one monitor working area next time it's not fullscreen
+    // and not maximized. Used once after every new "untrusted" size comes from
+    // mpv, else we assume that the last known size is valid and don't fit.
+    // FIXME: on a multi-monitor setup one bit is not enough, because the first
+    // fit (autofit etc) should be to one monitor, but later size changes from
+    // mpv like window-scale (VOCTRL_SET_UNFS_WINDOW_SIZE) should allow the
+    // entire virtual desktop area - but we still limit to one monitor size.
     bool fit_on_screen;
 
     ITaskbarList2 *taskbar_list;
@@ -148,16 +159,22 @@ struct vo_w32_state {
     HANDLE avrt_handle;
 };
 
-static void add_window_borders(HWND hwnd, RECT *rc)
+static void add_window_borders(struct vo_w32_state *w32, HWND hwnd, RECT *rc)
 {
-    AdjustWindowRect(rc, GetWindowLongPtrW(hwnd, GWL_STYLE), 0);
+    if (w32->api.pAdjustWindowRectExForDpi) {
+        w32->api.pAdjustWindowRectExForDpi(rc,
+            GetWindowLongPtrW(hwnd, GWL_STYLE), 0,
+            GetWindowLongPtrW(hwnd, GWL_EXSTYLE), w32->dpi);
+    } else {
+        AdjustWindowRect(rc, GetWindowLongPtrW(hwnd, GWL_STYLE), 0);
+    }
 }
 
 // basically a reverse AdjustWindowRect (win32 doesn't appear to have this)
-static void subtract_window_borders(HWND hwnd, RECT *rc)
+static void subtract_window_borders(struct vo_w32_state *w32, HWND hwnd, RECT *rc)
 {
     RECT b = { 0, 0, 0, 0 };
-    add_window_borders(hwnd, &b);
+    add_window_borders(w32, hwnd, &b);
     rc->left -= b.left;
     rc->top -= b.top;
     rc->right -= b.right;
@@ -520,21 +537,26 @@ done:
 static void update_dpi(struct vo_w32_state *w32)
 {
     UINT dpiX, dpiY;
+    HDC hdc = NULL;
+    int dpi = 0;
+
     if (w32->api.pGetDpiForMonitor && w32->api.pGetDpiForMonitor(w32->monitor,
                                      MDT_EFFECTIVE_DPI, &dpiX, &dpiY) == S_OK) {
-        w32->dpi = (int)dpiX;
-        MP_VERBOSE(w32, "DPI detected from the new API: %d\n", w32->dpi);
-        return;
-    }
-    HDC hdc = GetDC(NULL);
-    if (hdc) {
-        w32->dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+        dpi = (int)dpiX;
+        MP_VERBOSE(w32, "DPI detected from the new API: %d\n", dpi);
+    } else if ((hdc = GetDC(NULL))) {
+        dpi = GetDeviceCaps(hdc, LOGPIXELSX);
         ReleaseDC(NULL, hdc);
-        MP_VERBOSE(w32, "DPI detected from the old API: %d\n", w32->dpi);
-    } else {
-        w32->dpi = 96;
-        MP_VERBOSE(w32, "Couldn't determine DPI, falling back to %d\n", w32->dpi);
+        MP_VERBOSE(w32, "DPI detected from the old API: %d\n", dpi);
     }
+ 
+    if (dpi <= 0) {
+        dpi = 96;
+        MP_VERBOSE(w32, "Couldn't determine DPI, falling back to %d\n", dpi);
+    }
+
+    w32->dpi = dpi;
+    w32->dpi_scale = w32->opts->hidpi_window_scale ? w32->dpi / 96.0 : 1.0;
 }
 
 static void update_display_info(struct vo_w32_state *w32)
@@ -784,13 +806,12 @@ static void update_window_style(struct vo_w32_state *w32)
     w32->windowrc = wr;
 }
 
-// Adjust rc size and position if its size is larger than rc2.
+// If rc is wider/taller than n_w/n_h, shrink rc size while keeping the center.
 // returns true if the rectangle was modified.
-static bool fit_rect(RECT *rc, RECT *rc2)
+static bool fit_rect_size(RECT *rc, long n_w, long n_h)
 {
-    // Calculate old size and maximum new size
+    // nothing to do if we already fit.
     int o_w = rect_w(*rc), o_h = rect_h(*rc);
-    int n_w = rect_w(*rc2), n_h = rect_h(*rc2);
     if (o_w <= n_w && o_h <= n_h)
         return false;
 
@@ -810,17 +831,27 @@ static bool fit_rect(RECT *rc, RECT *rc2)
     return true;
 }
 
-// Adjust window size and position if its size is larger than the screen size.
+// If the window is bigger than the desktop, shrink to fit with same center.
+// Also, if the top edge is above the working area, move down to align.
 static void fit_window_on_screen(struct vo_w32_state *w32)
 {
-    if (w32->parent || w32->current_fs || IsMaximized(w32->window))
-        return;
-
     RECT screen = get_working_area(w32);
-    if (w32->opts->border && w32->opts->fit_border)
-        subtract_window_borders(w32->window, &screen);
+    if (w32->opts->border)
+        subtract_window_borders(w32, w32->window, &screen);
 
-    if (fit_rect(&w32->windowrc, &screen)) {
+    bool adjusted = fit_rect_size(&w32->windowrc, rect_w(screen), rect_h(screen));
+
+    if (w32->windowrc.top < screen.top) {
+        // if the top-edge of client area is above the target area (mainly
+        // because the client-area is centered but the title bar is taller
+        // than the bottom border), then move it down to align the edges.
+        // Windows itself applies the same constraint during manual move.
+        w32->windowrc.bottom += screen.top - w32->windowrc.top;
+        w32->windowrc.top = screen.top;
+        adjusted = true;
+    }
+
+    if (adjusted) {
         MP_VERBOSE(w32, "adjusted window bounds: %d:%d:%d:%d\n",
                    (int)w32->windowrc.left, (int)w32->windowrc.top,
                    (int)rect_w(w32->windowrc), (int)rect_h(w32->windowrc));
@@ -828,11 +859,10 @@ static void fit_window_on_screen(struct vo_w32_state *w32)
 }
 
 // Calculate new fullscreen state and change window size and position.
-// returns true if fullscreen state was changed.
-static bool update_fullscreen_state(struct vo_w32_state *w32)
+static void update_fullscreen_state(struct vo_w32_state *w32)
 {
     if (w32->parent)
-        return false;
+        return;
 
     bool new_fs = w32->opts->fullscreen;
     if (w32->toggle_fs) {
@@ -864,7 +894,6 @@ static bool update_fullscreen_state(struct vo_w32_state *w32)
     MP_VERBOSE(w32, "reset window bounds: %d:%d:%d:%d\n",
                (int)w32->windowrc.left, (int)w32->windowrc.top,
                (int)rect_w(w32->windowrc), (int)rect_h(w32->windowrc));
-    return toggle_fs;
 }
 
 static void update_minimized_state(struct vo_w32_state *w32)
@@ -924,7 +953,7 @@ static void update_window_state(struct vo_w32_state *w32)
         return;
 
     RECT wr = w32->windowrc;
-    add_window_borders(w32->window, &wr);
+    add_window_borders(w32, w32->window, &wr);
 
     SetWindowPos(w32->window, w32->opts->ontop ? HWND_TOPMOST : HWND_NOTOPMOST,
                  wr.left, wr.top, rect_w(wr), rect_h(wr),
@@ -958,15 +987,13 @@ static void reinit_window_state(struct vo_w32_state *w32)
         return;
 
     // The order matters: fs state should be updated prior to changing styles
-    bool toggle_fs = update_fullscreen_state(w32);
+    update_fullscreen_state(w32);
     update_window_style(w32);
 
-    // Assume that the window has already been fit on screen before switching fs
-    if (!toggle_fs || w32->fit_on_screen) {
+    // fit_on_screen is applied at most once when/if applicable (normal win).
+    if (w32->fit_on_screen && !w32->current_fs && !IsMaximized(w32->window)) {
         fit_window_on_screen(w32);
-        // The fullscreen state might still be active, so set the flag
-        // to fit on screen next time the window leaves the fullscreen.
-        w32->fit_on_screen = w32->current_fs;
+        w32->fit_on_screen = false;
     }
 
     // Show and activate the window after all window state parameters were set
@@ -1088,7 +1115,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
             // get client area of the windows if it had the rect rc
             // (subtracting the window borders)
             RECT r = *rc;
-            subtract_window_borders(w32->window, &r);
+            subtract_window_borders(w32, w32->window, &r);
             int c_w = rect_w(r), c_h = rect_h(r);
             float aspect = w32->o_dwidth / (float) MPMAX(w32->o_dheight, 1);
             int d_w = c_h * aspect - c_w;
@@ -1104,6 +1131,11 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
         break;
     case WM_DPICHANGED:
         update_display_info(w32);
+
+        RECT *rc = (RECT*)lParam;
+        w32->windowrc = *rc;
+        subtract_window_borders(w32, w32->window, &w32->windowrc);
+        update_window_state(w32);
         break;
     case WM_CLOSE:
         // Don't destroy the window yet to not lose wakeup events.
@@ -1182,7 +1214,13 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
         break;
     case WM_KILLFOCUS:
         mp_input_put_key(w32->input_ctx, MP_INPUT_RELEASE_ALL);
-        break;
+        w32->focused = false;
+        signal_events(w32, VO_EVENT_FOCUS);
+        return 0;
+    case WM_SETFOCUS:
+        w32->focused = true;
+        signal_events(w32, VO_EVENT_FOCUS);
+        return 0;
     case WM_SETCURSOR:
         // The cursor should only be hidden if the mouse is in the client area
         // and if the window isn't in menu mode (HIWORD(lParam) is non-zero)
@@ -1381,10 +1419,18 @@ static void gui_thread_reconfig(void *ptr)
     struct vo *vo = w32->vo;
 
     RECT r = get_working_area(w32);
+    if (!w32->current_fs && !IsMaximized(w32->window) && w32->opts->border)
+        subtract_window_borders(w32, w32->window, &r);
     struct mp_rect screen = { r.left, r.top, r.right, r.bottom };
     struct vo_win_geometry geo;
 
-    vo_calc_window_geometry(vo, &screen, &geo);
+    RECT monrc = get_monitor_info(w32).rcMonitor;
+    struct mp_rect mon = { monrc.left, monrc.top, monrc.right, monrc.bottom };
+
+    if (w32->dpi_scale == 0)
+        force_update_display_info(w32);
+
+    vo_calc_window_geometry3(vo, &screen, &mon, w32->dpi_scale, &geo);
     vo_apply_window_geometry(vo, &geo);
 
     bool reset_size = w32->o_dwidth != vo->dwidth ||
@@ -1439,6 +1485,11 @@ static void w32_api_load(struct vo_w32_state *w32)
     // Available since Win8.1
     w32->api.pGetDpiForMonitor = !shcore_dll ? NULL :
                 (void *)GetProcAddress(shcore_dll, "GetDpiForMonitor");
+
+    HMODULE user32_dll = LoadLibraryW(L"user32.dll");
+    // Available since Win10
+    w32->api.pAdjustWindowRectExForDpi = !user32_dll ? NULL :
+                (void *)GetProcAddress(user32_dll, "AdjustWindowRectExForDpi");
 
     // imm32.dll must be loaded dynamically
     // to account for machines without East Asian language support
@@ -1674,6 +1725,10 @@ static int gui_thread_control(struct vo_w32_state *w32, int request, void *arg)
 
         return VO_TRUE;
     }
+    case VOCTRL_GET_HIDPI_SCALE: {
+        *(double *)arg = w32->dpi_scale;
+        return VO_TRUE;
+    }
     case VOCTRL_GET_UNFS_WINDOW_SIZE: {
         int *s = arg;
 
@@ -1681,8 +1736,8 @@ static int gui_thread_control(struct vo_w32_state *w32, int request, void *arg)
             return VO_FALSE;
 
         RECT *rc = w32->current_fs ? &w32->prev_windowrc : &w32->windowrc;
-        s[0] = rect_w(*rc);
-        s[1] = rect_h(*rc);
+        s[0] = rect_w(*rc) / w32->dpi_scale;
+        s[1] = rect_h(*rc) / w32->dpi_scale;
         return VO_TRUE;
     }
     case VOCTRL_SET_UNFS_WINDOW_SIZE: {
@@ -1690,6 +1745,9 @@ static int gui_thread_control(struct vo_w32_state *w32, int request, void *arg)
 
         if (!w32->window_bounds_initialized)
             return VO_FALSE;
+
+        s[0] *= w32->dpi_scale;
+        s[1] *= w32->dpi_scale;
 
         RECT *rc = w32->current_fs ? &w32->prev_windowrc : &w32->windowrc;
         const int x = rc->left + rect_w(*rc) / 2 - s[0] / 2;
@@ -1735,6 +1793,11 @@ static int gui_thread_control(struct vo_w32_state *w32, int request, void *arg)
         update_display_info(w32);
         *(double*) arg = w32->display_fps;
         return VO_TRUE;
+    case VOCTRL_GET_DISPLAY_RES: ;
+        RECT r = get_screen_area(w32);
+        ((int *)arg)[0] = r.right;
+        ((int *)arg)[1] = r.bottom;
+        return VO_TRUE;
     case VOCTRL_GET_DISPLAY_NAMES:
         *(char ***)arg = get_disp_names(w32);
         return VO_TRUE;
@@ -1747,6 +1810,9 @@ static int gui_thread_control(struct vo_w32_state *w32, int request, void *arg)
             return p->len ? VO_TRUE : VO_FALSE;
         }
         return VO_FALSE;
+    case VOCTRL_GET_FOCUSED:
+        *(bool *)arg = w32->focused;
+        return VO_TRUE;
     }
     return VO_NOTIMPL;
 }

@@ -17,7 +17,7 @@
 #include "utils.h"
 
 // Force cache flush if more than this number of shaders is created.
-#define SC_MAX_ENTRIES 48
+#define SC_MAX_ENTRIES 256
 
 union uniform_val {
     float f[9];         // RA_VARTYPE_FLOAT
@@ -458,6 +458,26 @@ void gl_sc_blend(struct gl_shader_cache *sc,
     sc->params.blend_dst_alpha = blend_dst_alpha;
 }
 
+const char *gl_sc_bvec(struct gl_shader_cache *sc, int dims)
+{
+    static const char *bvecs[] = {
+        [1] = "bool",
+        [2] = "bvec2",
+        [3] = "bvec3",
+        [4] = "bvec4",
+    };
+
+    static const char *vecs[] = {
+        [1] = "float",
+        [2] = "vec2",
+        [3] = "vec3",
+        [4] = "vec4",
+    };
+
+    assert(dims > 0 && dims < MP_ARRAY_SIZE(bvecs));
+    return sc->ra->glsl_version >= 130 ? bvecs[dims] : vecs[dims];
+}
+
 static const char *vao_glsl_type(const struct ra_renderpass_input *e)
 {
     // pretty dumb... too dumb, but works for us
@@ -695,7 +715,7 @@ static void add_uniforms(struct gl_shader_cache *sc, bstr *dst)
                 u->input.binding, u->input.name, u->buffer_format);
             break;
         case RA_VARTYPE_BUF_RW:
-            ADD(dst, "layout(std430, binding=%d) buffer %s { %s };\n",
+            ADD(dst, "layout(std430, binding=%d) restrict coherent buffer %s { %s };\n",
                 u->input.binding, u->input.name, u->buffer_format);
             break;
         case RA_VARTYPE_IMG_W: {
@@ -712,7 +732,7 @@ static void add_uniforms(struct gl_shader_cache *sc, bstr *dst)
             } else if (fmt) {
                 ADD(dst, "layout(%s) ", fmt);
             }
-            ADD(dst, "uniform %s %s;\n", u->glsl_type, u->input.name);
+            ADD(dst, "uniform restrict %s %s;\n", u->glsl_type, u->input.name);
         }
         }
     }
@@ -761,7 +781,12 @@ static void gl_sc_generate(struct gl_shader_cache *sc,
     for (int n = 0; n < sc->num_exts; n++)
         ADD(header, "#extension %s : enable\n", sc->exts[n]);
     if (glsl_es) {
+        ADD(header, "#ifdef GL_FRAGMENT_PRECISION_HIGH\n");
+        ADD(header, "precision highp float;\n");
+        ADD(header, "#else\n");
         ADD(header, "precision mediump float;\n");
+        ADD(header, "#endif\n");
+        
         ADD(header, "precision mediump sampler2D;\n");
         if (sc->ra->caps & RA_CAP_TEX_3D)
             ADD(header, "precision mediump sampler3D;\n");

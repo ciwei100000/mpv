@@ -15,14 +15,14 @@ local function typeconv(desttypeval, val)
         elseif val == "no" then
             val = false
         else
-            msg.error("Error: Can't convert " .. val .. " to boolean!")
+            msg.error("Error: Can't convert '" .. val .. "' to boolean!")
             val = nil
         end
     elseif type(desttypeval) == "number" then
         if not (tonumber(val) == nil) then
             val = tonumber(val)
         else
-            msg.error("Error: Can't convert " .. val .. " to number!")
+            msg.error("Error: Can't convert '" .. val .. "' to number!")
             val = nil
         end
     end
@@ -76,6 +76,9 @@ local function read_options(options, identifier, on_update)
         msg.verbose("Opened config file " .. conffilename .. ".")
         local linecounter = 1
         for line in f:lines() do
+            if line:sub(#line) == "\r" then
+                line = line:sub(1, #line - 1)
+            end
             if string.find(line, "#") == 1 then
 
             else
@@ -89,7 +92,7 @@ local function read_options(options, identifier, on_update)
                     -- match found values with defaults
                     if option_types[key] == nil then
                         msg.warn(conffilename..":"..linecounter..
-                            " unknown key " .. key .. ", ignoring")
+                            " unknown key '" .. key .. "', ignoring")
                     else
                         local convval = typeconv(option_types[key], val)
                         if convval == nil then
@@ -152,7 +155,7 @@ local function read_options(options, identifier, on_update)
                 end
             end
             last_opts = new_opts
-            if #changelist then
+            if next(changelist) ~= nil then
                 on_update(changelist)
             end
         end)

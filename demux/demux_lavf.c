@@ -84,28 +84,29 @@ struct demux_lavf_opts {
 
 const struct m_sub_options demux_lavf_conf = {
     .opts = (const m_option_t[]) {
-        OPT_INTRANGE("demuxer-lavf-probesize", probesize, 0, 32, INT_MAX),
-        OPT_CHOICE("demuxer-lavf-probe-info", probeinfo, 0,
-                   ({"no", 0}, {"yes", 1}, {"auto", -1}, {"nostreams", -2})),
-        OPT_STRING("demuxer-lavf-format", format, 0),
-        OPT_FLOATRANGE("demuxer-lavf-analyzeduration", analyzeduration, 0,
-                       0, 3600),
-        OPT_INTRANGE("demuxer-lavf-buffersize", buffersize, 0, 1,
-                     10 * 1024 * 1024, OPTDEF_INT(BIO_BUFFER_SIZE)),
-        OPT_FLAG("demuxer-lavf-allow-mimetype", allow_mimetype, 0),
-        OPT_INTRANGE("demuxer-lavf-probescore", probescore, 0,
-                     1, AVPROBE_SCORE_MAX),
-        OPT_FLAG("demuxer-lavf-hacks", hacks, 0),
-        OPT_KEYVALUELIST("demuxer-lavf-o", avopts, 0),
-        OPT_STRING("sub-codepage", sub_cp, 0),
-        OPT_CHOICE("rtsp-transport", rtsp_transport, 0,
-               ({"lavf", 0},
-                {"udp", 1},
-                {"tcp", 2},
-                {"http", 3})),
-        OPT_CHOICE("demuxer-lavf-linearize-timestamps", linearize_ts, 0,
-                   ({"no", 0}, {"auto", -1}, {"yes", 1})),
-        OPT_FLAG("demuxer-lavf-propagate-opts", propagate_opts, 0),
+        {"demuxer-lavf-probesize", OPT_INT(probesize), M_RANGE(32, INT_MAX)},
+        {"demuxer-lavf-probe-info", OPT_CHOICE(probeinfo,
+            {"no", 0}, {"yes", 1}, {"auto", -1}, {"nostreams", -2})},
+        {"demuxer-lavf-format", OPT_STRING(format)},
+        {"demuxer-lavf-analyzeduration", OPT_FLOAT(analyzeduration),
+         M_RANGE(0, 3600)},
+        {"demuxer-lavf-buffersize", OPT_INT(buffersize),
+         M_RANGE(1, 10 * 1024 * 1024), OPTDEF_INT(BIO_BUFFER_SIZE)},
+        {"demuxer-lavf-allow-mimetype", OPT_FLAG(allow_mimetype)},
+        {"demuxer-lavf-probescore", OPT_INT(probescore),
+         M_RANGE(1, AVPROBE_SCORE_MAX)},
+        {"demuxer-lavf-hacks", OPT_FLAG(hacks)},
+        {"demuxer-lavf-o", OPT_KEYVALUELIST(avopts)},
+        {"sub-codepage", OPT_STRING(sub_cp)},
+        {"rtsp-transport", OPT_CHOICE(rtsp_transport,
+            {"lavf", 0},
+            {"udp", 1},
+            {"tcp", 2},
+            {"http", 3},
+            {"udp_multicast", 4})},
+        {"demuxer-lavf-linearize-timestamps", OPT_CHOICE(linearize_ts,
+            {"no", 0}, {"auto", -1}, {"yes", 1})},
+        {"demuxer-lavf-propagate-opts", OPT_FLAG(propagate_opts)},
         {0}
     },
     .size = sizeof(struct demux_lavf_opts),
@@ -137,7 +138,6 @@ struct format_hack {
     bool use_stream_ids : 1;    // has a meaningful native stream IDs (export it)
     bool fully_read : 1;        // set demuxer.fully_read flag
     bool detect_charset : 1;    // format is a small text file, possibly not UTF8
-    bool image_format : 1;      // expected to contain exactly 1 frame
     // Do not confuse player's position estimation (position is into external
     // segment, with e.g. HLS, player knows about the playlist main file only).
     bool clear_filepos : 1;
@@ -146,6 +146,8 @@ struct format_hack {
     bool is_network : 1;
     bool no_seek : 1;
     bool no_pcm_seek : 1;
+    bool no_seek_on_no_duration : 1;
+    bool readall_on_no_streamseek : 1;
 };
 
 #define BLACKLIST(fmt) {fmt, .ignore = true}
@@ -174,6 +176,7 @@ static const struct format_hack format_hacks[] = {
     {"matroska", .skipinfo = true, .no_pcm_seek = true, .use_stream_ids = true},
 
     {"v4l2", .no_seek = true},
+    {"rtsp", .no_seek_on_no_duration = true},
 
     // In theory, such streams might contain timestamps, but virtually none do.
     {"h264", .if_flags = AVFMT_NOTIMESTAMPS },
@@ -182,6 +185,10 @@ static const struct format_hack format_hacks[] = {
     // Some Ogg shoutcast streams are essentially concatenated OGG files. They
     // reset timestamps, which causes all sorts of problems.
     {"ogg", .linearize_audio_ts = true, .use_stream_ids = true},
+
+    // At some point, FFmpeg lost the ability to read gif from unseekable
+    // streams.
+    {"gif", .readall_on_no_streamseek = true},
 
     TEXTSUB("aqtitle"), TEXTSUB("jacosub"), TEXTSUB("microdvd"),
     TEXTSUB("mpl2"), TEXTSUB("mpsub"), TEXTSUB("pjs"), TEXTSUB("realtext"),
@@ -197,8 +204,6 @@ static const struct format_hack format_hacks[] = {
     BLACKLIST("bin"),
     // Useless, does not work with custom streams.
     BLACKLIST("image2"),
-    // Image demuxers ("<name>_pipe" is detected explicitly)
-    {"image2pipe", .image_format = true},
     {0}
 };
 
@@ -219,7 +224,7 @@ typedef struct lavf_priv {
     bool own_stream;
     char *filename;
     struct format_hack format_hack;
-    AVInputFormat *avif;
+    const AVInputFormat *avif;
     int avif_flags;
     AVFormatContext *avfc;
     AVIOContext *pb;
@@ -238,6 +243,8 @@ typedef struct lavf_priv {
     int linearize_ts;
     bool any_ts_fixed;
 
+    int retry_counter;
+
     AVDictionary *av_opts;
 
     // Proxying nested streams.
@@ -250,22 +257,20 @@ typedef struct lavf_priv {
 
 static void update_read_stats(struct demuxer *demuxer)
 {
+#if !HAVE_FFMPEG_AVIOCONTEXT_BYTES_READ
+    return;
+#else
     lavf_priv_t *priv = demuxer->priv;
 
     for (int n = 0; n < priv->num_nested; n++) {
         struct nested_stream *nest = &priv->nested[n];
 
-#if !HAVE_FFMPEG_STRICT_ABI
-        // Note: accessing the bytes_read field is not allowed by FFmpeg's API.
-        // This is fully intentional - there is no other way to get this
-        // information (not even by custom I/O, because the connection reuse
-        // mechanism by the HLS demuxer would get disabled).
         int64_t cur = nest->id->bytes_read;
         int64_t new = cur - nest->last_bytes;
         nest->last_bytes = cur;
         demux_report_unbuffered_read_bytes(demuxer, new);
-#endif
     }
+#endif
 }
 
 // At least mp4 has name="mov,mp4,m4a,3gp,3g2,mj2", so we split the name
@@ -433,7 +438,7 @@ static int lavf_check_file(demuxer_t *demuxer, enum demux_check check)
     if (!lavfdopts->allow_mimetype || !mime_type)
         mime_type = "";
 
-    AVInputFormat *forced_format = NULL;
+    const AVInputFormat *forced_format = NULL;
     const char *format = lavfdopts->format;
     if (!format)
         format = s->lavf_type;
@@ -453,7 +458,7 @@ static int lavf_check_file(demuxer_t *demuxer, enum demux_check check)
 
     AVProbeData avpd = {
         // Disable file-extension matching with normal checks
-        .filename = priv->filename,
+        .filename = check <= DEMUX_CHECK_REQUEST ? priv->filename : "",
         .buf_size = 0,
         .buf = av_mallocz(PROBE_BUF_SIZE + AV_INPUT_BUFFER_PADDING_SIZE),
     };
@@ -516,11 +521,6 @@ static int lavf_check_file(demuxer_t *demuxer, enum demux_check check)
     if (!priv->avif) {
         MP_VERBOSE(demuxer, "No format found, try lowering probescore or forcing the format.\n");
         return -1;
-    }
-
-    if (bstr_endswith0(bstr0(priv->avif->name), "_pipe")) {
-        MP_VERBOSE(demuxer, "Assuming this is an image format.\n");
-        priv->format_hack.image_format = true;
     }
 
     if (lavfdopts->hacks)
@@ -600,6 +600,8 @@ static void export_replaygain(demuxer_t *demuxer, struct sh_stream *sh,
 
         av_rgain = (AVReplayGain*)src_sd->data;
         rgain    = talloc_ptrtype(demuxer, rgain);
+        rgain->track_gain = rgain->album_gain = 0;
+        rgain->track_peak = rgain->album_peak = 1;
 
         // Set values in *rgain, using track gain as a fallback for album gain
         // if the latter is not present. This behavior matches that in
@@ -702,8 +704,17 @@ static void handle_new_stream(demuxer_t *demuxer, int i)
         sh->codec->disp_h = codec->height;
         if (st->avg_frame_rate.num)
             sh->codec->fps = av_q2d(st->avg_frame_rate);
-        if (priv->format_hack.image_format)
+        if (st->nb_frames <= 1 && (
+                sh->attached_picture ||
+                bstr_endswith0(bstr0(priv->avif->name), "_pipe") ||
+                strcmp(priv->avif->name, "alias_pix") == 0 ||
+                strcmp(priv->avif->name, "gif") == 0 ||
+                strcmp(priv->avif->name, "image2pipe") == 0
+            )) {
+            MP_VERBOSE(demuxer, "Assuming this is an image format.\n");
+            sh->image = true;
             sh->codec->fps = priv->mf_fps;
+        }
         sh->codec->par_w = st->sample_aspect_ratio.num;
         sh->codec->par_h = st->sample_aspect_ratio.den;
 
@@ -796,8 +807,6 @@ static void handle_new_stream(demuxer_t *demuxer, int i)
         if (lang && lang->value && strcmp(lang->value, "und") != 0)
             sh->lang = talloc_strdup(sh, lang->value);
         sh->hls_bitrate = dict_get_decimal(st->metadata, "variant_bitrate", 0);
-        if (!sh->title && sh->hls_bitrate > 0)
-            sh->title = talloc_asprintf(sh, "bitrate %d", sh->hls_bitrate);
         sh->missing_timestamps = !!(priv->avif_flags & AVFMT_NOTIMESTAMPS);
         mp_tags_copy_from_av_dictionary(sh->tags, st->metadata);
         demux_add_sh_stream(demuxer, sh);
@@ -984,6 +993,7 @@ static int demux_open_lavf(demuxer_t *demuxer, enum demux_check check)
         case 1: transport = "udp";  break;
         case 2: transport = "tcp";  break;
         case 3: transport = "http"; break;
+        case 4: transport = "udp_multicast"; break;
         }
         if (transport)
             av_dict_set(&dopts, "rtsp_transport", transport, 0);
@@ -1014,6 +1024,20 @@ static int demux_open_lavf(demuxer_t *demuxer, enum demux_check check)
     if (av_dict_copy(&priv->av_opts, dopts, 0) < 0) {
         av_dict_free(&dopts);
         return -1;
+    }
+
+    if (priv->format_hack.readall_on_no_streamseek && priv->pb &&
+        !priv->pb->seekable)
+    {
+        MP_VERBOSE(demuxer, "Non-seekable demuxer pre-read hack...\n");
+        // Read incremental to avoid unnecessary large buffer sizes.
+        int r = 0;
+        for (int n = 16; n < 29; n++) {
+            r = stream_peek(priv->stream, 1 << n);
+            if (r < (1 << n))
+                break;
+        }
+        MP_VERBOSE(demuxer, "...did read %d bytes.\n", r);
     }
 
     if (avformat_open_input(&avfc, priv->filename, priv->avif, &dopts) < 0) {
@@ -1092,6 +1116,9 @@ static int demux_open_lavf(demuxer_t *demuxer, enum demux_check check)
             demuxer->duration = duration;
     }
 
+    if (demuxer->duration < 0 && priv->format_hack.no_seek_on_no_duration)
+        demuxer->seekable = false;
+
     // In some cases, libavformat will export bogus bullshit timestamps anyway,
     // such as with mjpeg.
     if (priv->avif_flags & AVFMT_NOTIMESTAMPS) {
@@ -1126,13 +1153,17 @@ static bool demux_lavf_read_packet(struct demuxer *demux,
     update_read_stats(demux);
     if (r < 0) {
         av_packet_unref(pkt);
-        if (r == AVERROR(EAGAIN))
-            return true;
         if (r == AVERROR_EOF)
             return false;
         MP_WARN(demux, "error reading packet: %s.\n", av_err2str(r));
-        return false;
+        if (priv->retry_counter >= 10) {
+            MP_ERR(demux, "...treating it as fatal error.\n");
+            return false;
+        }
+        priv->retry_counter += 1;
+        return true;
     }
+    priv->retry_counter = 0;
 
     add_new_streams(demux);
     update_metadata(demux);
@@ -1161,10 +1192,8 @@ static bool demux_lavf_read_packet(struct demuxer *demux,
     dp->duration = pkt->duration * av_q2d(st->time_base);
     dp->pos = pkt->pos;
     dp->keyframe = pkt->flags & AV_PKT_FLAG_KEY;
-#if LIBAVFORMAT_VERSION_MICRO >= 100
     if (pkt->flags & AV_PKT_FLAG_DISCARD)
         MP_ERR(demux, "Edit lists are not correctly supported (FFmpeg issue).\n");
-#endif
     av_packet_unref(pkt);
 
     if (priv->format_hack.clear_filepos)
@@ -1324,6 +1353,8 @@ static void demux_close_lavf(demuxer_t *demuxer)
         }
         if (priv->own_stream)
             free_stream(priv->stream);
+        if (priv->av_opts)
+            av_dict_free(&priv->av_opts);
         talloc_free(priv);
         demuxer->priv = NULL;
     }

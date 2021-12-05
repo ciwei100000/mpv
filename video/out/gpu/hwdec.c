@@ -73,7 +73,7 @@ const struct ra_hwdec_driver *const ra_hwdec_drivers[] = {
 #if HAVE_RPI_MMAL
     &ra_hwdec_rpi_overlay,
 #endif
-#if HAVE_DRMPRIME && HAVE_DRM
+#if HAVE_DRM
     &ra_hwdec_drmprime_drm,
 #endif
 
@@ -106,8 +106,9 @@ struct ra_hwdec *ra_hwdec_load_driver(struct ra *ra, struct mp_log *log,
 }
 
 int ra_hwdec_validate_opt(struct mp_log *log, const m_option_t *opt,
-                          struct bstr name, struct bstr param)
+                          struct bstr name, const char **value)
 {
+    struct bstr param = bstr0(*value);
     bool help = bstr_equals0(param, "help");
     if (help)
         mp_info(log, "Available hwdecs:\n");

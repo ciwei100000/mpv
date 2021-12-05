@@ -36,6 +36,8 @@ function detect_platform()
         return 'windows'
     elseif mp.get_property_native('options/macos-force-dedicated-gpu', o) ~= o then
         return 'macos'
+    elseif os.getenv('WAYLAND_DISPLAY') then
+        return 'wayland'
     end
     return 'x11'
 end
@@ -52,25 +54,6 @@ end
 
 -- Apply user-set options
 options.read_options(opts)
-
--- Build a list of commands, properties and options for tab-completion
-local option_info = {
-    'name', 'type', 'set-from-commandline', 'set-locally', 'default-value',
-    'min', 'max', 'choices',
-}
-local cmd_list = {}
-for i, cmd in ipairs(mp.get_property_native('command-list')) do
-    cmd_list[i] = cmd.name
-end
-local prop_list = mp.get_property_native('property-list')
-for _, opt in ipairs(mp.get_property_native('options')) do
-    prop_list[#prop_list + 1] = 'options/' .. opt
-    prop_list[#prop_list + 1] = 'file-local-options/' .. opt
-    prop_list[#prop_list + 1] = 'option-info/' .. opt
-    for _, p in ipairs(option_info) do
-        prop_list[#prop_list + 1] = 'option-info/' .. opt .. '/' .. p
-    end
-end
 
 local repl_active = false
 local insert_mode = false
@@ -226,14 +209,16 @@ function set_active(active)
         repl_active = false
         undefine_key_bindings()
         mp.enable_messages('silent:terminal-default')
+        collectgarbage()
     end
     update()
 end
 
 -- Show the repl if hidden and replace its contents with 'text'
 -- (script-message-to repl type)
-function show_and_type(text)
+function show_and_type(text, cursor_pos)
     text = text or ''
+    cursor_pos = tonumber(cursor_pos)
 
     -- Save the line currently being edited, just in case
     if line ~= text and line ~= '' and history[#history] ~= line then
@@ -241,7 +226,12 @@ function show_and_type(text)
     end
 
     line = text
-    cursor = line:len() + 1
+    if cursor_pos ~= nil and cursor_pos >= 1
+       and cursor_pos <= line:len() + 1 then
+        cursor = math.floor(cursor_pos)
+    else
+        cursor = line:len() + 1
+    end
     history_pos = #history + 1
     insert_mode = false
     if repl_active then
@@ -270,7 +260,7 @@ function prev_utf8(str, pos)
     return pos
 end
 
--- Insert a character at the current cursor position (any_unicode, Shift+Enter)
+-- Insert a character at the current cursor position (any_unicode)
 function handle_char_input(c)
     if insert_mode then
         line = line:sub(1, cursor - 1) .. c .. line:sub(next_utf8(line, cursor))
@@ -323,10 +313,13 @@ function clear()
     update()
 end
 
--- Close the REPL if the current line is empty, otherwise do nothing (Ctrl+D)
+-- Close the REPL if the current line is empty, otherwise delete the next
+-- character (Ctrl+D)
 function maybe_exit()
     if line == '' then
         set_active(false)
+    else
+        handle_del()
     end
 end
 
@@ -467,18 +460,39 @@ end
 --   append: An extra string to be appended to the end of a successful
 --           completion. It is only appended if 'list' contains exactly one
 --           match.
-local completers = {
-    { pattern = '^%s*()[%w_-]+()$', list = cmd_list, append = ' ' },
-    { pattern = '^%s*set%s+()[%w_/-]+()$', list = prop_list, append = ' ' },
-    { pattern = '^%s*set%s+"()[%w_/-]+()$', list = prop_list, append = '" ' },
-    { pattern = '^%s*add%s+()[%w_/-]+()$', list = prop_list, append = ' ' },
-    { pattern = '^%s*add%s+"()[%w_/-]+()$', list = prop_list, append = '" ' },
-    { pattern = '^%s*cycle%s+()[%w_/-]+()$', list = prop_list, append = ' ' },
-    { pattern = '^%s*cycle%s+"()[%w_/-]+()$', list = prop_list, append = '" ' },
-    { pattern = '^%s*multiply%s+()[%w_/-]+()$', list = prop_list, append = ' ' },
-    { pattern = '^%s*multiply%s+"()[%w_/-]+()$', list = prop_list, append = '" ' },
-    { pattern = '${()[%w_/-]+()$', list = prop_list, append = '}' },
-}
+function build_completers()
+    -- Build a list of commands, properties and options for tab-completion
+    local option_info = {
+        'name', 'type', 'set-from-commandline', 'set-locally', 'default-value',
+        'min', 'max', 'choices',
+    }
+    local cmd_list = {}
+    for i, cmd in ipairs(mp.get_property_native('command-list')) do
+        cmd_list[i] = cmd.name
+    end
+    local prop_list = mp.get_property_native('property-list')
+    for _, opt in ipairs(mp.get_property_native('options')) do
+        prop_list[#prop_list + 1] = 'options/' .. opt
+        prop_list[#prop_list + 1] = 'file-local-options/' .. opt
+        prop_list[#prop_list + 1] = 'option-info/' .. opt
+        for _, p in ipairs(option_info) do
+            prop_list[#prop_list + 1] = 'option-info/' .. opt .. '/' .. p
+        end
+    end
+
+    return {
+        { pattern = '^%s*()[%w_-]+()$', list = cmd_list, append = ' ' },
+        { pattern = '^%s*set%s+()[%w_/-]+()$', list = prop_list, append = ' ' },
+        { pattern = '^%s*set%s+"()[%w_/-]+()$', list = prop_list, append = '" ' },
+        { pattern = '^%s*add%s+()[%w_/-]+()$', list = prop_list, append = ' ' },
+        { pattern = '^%s*add%s+"()[%w_/-]+()$', list = prop_list, append = '" ' },
+        { pattern = '^%s*cycle%s+()[%w_/-]+()$', list = prop_list, append = ' ' },
+        { pattern = '^%s*cycle%s+"()[%w_/-]+()$', list = prop_list, append = '" ' },
+        { pattern = '^%s*multiply%s+()[%w_/-]+()$', list = prop_list, append = ' ' },
+        { pattern = '^%s*multiply%s+"()[%w_/-]+()$', list = prop_list, append = '" ' },
+        { pattern = '${()[%w_/-]+()$', list = prop_list, append = '}' },
+    }
+end
 
 -- Use 'list' to find possible tab-completions for 'part.' Returns the longest
 -- common prefix of all the matching list items and a flag that indicates
@@ -513,7 +527,7 @@ function complete()
     local after_cur = line:sub(cursor)
 
     -- Try the first completer that works
-    for _, completer in ipairs(completers) do
+    for _, completer in ipairs(build_completers()) do
         -- Completer patterns should return the start and end of the word to be
         -- completed as the first and second capture groups
         local _, _, s, e = before_cur:find(completer.pattern)
@@ -560,7 +574,7 @@ function go_end()
     update()
 end
 
--- Delete from the cursor to the end of the word (Ctrl+W)
+-- Delete from the cursor to the beginning of the word (Ctrl+Backspace)
 function del_word()
     local before_cur = line:sub(1, cursor - 1)
     local after_cur = line:sub(cursor)
@@ -568,6 +582,18 @@ function del_word()
     before_cur = before_cur:gsub('[^%s]+%s*$', '', 1)
     line = before_cur .. after_cur
     cursor = before_cur:len() + 1
+    update()
+end
+
+-- Delete from the cursor to the end of the word (Ctrl+Del)
+function del_next_word()
+    if cursor > line:len() then return end
+
+    local before_cur = line:sub(1, cursor - 1)
+    local after_cur = line:sub(cursor)
+
+    after_cur = after_cur:gsub('^%s*[^%s]+', '', 1)
+    line = before_cur .. after_cur
     update()
 end
 
@@ -595,6 +621,14 @@ function get_clipboard(clip)
     if platform == 'x11' then
         local res = utils.subprocess({
             args = { 'xclip', '-selection', clip and 'clipboard' or 'primary', '-out' },
+            playback_only = false,
+        })
+        if not res.error then
+            return res.stdout
+        end
+    elseif platform == 'wayland' then
+        local res = utils.subprocess({
+            args = { 'wl-paste', clip and '-n' or  '-np' },
             playback_only = false,
         })
         if not res.error then
@@ -638,7 +672,7 @@ function get_clipboard(clip)
 end
 
 -- Paste text from the window-system's clipboard. 'clip' determines whether the
--- clipboard or the primary selection buffer is used (on X11 only.)
+-- clipboard or the primary selection buffer is used (on X11 and Wayland only.)
 function paste(clip)
     local text = get_clipboard(clip)
     local before_cur = line:sub(1, cursor - 1)
@@ -650,41 +684,67 @@ end
 
 -- List of input bindings. This is a weird mashup between common GUI text-input
 -- bindings and readline bindings.
-local bindings = {
-    { 'esc',         function() set_active(false) end       },
-    { 'enter',       handle_enter                           },
-    { 'shift+enter', function() handle_char_input('\n') end },
-    { 'bs',          handle_backspace                       },
-    { 'shift+bs',    handle_backspace                       },
-    { 'del',         handle_del                             },
-    { 'shift+del',   handle_del                             },
-    { 'ins',         handle_ins                             },
-    { 'shift+ins',   function() paste(false) end            },
-    { 'mbtn_mid',    function() paste(false) end            },
-    { 'left',        function() prev_char() end             },
-    { 'right',       function() next_char() end             },
-    { 'up',          function() move_history(-1) end        },
-    { 'wheel_up',    function() move_history(-1) end        },
-    { 'down',        function() move_history(1) end         },
-    { 'wheel_down',  function() move_history(1) end         },
-    { 'wheel_left',  function() end                         },
-    { 'wheel_right', function() end                         },
-    { 'ctrl+left',   prev_word                              },
-    { 'ctrl+right',  next_word                              },
-    { 'tab',         complete                               },
-    { 'home',        go_home                                },
-    { 'end',         go_end                                 },
-    { 'pgup',        handle_pgup                            },
-    { 'pgdwn',       handle_pgdown                          },
-    { 'ctrl+c',      clear                                  },
-    { 'ctrl+d',      maybe_exit                             },
-    { 'ctrl+k',      del_to_eol                             },
-    { 'ctrl+l',      clear_log_buffer                       },
-    { 'ctrl+u',      del_to_start                           },
-    { 'ctrl+v',      function() paste(true) end             },
-    { 'meta+v',      function() paste(true) end             },
-    { 'ctrl+w',      del_word                               },
-}
+function get_bindings()
+    local bindings = {
+        { 'esc',         function() set_active(false) end       },
+        { 'enter',       handle_enter                           },
+        { 'kp_enter',    handle_enter                           },
+        { 'shift+enter', function() handle_char_input('\n') end },
+        { 'ctrl+j',      handle_enter                           },
+        { 'ctrl+m',      handle_enter                           },
+        { 'bs',          handle_backspace                       },
+        { 'shift+bs',    handle_backspace                       },
+        { 'ctrl+h',      handle_backspace                       },
+        { 'del',         handle_del                             },
+        { 'shift+del',   handle_del                             },
+        { 'ins',         handle_ins                             },
+        { 'shift+ins',   function() paste(false) end            },
+        { 'mbtn_mid',    function() paste(false) end            },
+        { 'left',        function() prev_char() end             },
+        { 'ctrl+b',      function() prev_char() end             },
+        { 'right',       function() next_char() end             },
+        { 'ctrl+f',      function() next_char() end             },
+        { 'up',          function() move_history(-1) end        },
+        { 'ctrl+p',      function() move_history(-1) end        },
+        { 'wheel_up',    function() move_history(-1) end        },
+        { 'down',        function() move_history(1) end         },
+        { 'ctrl+n',      function() move_history(1) end         },
+        { 'wheel_down',  function() move_history(1) end         },
+        { 'wheel_left',  function() end                         },
+        { 'wheel_right', function() end                         },
+        { 'ctrl+left',   prev_word                              },
+        { 'alt+b',       prev_word                              },
+        { 'ctrl+right',  next_word                              },
+        { 'alt+f',       next_word                              },
+        { 'tab',         complete                               },
+        { 'ctrl+i',      complete                               },
+        { 'ctrl+a',      go_home                                },
+        { 'home',        go_home                                },
+        { 'ctrl+e',      go_end                                 },
+        { 'end',         go_end                                 },
+        { 'pgup',        handle_pgup                            },
+        { 'pgdwn',       handle_pgdown                          },
+        { 'ctrl+c',      clear                                  },
+        { 'ctrl+d',      maybe_exit                             },
+        { 'ctrl+k',      del_to_eol                             },
+        { 'ctrl+l',      clear_log_buffer                       },
+        { 'ctrl+u',      del_to_start                           },
+        { 'ctrl+v',      function() paste(true) end             },
+        { 'meta+v',      function() paste(true) end             },
+        { 'ctrl+bs',     del_word                               },
+        { 'ctrl+w',      del_word                               },
+        { 'ctrl+del',    del_next_word                          },
+        { 'alt+d',       del_next_word                          },
+        { 'kp_dec',      function() handle_char_input('.') end  },
+    }
+
+    for i = 0, 9 do
+        bindings[#bindings + 1] =
+            {'kp' .. i, function() handle_char_input('' .. i) end}
+    end
+
+    return bindings
+end
 
 local function text_input(info)
     if info.key_text and (info.event == "press" or info.event == "down"
@@ -698,7 +758,7 @@ function define_key_bindings()
     if #key_bindings > 0 then
         return
     end
-    for _, bind in ipairs(bindings) do
+    for _, bind in ipairs(get_bindings()) do
         -- Generate arbitrary name for removing the bindings later.
         local name = "_console_" .. (#key_bindings + 1)
         key_bindings[#key_bindings + 1] = name
@@ -723,8 +783,8 @@ mp.add_key_binding(nil, 'enable', function()
 end)
 
 -- Add a script-message to show the REPL and fill it with the provided text
-mp.register_script_message('type', function(text)
-    show_and_type(text)
+mp.register_script_message('type', function(text, cursor_pos)
+    show_and_type(text, cursor_pos)
 end)
 
 -- Redraw the REPL when the OSD size changes. This is needed because the
@@ -772,3 +832,5 @@ mp.register_event('log-message', function(e)
 
     log_add(style, '[' .. e.prefix .. '] ' .. e.text)
 end)
+
+collectgarbage()

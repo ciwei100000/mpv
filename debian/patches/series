@@ -1,6 +1,3 @@
-03_waf.patch
-05_add-keywords.patch
-06_ffmpeg-abi.patch
-07_io-stdin-used.patch
-08_lua_security.patch
-0006-demux_mf-improve-format-string-processing.patch
+0001-waf.patch
+0002-Add-keywords-to-desktop-file.patch
+0003-io-stdin-used.patch

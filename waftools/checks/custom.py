@@ -5,7 +5,8 @@ from distutils.version import StrictVersion
 import os
 
 __all__ = ["check_pthreads", "check_iconv", "check_lua",
-           "check_cocoa", "check_wl_protocols", "check_swift"]
+           "check_cocoa", "check_wl_protocols", "check_swift",
+           "check_egl_provider"]
 
 pthreads_program = load_fragment('pthreads.c')
 
@@ -57,16 +58,29 @@ def check_iconv(ctx, dependency_identifier):
     return check_libs(libs, checkfn)(ctx, dependency_identifier)
 
 def check_lua(ctx, dependency_identifier):
+    # mainline lua 5.1/5.2 doesn't have a .pc file, so each distro chooses
+    # a different name, either non-versioned (lua.pc) or lua5x/lua5.x/lua-5.x
+    # and we need to check them all. luadef* are the non-versioned .pc files,
+    # and the rest represent the .pc file exactly e.g. --lua=lua-5.1
+    # The non lua* names are legacy in mpv configure, and kept for compat.
     lua_versions = [
-        ( '51',     'lua >= 5.1.0 lua < 5.2.0'),
-        ( '51obsd', 'lua51 >= 5.1.0'), # OpenBSD
-        ( '51deb',  'lua5.1 >= 5.1.0'), # debian
-        ( '51fbsd', 'lua-5.1 >= 5.1.0'), # FreeBSD
+        ( 'luadef52','lua >= 5.2.0 lua < 5.3.0' ), # package "lua"
         ( '52',     'lua >= 5.2.0 lua < 5.3.0' ),
+        ( 'lua52',  'lua52 >= 5.2.0'),
         ( '52arch', 'lua52 >= 5.2.0'), # Arch
+        ( 'lua5.2', 'lua5.2 >= 5.2.0'),
         ( '52deb',  'lua5.2 >= 5.2.0'), # debian
+        ( 'lua-5.2','lua-5.2 >= 5.2.0'),
         ( '52fbsd', 'lua-5.2 >= 5.2.0'), # FreeBSD
         ( 'luajit', 'luajit >= 2.0.0' ),
+        ( 'luadef51','lua >= 5.1.0 lua < 5.2.0'), # package "lua"
+        ( '51',     'lua >= 5.1.0 lua < 5.2.0'),
+        ( 'lua51',  'lua51 >= 5.1.0'),
+        ( '51obsd', 'lua51 >= 5.1.0'), # OpenBSD
+        ( 'lua5.1', 'lua5.1 >= 5.1.0'),
+        ( '51deb',  'lua5.1 >= 5.1.0'), # debian
+        ( 'lua-5.1','lua-5.1 >= 5.1.0'),
+        ( '51fbsd', 'lua-5.1 >= 5.1.0'), # FreeBSD
     ]
 
     if ctx.options.LUA_VER:
@@ -74,13 +88,15 @@ def check_lua(ctx, dependency_identifier):
             [lv for lv in lua_versions if lv[0] == ctx.options.LUA_VER]
 
     for lua_version, pkgconfig_query in lua_versions:
+        display_version = lua_version
+        lua_version = inflector.sanitize_id(lua_version)
         if check_pkg_config(pkgconfig_query, uselib_store=lua_version) \
             (ctx, dependency_identifier):
             # XXX: this is a bit of a hack, ask waf developers if I can copy
             # the uselib_store to 'lua'
             ctx.mark_satisfied(lua_version)
             ctx.add_optional_message(dependency_identifier,
-                                     'version found: ' + lua_version)
+                                     'version found: ' + display_version)
             return True
     return False
 
@@ -113,14 +129,42 @@ def check_cocoa(ctx, dependency_identifier):
 
     return res
 
-def check_swift(ctx, dependency_identifier):
-    minVer = StrictVersion("3.0.2")
-    if ctx.env.SWIFT_VERSION:
-        if StrictVersion(ctx.env.SWIFT_VERSION) >= minVer:
-            ctx.add_optional_message(dependency_identifier,
-                                     'version found: ' + str(ctx.env.SWIFT_VERSION))
-            return True
-    ctx.add_optional_message(dependency_identifier,
-                             "'swift >= " + str(minVer) + "' not found, found " +
-                             str(ctx.env.SWIFT_VERSION or None))
-    return False
+def check_swift(version):
+    def fn(ctx, dependency_identifier):
+        minVer = StrictVersion(version)
+        if ctx.env.SWIFT_VERSION:
+            if StrictVersion(ctx.env.SWIFT_VERSION) >= minVer:
+                ctx.add_optional_message(dependency_identifier,
+                                         'version found: ' + str(ctx.env.SWIFT_VERSION))
+                return True
+        ctx.add_optional_message(dependency_identifier,
+                                 "'swift >= " + str(minVer) + "' not found, found " +
+                                 str(ctx.env.SWIFT_VERSION or None))
+        return False
+    return fn
+
+def check_egl_provider(minVersion=None, name='egl', check=None):
+    def fn(ctx, dependency_identifier, **kw):
+        if not hasattr(ctx, 'egl_provider'):
+            egl_provider_check = check or check_pkg_config(name)
+            if egl_provider_check(ctx, dependency_identifier):
+                ctx.egl_provider = name
+                for ver in ['1.5', '1.4', '1.3', '1.2', '1.1', '1.0']:
+                    stmt = 'int x[EGL_VERSION_{0}]'.format(ver.replace('.','_'))
+                    check_stmt = check_statement(['EGL/egl.h'], stmt)
+                    if check_stmt(ctx, dependency_identifier):
+                        ctx.egl_provider_version = StrictVersion(ver)
+                        break
+                return True
+            else:
+                return False
+        else:
+            minVersionSV = minVersion and StrictVersion(minVersion)
+            if not minVersionSV or ctx.egl_provider_version and \
+                    ctx.egl_provider_version >= minVersionSV:
+                defkey = inflector.define_key(dependency_identifier)
+                ctx.define(defkey, 1)
+                return True
+            else:
+                return False
+    return fn

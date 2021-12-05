@@ -116,7 +116,7 @@ static void determine_codec_params(struct mp_filter *da, AVPacket *pkt,
     if (profile != FF_PROFILE_UNKNOWN || spdif_ctx->codec_id != AV_CODEC_ID_DTS)
         return;
 
-    AVCodec *codec = avcodec_find_decoder(spdif_ctx->codec_id);
+    const AVCodec *codec = avcodec_find_decoder(spdif_ctx->codec_id);
     if (!codec)
         goto done;
 
@@ -176,10 +176,8 @@ static int init_filter(struct mp_filter *da, AVPacket *pkt)
         goto fail;
     }
 
-    // Request minimal buffering (not available on Libav)
-#if LIBAVFORMAT_VERSION_MICRO >= 100
+    // Request minimal buffering
     lavf_ctx->pb->direct = 1;
-#endif
 
     AVStream *stream = avformat_new_stream(lavf_ctx, 0);
     if (!stream)

@@ -35,14 +35,14 @@ zstyle -a ":completion:*:*:$service:*" tag-order tag_order ||
 
 typeset -ga _mpv_completion_arguments _mpv_completion_protocols
 
-function generate_arguments {
+function _mpv_generate_arguments {
 
   _mpv_completion_arguments=()
 
   local -a option_aliases=()
 
   local list_options_line
-  for list_options_line in "${(@f)$($words[1] --list-options)}"; do
+  for list_options_line in "${(@f)$($~words[1] --list-options)}"; do
 
     [[ $list_options_line =~ $'^[ \t]+--([^ \t]+)[ \t]*(.*)' ]] || continue
 
@@ -143,22 +143,22 @@ function generate_arguments {
 
 }
 
-function generate_protocols {
+function _mpv_generate_protocols {
   _mpv_completion_protocols=()
   local list_protos_line
-  for list_protos_line in "${(@f)$($words[1] --list-protocols)}"; do
+  for list_protos_line in "${(@f)$($~words[1] --list-protocols)}"; do
     if [[ $list_protos_line =~ $'^[ \t]+(.*)' ]]; then
       _mpv_completion_protocols+="$match[1]"
     fi
   done
 }
 
-function generate_if_changed {
+function _mpv_generate_if_changed {
   # Called with $1 = 'arguments' or 'protocols'. Generates the respective list
   # on the first run and re-generates it if the executable being completed for
   # is different than the one we used to generate the cached list.
   typeset -gA _mpv_completion_binary
-  local current_binary=${words[1]:c}
+  local current_binary=${~words[1]:c}
   zmodload -F zsh/stat b:zstat
   current_binary+=T$(zstat +mtime $current_binary)
   if [[ $_mpv_completion_binary[$1] != $current_binary ]]; then
@@ -168,7 +168,7 @@ function generate_if_changed {
     # However, we can't rely on PCRE being available, so we keep all our
     # patterns POSIX-compatible.
     zmodload -s -F zsh/pcre C:pcre-match && setopt re_match_pcre
-    generate_$1
+    _mpv_generate_$1
     _mpv_completion_binary[$1]=$current_binary
   fi
 }
@@ -177,7 +177,7 @@ function generate_if_changed {
 # an option. This way, the user should never see a delay when just completing a
 # filename.
 if [[ $words[$CURRENT] == -* ]]; then
-  generate_if_changed arguments
+  _mpv_generate_if_changed arguments
 fi
 
 local rc=1
@@ -207,7 +207,7 @@ case $state in
     esac
     local -a values
     local current
-    for current in "${(@f)$($words[1] --${option_name}=help)}"; do
+    for current in "${(@f)$($~words[1] --${option_name}=help)}"; do
       [[ $current =~ $pattern ]] || continue;
       local name=${match[name_group]//:/\\:} desc=${match[desc_group]}
       if [[ -n $desc ]]; then
@@ -237,7 +237,7 @@ case $state in
       if _requested urls; then
         while _next_label urls expl URL; do
           _urls "$expl[@]" && rc=0
-          generate_if_changed protocols
+          _mpv_generate_if_changed protocols
           compadd -S '' "$expl[@]" $_mpv_completion_protocols && rc=0
         done
       fi

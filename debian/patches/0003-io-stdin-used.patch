@@ -1,0 +1,23 @@
+From: James Cowgill <jcowgill@debian.org>
+Date: Tue, 7 Sep 2021 10:50:26 +0200
+Subject: Add _IO_stdin_used to mpv version script
+
+This symbol is used on some architectures by glibc to determine whether the
+calling executable is linked with the old libio ABI or the new libio ABI. All
+new executables are supposed to have it defined. Unfortunately, if the version
+script does not allow this symbol to be exported, glibc will try to use the
+old ABI and cause chaos (crashes in various places).
+Author: James Cowgill <jcowgill@debian.org>
+---
+ libmpv/mpv.def | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/libmpv/mpv.def b/libmpv/mpv.def
+index 50a7135..cc2d9b0 100644
+--- a/libmpv/mpv.def
++++ b/libmpv/mpv.def
+@@ -1,3 +1,4 @@
++_IO_stdin_used
+ mpv_abort_async_command
+ mpv_client_api_version
+ mpv_client_id

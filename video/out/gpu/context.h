@@ -44,6 +44,7 @@ struct ra_ctx_fns {
     // optional.
     void (*wakeup)(struct ra_ctx *ctx);
     void (*wait_events)(struct ra_ctx *ctx, int64_t until_time_us);
+    void (*update_render_opts)(struct ra_ctx *ctx);
 
     // Initialize/destroy the 'struct ra' and possibly the underlying VO backend.
     // Not normally called by the user of the ra_ctx.
@@ -99,7 +100,11 @@ struct ra_ctx *ra_ctx_create(struct vo *vo, const char *context_type,
 void ra_ctx_destroy(struct ra_ctx **ctx);
 
 struct m_option;
+int ra_ctx_api_help(struct mp_log *log, const struct m_option *opt,
+                    struct bstr name);
 int ra_ctx_validate_api(struct mp_log *log, const struct m_option *opt,
-                        struct bstr name, struct bstr param);
+                        struct bstr name, const char **value);
+int ra_ctx_context_help(struct mp_log *log, const struct m_option *opt,
+                        struct bstr name);
 int ra_ctx_validate_context(struct mp_log *log, const struct m_option *opt,
-                            struct bstr name, struct bstr param);
+                            struct bstr name, const char **value);

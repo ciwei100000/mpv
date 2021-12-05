@@ -188,7 +188,7 @@ static void reset(struct ao *ao)
     priv->paused = 1;
 }
 
-static void resume(struct ao *ao)
+static void start(struct ao *ao)
 {
     struct priv *priv = ao->priv;
     if (priv->paused)
@@ -204,14 +204,13 @@ const struct ao_driver audio_out_sdl = {
     .init      = init,
     .uninit    = uninit,
     .reset     = reset,
-    .resume    = resume,
-    .reports_underruns = true,
+    .start     = start,
     .priv_size = sizeof(struct priv),
     .priv_defaults = &(const struct priv) {
         .buflen = 0, // use SDL default
     },
     .options = (const struct m_option[]) {
-        OPT_FLOAT("buflen", buflen, 0),
+        {"buflen", OPT_FLOAT(buflen)},
         {0}
     },
     .options_prefix = "sdl",

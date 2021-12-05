@@ -15,6 +15,7 @@
  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -62,8 +63,8 @@ static void uninit_avctx(struct mp_filter *vd);
 static int get_buffer2_direct(AVCodecContext *avctx, AVFrame *pic, int flags);
 static enum AVPixelFormat get_format_hwdec(struct AVCodecContext *avctx,
                                            const enum AVPixelFormat *pix_fmt);
-static int hwdec_validate_opt(struct mp_log *log, const m_option_t *opt,
-                              struct bstr name, struct bstr param);
+static int hwdec_opt_help(struct mp_log *log, const m_option_t *opt,
+                          struct bstr name);
 
 #define HWDEC_DELAY_QUEUE_COUNT 2
 
@@ -98,32 +99,30 @@ static const struct m_opt_choice_alternatives discard_names[] = {
     {"all",         AVDISCARD_ALL},
     {0}
 };
-#define OPT_DISCARD(name, field, flags) \
-    OPT_GENERAL(int, name, field, flags, .type = CONF_TYPE_CHOICE, \
-                .priv = (void *)discard_names)
+#define OPT_DISCARD(field) OPT_CHOICE_C(field, discard_names)
 
 const struct m_sub_options vd_lavc_conf = {
     .opts = (const m_option_t[]){
-        OPT_FLAG("vd-lavc-fast", fast, 0),
-        OPT_FLAG("vd-lavc-show-all", show_all, 0),
-        OPT_DISCARD("vd-lavc-skiploopfilter", skip_loop_filter, 0),
-        OPT_DISCARD("vd-lavc-skipidct", skip_idct, 0),
-        OPT_DISCARD("vd-lavc-skipframe", skip_frame, 0),
-        OPT_DISCARD("vd-lavc-framedrop", framedrop, 0),
-        OPT_INT("vd-lavc-threads", threads, M_OPT_MIN, .min = 0),
-        OPT_FLAG("vd-lavc-bitexact", bitexact, 0),
-        OPT_FLAG("vd-lavc-assume-old-x264", old_x264, 0),
-        OPT_FLAG("vd-lavc-check-hw-profile", check_hw_profile, 0),
-        OPT_CHOICE_OR_INT("vd-lavc-software-fallback", software_fallback,
-                          0, 1, INT_MAX, ({"no", INT_MAX}, {"yes", 1})),
-        OPT_KEYVALUELIST("vd-lavc-o", avopts, 0),
-        OPT_FLAG("vd-lavc-dr", dr, 0),
-        OPT_STRING_VALIDATE("hwdec", hwdec_api,
-                            M_OPT_OPTIONAL_PARAM | UPDATE_HWDEC,
-                            hwdec_validate_opt),
-        OPT_STRING("hwdec-codecs", hwdec_codecs, 0),
-        OPT_IMAGEFORMAT("hwdec-image-format", hwdec_image_format, 0, .min = -1),
-        OPT_INTRANGE("hwdec-extra-frames", hwdec_extra_frames, 0, 0, 256),
+        {"vd-lavc-fast", OPT_FLAG(fast)},
+        {"vd-lavc-show-all", OPT_FLAG(show_all)},
+        {"vd-lavc-skiploopfilter", OPT_DISCARD(skip_loop_filter)},
+        {"vd-lavc-skipidct", OPT_DISCARD(skip_idct)},
+        {"vd-lavc-skipframe", OPT_DISCARD(skip_frame)},
+        {"vd-lavc-framedrop", OPT_DISCARD(framedrop)},
+        {"vd-lavc-threads", OPT_INT(threads), M_RANGE(0, DBL_MAX)},
+        {"vd-lavc-bitexact", OPT_FLAG(bitexact)},
+        {"vd-lavc-assume-old-x264", OPT_FLAG(old_x264)},
+        {"vd-lavc-check-hw-profile", OPT_FLAG(check_hw_profile)},
+        {"vd-lavc-software-fallback", OPT_CHOICE(software_fallback,
+            {"no", INT_MAX}, {"yes", 1}), M_RANGE(1, INT_MAX)},
+        {"vd-lavc-o", OPT_KEYVALUELIST(avopts)},
+        {"vd-lavc-dr", OPT_FLAG(dr)},
+        {"hwdec", OPT_STRING(hwdec_api),
+            .help = hwdec_opt_help,
+            .flags = M_OPT_OPTIONAL_PARAM | UPDATE_HWDEC},
+        {"hwdec-codecs", OPT_STRING(hwdec_codecs)},
+        {"hwdec-image-format", OPT_IMAGEFORMAT(hwdec_image_format)},
+        {"hwdec-extra-frames", OPT_INT(hwdec_extra_frames), M_RANGE(0, 256)},
         {0}
     },
     .size = sizeof(struct vd_lavc_params),
@@ -137,7 +136,7 @@ const struct m_sub_options vd_lavc_conf = {
         .framedrop = AVDISCARD_NONREF,
         .dr = 1,
         .hwdec_api = "no",
-        .hwdec_codecs = "h264,vc1,hevc,vp9",
+        .hwdec_codecs = "h264,vc1,hevc,vp8,vp9,av1",
         // Maximum number of surfaces the player wants to buffer. This number
         // might require adjustment depending on whatever the player does;
         // for example, if vo_gpu increases the number of reference surfaces for
@@ -176,7 +175,6 @@ typedef struct lavc_ctx {
     bool flushing;
     struct lavc_state state;
     const char *decoder;
-    bool hwdec_requested;
     bool hwdec_failed;
     bool hwdec_notified;
 
@@ -470,8 +468,6 @@ static void select_and_set_hwdec(struct mp_filter *vd)
         int num_hwdecs = 0;
         add_all_hwdec_methods(&hwdecs, &num_hwdecs);
 
-        ctx->hwdec_requested = true;
-
         for (int n = 0; n < num_hwdecs; n++) {
             struct hwdec_info *hwdec = &hwdecs[n];
 
@@ -538,33 +534,30 @@ static void select_and_set_hwdec(struct mp_filter *vd)
     }
 }
 
-static int hwdec_validate_opt(struct mp_log *log, const m_option_t *opt,
-                              struct bstr name, struct bstr param)
+static int hwdec_opt_help(struct mp_log *log, const m_option_t *opt,
+                          struct bstr name)
 {
-    if (bstr_equals0(param, "help")) {
-        struct hwdec_info *hwdecs = NULL;
-        int num_hwdecs = 0;
-        add_all_hwdec_methods(&hwdecs, &num_hwdecs);
+    struct hwdec_info *hwdecs = NULL;
+    int num_hwdecs = 0;
+    add_all_hwdec_methods(&hwdecs, &num_hwdecs);
 
-        mp_info(log, "Valid values (with alternative full names):\n");
+    mp_info(log, "Valid values (with alternative full names):\n");
 
-        for (int n = 0; n < num_hwdecs; n++) {
-            struct hwdec_info *hwdec = &hwdecs[n];
+    for (int n = 0; n < num_hwdecs; n++) {
+        struct hwdec_info *hwdec = &hwdecs[n];
 
-            mp_info(log, "  %s (%s)\n", hwdec->method_name, hwdec->name);
-        }
-
-        talloc_free(hwdecs);
-
-        mp_info(log, "  auto (yes '')\n");
-        mp_info(log, "  no\n");
-        mp_info(log, "  auto-safe\n");
-        mp_info(log, "  auto-copy\n");
-        mp_info(log, "  auto-copy-safe\n");
-
-        return M_OPT_EXIT;
+        mp_info(log, "  %s (%s)\n", hwdec->method_name, hwdec->name);
     }
-    return 0;
+
+    talloc_free(hwdecs);
+
+    mp_info(log, "  auto (yes '')\n");
+    mp_info(log, "  no\n");
+    mp_info(log, "  auto-safe\n");
+    mp_info(log, "  auto-copy\n");
+    mp_info(log, "  auto-copy-safe\n");
+
+    return M_OPT_EXIT;
 }
 
 static void force_fallback(struct mp_filter *vd)
@@ -628,10 +621,7 @@ static void init_avctx(struct mp_filter *vd)
         goto error;
     avctx->codec_type = AVMEDIA_TYPE_VIDEO;
     avctx->codec_id = lavc_codec->id;
-
-#if LIBAVCODEC_VERSION_MICRO >= 100
     avctx->pkt_timebase = ctx->codec_timebase;
-#endif
 
     ctx->pic = av_frame_alloc();
     if (!ctx->pic)
@@ -669,7 +659,9 @@ static void init_avctx(struct mp_filter *vd)
     if (!ctx->use_hwdec && ctx->vo && lavc_param->dr) {
         avctx->opaque = vd;
         avctx->get_buffer2 = get_buffer2_direct;
+#if LIBAVCODEC_VERSION_MAJOR < 60
         avctx->thread_safe_callbacks = 1;
+#endif
     }
 
     avctx->flags |= lavc_param->bitexact ? AV_CODEC_FLAG_BITEXACT : 0;
@@ -1105,10 +1097,8 @@ static int decode_frame(struct mp_filter *vd)
     mpi->pts = mp_pts_from_av(ctx->pic->pts, &ctx->codec_timebase);
     mpi->dts = mp_pts_from_av(ctx->pic->pkt_dts, &ctx->codec_timebase);
 
-#if LIBAVCODEC_VERSION_MICRO >= 100
     mpi->pkt_duration =
         mp_pts_from_av(ctx->pic->pkt_duration, &ctx->codec_timebase);
-#endif
 
     av_frame_unref(ctx->pic);
 
@@ -1165,7 +1155,7 @@ static int receive_frame(struct mp_filter *vd, struct mp_frame *out_frame)
         }
     }
 
-    if (!ctx->hwdec_notified && ctx->hwdec_requested) {
+    if (!ctx->hwdec_notified) {
         if (ctx->use_hwdec) {
             MP_INFO(vd, "Using hardware decoding (%s).\n",
                     ctx->hwdec.method_name);

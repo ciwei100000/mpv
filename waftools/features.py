@@ -3,7 +3,7 @@ import optparse
 
 class Feature(object):
     def __init__(self, group, feature):
-        self.group     = group
+        self.group = group
         self.identifier, self.attributes = feature['name'], feature
 
     def add_options(self):
@@ -29,6 +29,7 @@ class Feature(object):
             ],
             'enable': [
                 {'state': 'disable', 'action': 'store_false', 'default': True},
+                {'state': 'enable',  'action': 'store_true',  'default': True},
             ],
         }[self.behaviour()]
 
