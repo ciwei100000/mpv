@@ -62,7 +62,7 @@ Rules-Requires-Root: no
 Package: mpv
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Recommends: xdg-utils, youtube-dl (>= 2014.11.26)
+Recommends: xdg-utils, yt-dlp | youtube-dl (>= 2014.11.26)
 Suggests: libcuda1 [amd64 armf64 i386]
 Multi-Arch: foreign
 Description: video player based on MPlayer/mplayer2
