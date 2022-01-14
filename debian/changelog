@@ -1,3 +1,11 @@
+mpv (0.34.1-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream version 0.34.1
+  * debian/control: Add yt-dpl to Recommends
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Thu, 06 Jan 2022 12:53:19 +0100
+
 mpv (0.34.0-2-nonfree) unstable; urgency=medium
 
   * Merge branch 'debian/0.34.0-2' into ciwei100000
