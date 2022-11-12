@@ -30,7 +30,7 @@ Build-Depends:
  liblua5.2-dev,
  libmujs-dev,
  libpipewire-0.3-dev [linux-any],
- libplacebo-dev (>= 3.104),
+ libplacebo-dev (>= 4.157),
  libpulse-dev,
  librubberband-dev,
  libsdl2-dev,
