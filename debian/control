@@ -45,6 +45,7 @@ Build-Depends:
  libx11-dev,
  libxinerama-dev,
  libxkbcommon-dev [linux-any],
+ libxpresent-dev,
  libxrandr-dev,
  libxss-dev,
  libxv-dev,
