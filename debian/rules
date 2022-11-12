@@ -5,40 +5,19 @@ include /usr/share/dpkg/architecture.mk
 export DEB_BUILD_MAINT_OPTIONS := hardening=+all # #741439, #799738
 
 ifeq ($(DEB_HOST_ARCH_OS),linux)
-  ARCH_CONFIGURE = --enable-dvbin
-endif
-
-ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-else
-NUMJOBS = 1
+  ARCH_CONFIGURE = -Ddvbin=enabled
 endif
 
 %:
 	dh $@
 
 override_dh_auto_configure:
-	python3 ./waf configure						\
-			--prefix=/usr					\
-			--libdir=/usr/lib/$(DEB_HOST_MULTIARCH)		\
-			--confdir=/etc/mpv				\
-			--zshdir=/usr/share/zsh/vendor-completions	\
-			--enable-cdda					\
-			--enable-dvdnav					\
-			--enable-libmpv-shared				\
-			--enable-sdl2					\
-			--disable-build-date				\
-			$(ARCH_CONFIGURE)
-
-override_dh_auto_build:
-	python3 ./waf -v build --jobs=$(NUMJOBS)
-
-override_dh_auto_install:
-	python3 ./waf -v install --destdir=debian/tmp
+	dh_auto_configure -- \
+		-Dlibmpv=true \
+		-Dbuild-data=false \
+		-Dcdda=enabled \
+		-Ddvdnav=enabled \
+		-Dsdl2=enabled
 
 override_dh_installchangelogs:
 	dh_installchangelogs RELEASE_NOTES
-
-override_dh_auto_clean:
-	test -s ./waf && python3 ./waf -v distclean || true
-	find . -name "*.pyc" -delete
