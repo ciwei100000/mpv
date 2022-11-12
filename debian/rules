@@ -20,5 +20,8 @@ override_dh_auto_configure:
 		-Dsdl2=enabled \
 		-Dsndio=disabled
 
+execute_after_dh_auto_install:
+	mv debian/tmp/usr/share/zsh/site-functions debian/tmp/usr/share/zsh/vendor-completions
+
 override_dh_installchangelogs:
 	dh_installchangelogs RELEASE_NOTES
