@@ -6,7 +6,7 @@ mpv (0.35.0-1) experimental; urgency=medium
   * Set upstream metadata fields: Bug-Submit.
 
   [ Sebastian Ramacher ]
-  * New upstream version 0.35.0
+  * New upstream version 0.35.0 (Closes: #102329)
   * SONAME bump: libmpv1 -> libmpv2
   * debian/: Use meson build system
   * debian/patches:
