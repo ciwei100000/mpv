@@ -29,6 +29,7 @@ Build-Depends:
  liblcms2-dev (>= 2.6~),
  liblua5.2-dev,
  libmujs-dev,
+ libpipewire-0.3-dev [linux-any],
  libplacebo-dev (>= 3.104),
  libpulse-dev,
  librubberband-dev,
