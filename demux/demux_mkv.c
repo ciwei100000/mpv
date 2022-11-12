@@ -1362,6 +1362,8 @@ static const char *const mkv_video_tags[][2] = {
     {"V_SNOW",              "snow"},
     {"V_AV1",               "av1"},
     {"V_PNG",               "png"},
+    {"V_AVS2",              "avs2"},
+    {"V_AVS3",              "avs3"},
     {0}
 };
 
@@ -2872,7 +2874,7 @@ static int read_next_block_into_queue(demuxer_t *demuxer)
         if (mkv_d->cluster_end != EBML_UINT_INVALID)
             mkv_d->cluster_end += stream_tell(s);
     }
-    assert(0); // unreachable
+    MP_ASSERT_UNREACHABLE();
 
 add_block:
     index_block(demuxer, &block);

@@ -858,7 +858,7 @@ void m_config_print_option_list(const struct m_config *config, const char *name)
         MP_INFO(config, " %s%-30s", prefix, co->name);
         if (opt->type == &m_option_type_choice) {
             MP_INFO(config, " Choices:");
-            struct m_opt_choice_alternatives *alt = opt->priv;
+            const struct m_opt_choice_alternatives *alt = opt->priv;
             for (int n = 0; alt[n].name; n++)
                 MP_INFO(config, " %s", alt[n].name);
             if (opt->min < opt->max)
@@ -1041,7 +1041,7 @@ int m_config_restore_profile(struct m_config *config, char *name)
         return M_OPT_INVALID;
 
     if (!p->backups)
-        MP_WARN(config, "Profile contains no restore data.\n");
+        MP_WARN(config, "Profile '%s' contains no restore data.\n", name);
 
     restore_backups(&p->backups, config);
 
