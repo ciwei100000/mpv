@@ -7,7 +7,13 @@ Comment:
  are linked to the GPL-3+ libsmbclient library.
 
 Files: *
-Copyright: 2000-2020, mpv/MPlayer/mplayer2 projects
+Copyright:
+ 2000-2022, mpv/MPlayer/mplayer2 projects
+ 2021 Thomas Weißschuh
+ 2021 Oschowa
+ 2020 Andreas Kempf
+ 2021 sfan5
+ 2021 Niklas Haas
 License: LGPL-2.1+
 
 Files: debian/*
@@ -30,8 +36,15 @@ Files:
 Copyright: 2000-2020, mpv/MPlayer/mplayer2 projects
 License: ISC
 
-Files: osdep/android/strnlen.*
-Copyright: 2009, David Schultz <das@FreeBSD.org>
+Files:
+ osdep/android/strnlen.*
+ audio/out/ao_sndio.c
+Copyright:
+ 2009, David Schultz <das@FreeBSD.org>
+ 2008 Alexandre Ratchov
+ 2013 Christain Neukirchen
+ 2020 Rozhuk Ivan
+ 2021 Andrew Krasavin
 License: BSD-2-clause
 
 Files: osdep/timer-darwin.c
@@ -63,7 +76,7 @@ Files:
  video/vdpau.h
  video/vdpau_mixer.c
  video/vdpau_mixer.h
-Copyright: 2000-2020, mpv/MPlayer/mplayer2 projects
+Copyright: 2000-2022, mpv/MPlayer/mplayer2 projects
 License: GPL-2+
 
 Files: audio/filter/af_scaletempo2_internals.h
