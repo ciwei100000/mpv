@@ -25,6 +25,7 @@
 #include <limits.h>
 #include <math.h>
 #include <time.h>
+#include <drm_fourcc.h>
 
 #include "config.h"
 
@@ -90,12 +91,16 @@ const struct m_sub_options drm_conf = {
             M_RANGE(0, INT_MAX)},
         {"drm-format", OPT_CHOICE(drm_format,
             {"xrgb8888",    DRM_OPTS_FORMAT_XRGB8888},
-            {"xrgb2101010", DRM_OPTS_FORMAT_XRGB2101010})},
+            {"xrgb2101010", DRM_OPTS_FORMAT_XRGB2101010},
+            {"xbgr8888",    DRM_OPTS_FORMAT_XBGR8888},
+            {"xbgr2101010", DRM_OPTS_FORMAT_XBGR2101010})},
         {"drm-draw-surface-size", OPT_SIZE_BOX(drm_draw_surface_size)},
 
         {"drm-osd-plane-id", OPT_REPLACED("drm-draw-plane")},
         {"drm-video-plane-id", OPT_REPLACED("drm-drmprime-video-plane")},
         {"drm-osd-size", OPT_REPLACED("drm-draw-surface-size")},
+        {"drm-vrr-enabled", OPT_CHOICE(drm_vrr_enabled,
+            {"no", 0}, {"yes", 1}, {"auto", -1})},
         {0},
     },
     .defaults = &(const struct drm_opts) {
@@ -103,6 +108,7 @@ const struct m_sub_options drm_conf = {
         .drm_atomic = 1,
         .drm_draw_plane = DRM_OPTS_PRIMARY_PLANE,
         .drm_drmprime_video_plane = DRM_OPTS_OVERLAY_PLANE,
+        .drm_vrr_enabled = 0,
     },
     .size = sizeof(struct drm_opts),
 };
@@ -517,6 +523,19 @@ static int open_card_path(const char *path)
     return open(path, O_RDWR | O_CLOEXEC);
 }
 
+static bool card_supports_kms(const char *path)
+{
+#if HAVE_DRM_IS_KMS
+    int fd = open_card_path(path);
+    bool ret = fd != -1 && drmIsKMS(fd);
+    if (fd != -1)
+        close(fd);
+    return ret;
+#else
+    return true;
+#endif
+}
+
 static char *get_primary_device_path(struct mp_log *log, int *card_no)
 {
     drmDevice *devices[DRM_MAX_MINOR] = { 0 };
@@ -551,6 +570,17 @@ static char *get_primary_device_path(struct mp_log *log, int *card_no)
         }
 
         const char *primary_node_path = dev->nodes[DRM_NODE_PRIMARY];
+
+        if (!card_supports_kms(primary_node_path)) {
+            if (card_no_given) {
+                mp_err(log,
+                       "DRM card number %d given, yet it does not support "
+                       "KMS!\n", i);
+                break;
+            }
+
+            continue;
+        }
 
         mp_verbose(log, "Picked DRM card %d, primary node %s%s.\n",
                    i, primary_node_path,
