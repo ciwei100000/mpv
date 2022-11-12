@@ -49,7 +49,7 @@ Build-Depends:
  libxv-dev,
  libzimg-dev,
  meson,
- ninja-build
+ ninja-build,
  pkg-config,
  python3-docutils,
  spirv-cross,
