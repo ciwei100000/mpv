@@ -1,3 +1,10 @@
+mpv (0.35.0-2) experimental; urgency=medium
+
+  * Team upload
+  * debian/control: Add missing dependencies to libmpv-dev
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 13 Nov 2022 21:45:43 +0100
+
 mpv (0.35.0-1) experimental; urgency=medium
 
   * Team upload
