@@ -101,7 +101,52 @@ Description: video player based on MPlayer/mplayer2 (client library)
 Package: libmpv-dev
 Section: libdevel
 Architecture: any
-Depends: libmpv2 (= ${binary:Version}), ${misc:Depends}
+Depends:
+ libmpv2 (= ${binary:Version}),
+ libarchive-dev (>= 3.4),
+ libasound2-dev [linux-any],
+ libass-dev,
+ libavcodec-dev (>= 7:4.0),
+ libavdevice-dev (>= 7:4.0),
+ libavfilter-dev (>= 7:4.0),
+ libavformat-dev (>= 7:4.0),
+ libavutil-dev (>= 7:4.0),
+ libbluray-dev,
+ libcaca-dev,
+ libcdio-paranoia-dev,
+ libdrm-dev (>= 2.4.75),
+ libdvdnav-dev,
+ libegl1-mesa-dev [linux-any],
+ libffmpeg-nvenc-dev [amd64 arm64 i386],
+ libgbm-dev,
+ libgl1-mesa-dev,
+ libjack-dev,
+ libjpeg-dev,
+ liblcms2-dev (>= 2.6~),
+ liblua5.2-dev,
+ libmujs-dev,
+ libpipewire-0.3-dev [linux-any],
+ libplacebo-dev (>= 4.157),
+ libpulse-dev,
+ librubberband-dev,
+ libsdl2-dev,
+ libsixel-dev,
+ libspirv-cross-c-shared-dev,
+ libswscale-dev (>= 7:4.0),
+ libuchardet-dev,
+ libva-dev,
+ libvdpau-dev,
+ libvulkan-dev,
+ libwayland-dev (>= 1.15.0) [linux-any],
+ libx11-dev,
+ libxinerama-dev,
+ libxkbcommon-dev [linux-any],
+ libxpresent-dev,
+ libxrandr-dev,
+ libxss-dev,
+ libxv-dev,
+ libzimg-dev,
+ ${misc:Depends}
 Multi-Arch: same
 Description: video player based on MPlayer/mplayer2 (client library dev files)
  mpv is a movie player based on MPlayer and mplayer2. It supports a wide
