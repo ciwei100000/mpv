@@ -21,6 +21,46 @@ in the list.
 
 Available video output drivers are:
 
+``gpu``
+    General purpose, customizable, GPU-accelerated video output driver. It
+    supports extended scaling methods, dithering, color management, custom
+    shaders, HDR, and more.
+
+    See `GPU renderer options`_ for options specific to this VO.
+
+    By default, it tries to use fast and fail-safe settings. Use the
+    ``gpu-hq`` profile to use this driver with defaults set to high quality
+    rendering. The profile can be applied with ``--profile=gpu-hq`` and its
+    contents can be viewed with ``--show-profile=gpu-hq``.
+
+    This VO abstracts over several possible graphics APIs and windowing
+    contexts, which can be influenced using the ``--gpu-api`` and
+    ``--gpu-context`` options.
+
+    Hardware decoding over OpenGL-interop is supported to some degree. Note
+    that in this mode, some corner case might not be gracefully handled, and
+    color space conversion and chroma upsampling is generally in the hand of
+    the hardware decoder APIs.
+
+    ``gpu`` makes use of FBOs by default. Sometimes you can achieve better
+    quality or performance by changing the ``--fbo-format`` option to
+    ``rgb16f``, ``rgb32f`` or ``rgb``. Known problems include Mesa/Intel not
+    accepting ``rgb16``, Mesa sometimes not being compiled with float texture
+    support, and some macOS setups being very slow with ``rgb16`` but fast
+    with ``rgb32f``. If you have problems, you can also try enabling the
+    ``--gpu-dumb-mode=yes`` option.
+
+``gpu-next``
+    Experimental video renderer based on ``libplacebo``. This supports almost
+    the same set of features as ``--vo=gpu``. See `GPU renderer options`_ for a
+    list.
+
+    Should generally be faster and higher quality, but some features may still
+    be missing or misbehave. Expect (and report!) bugs. See here for a list of
+    known differences and bugs:
+
+    https://github.com/mpv-player/mpv/wiki/GPU-Next-vs-GPU
+
 ``xv`` (X11 only)
     Uses the XVideo extension to enable hardware-accelerated display. This is
     the most compatible VO on X, but may be low-quality, and has issues with
@@ -78,7 +118,9 @@ Available video output drivers are:
 
 ``vdpau`` (X11 only)
     Uses the VDPAU interface to display and optionally also decode video.
-    Hardware decoding is used with ``--hwdec=vdpau``.
+    Hardware decoding is used with ``--hwdec=vdpau``. Note that there is
+    absolutely no reason to use this, other than compatibility. We strongly
+    recommend that you use ``--vo=gpu`` with ``--hwdec=nvdec`` instead.
 
     .. note::
 
@@ -228,35 +270,6 @@ Available video output drivers are:
     ``--vo-direct3d-exact-backbuffer``
         Always resize the backbuffer to window size.
 
-``gpu``
-    General purpose, customizable, GPU-accelerated video output driver. It
-    supports extended scaling methods, dithering, color management, custom
-    shaders, HDR, and more.
-
-    See `GPU renderer options`_ for options specific to this VO.
-
-    By default, it tries to use fast and fail-safe settings. Use the
-    ``gpu-hq`` profile to use this driver with defaults set to high quality
-    rendering. The profile can be applied with ``--profile=gpu-hq`` and its
-    contents can be viewed with ``--show-profile=gpu-hq``.
-
-    This VO abstracts over several possible graphics APIs and windowing
-    contexts, which can be influenced using the ``--gpu-api`` and
-    ``--gpu-context`` options.
-
-    Hardware decoding over OpenGL-interop is supported to some degree. Note
-    that in this mode, some corner case might not be gracefully handled, and
-    color space conversion and chroma upsampling is generally in the hand of
-    the hardware decoder APIs.
-
-    ``gpu`` makes use of FBOs by default. Sometimes you can achieve better
-    quality or performance by changing the ``--fbo-format`` option to
-    ``rgb16f``, ``rgb32f`` or ``rgb``. Known problems include Mesa/Intel not
-    accepting ``rgb16``, Mesa sometimes not being compiled with float texture
-    support, and some macOS setups being very slow with ``rgb16`` but fast
-    with ``rgb32f``. If you have problems, you can also try enabling the
-    ``--gpu-dumb-mode=yes`` option.
-
 ``sdl``
     SDL 2.0+ Render video output driver, depending on system with or without
     hardware acceleration. Should work on all platforms supported by SDL 2.0.
@@ -273,13 +286,20 @@ Available video output drivers are:
     ``--sdl-switch-mode``
         Instruct SDL to switch the monitor video mode when going fullscreen.
 
+``dmabuf-wayland``
+    Experimental Wayland output driver designed for use with either drm stateless
+    or VA API hardware decoding. The driver is designed to avoid any GPU to CPU copies,
+    and to perform scaling and color space conversion using fixed-function hardware,
+    if available, rather than GPU shaders. This frees up GPU resources for other tasks.
+    Currently this driver is experimental and only works with the ``--hwdec=vaapi``
+    or ``hwdec=drm`` drivers;
+    OSD is also not supported. Supported compositors : Weston and Sway.
+
 ``vaapi``
     Intel VA API video output driver with support for hardware decoding. Note
     that there is absolutely no reason to use this, other than compatibility.
-    This is low quality, and has issues with OSD.
-
-    .. note:: This driver is for compatibility with crappy systems. You can
-              use vaapi hardware decoding with ``--vo=gpu`` too.
+    This is low quality, and has issues with OSD. We strongly recommend that
+    you use ``--vo=gpu`` with ``--hwdec=vaapi`` instead.
 
     The following global options are supported by this video output:
 
@@ -595,11 +615,11 @@ Available video output drivers are:
         based, and related to the CRTC.
         (default: primary)
 
-        When using this option with the drmprime-drm hwdec interop, only the OSD
-        is rendered to this plane.
+        When using this option with the drmprime-overlay hwdec interop, only the
+        OSD is rendered to this plane.
 
     ``--drm-drmprime-video-plane=<primary|overlay|N>``
-        Select the DRM plane to use for video with the drmprime-drm hwdec
+        Select the DRM plane to use for video with the drmprime-overlay hwdec
         interop (used by e.g. the rkmpp hwdec on RockChip SoCs, and v4l2 hwdec:s
         on various other SoC:s). The plane is unused otherwise. This option
         accepts the same values as ``--drm-draw-plane``. (default: overlay)
@@ -625,16 +645,28 @@ Available video output drivers are:
     ``--drm-draw-surface-size=<[WxH]>``
         Sets the size of the surface used on the draw plane. The surface will
         then be upscaled to the current screen resolution. This option can be
-        useful when used together with the drmprime-drm hwdec interop at high
-        resolutions, as it allows scaling the draw plane (which in this case
-        only handles the OSD) down to a size the GPU can handle.
+        useful when used together with the drmprime-overlay hwdec interop at
+        high resolutions, as it allows scaling the draw plane (which in this
+        case only handles the OSD) down to a size the GPU can handle.
 
-        When used without the drmprime-drm hwdec interop this option will just
-        cause the video to get rendered at a different resolution and then
+        When used without the drmprime-overlay hwdec interop this option will
+        just cause the video to get rendered at a different resolution and then
         scaled to screen size.
 
         Note: this option is only available with DRM atomic support.
         (default: display resolution)
+
+    ``--drm-vrr-enabled=<no|yes|auto>``
+        Toggle use of Variable Refresh Rate (VRR), aka Freesync or Adaptive Sync
+        on compatible systems. VRR allows for the display to be refreshed at any
+        rate within a range (usually ~40Hz-60Hz for 60Hz displays). This can help
+        with playback of 24/25/50fps content. Support depends on the use of a
+        compatible monitor, GPU, and a sufficiently new kernel with drivers
+        that support the feature.
+
+        :no:    Do not attempt to enable VRR. (default)
+        :yes:   Attempt to enable VRR, whether the capability is reported or not.
+        :auto:  Attempt to enable VRR if support is reported.
 
 ``mediacodec_embed`` (Android)
     Renders ``IMGFMT_MEDIACODEC`` frames directly to an ``android.view.Surface``.
@@ -645,8 +677,8 @@ Available video output drivers are:
     many of mpv's features (subtitle rendering, OSD/OSC, video filters, etc)
     are not available with this driver.
 
-    To use hardware decoding with ``--vo=gpu`` instead, use
-    ``--hwdec=mediacodec-copy`` along with ``--gpu-context=android``.
+    To use hardware decoding with ``--vo=gpu`` instead, use ``--hwdec=mediacodec``
+    or ``mediacodec-copy`` along with ``--gpu-context=android``.
 
 ``wlshm`` (Wayland only)
     Shared memory video output driver without hardware acceleration that works

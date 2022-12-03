@@ -8,43 +8,26 @@ export DEB_CXXFLAGS_MAINT_APPEND := -I/usr/local/cuda/include -O3 -flto=jobserve
 export DEB_LDFLAGS_MAINT_APPEND := -L/usr/local/cuda/lib64 -O3 -flto=jobserver
 
 ifeq ($(DEB_HOST_ARCH_OS),linux)
-  ARCH_CONFIGURE = --enable-dvbin
-endif
-
-ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-else
-NUMJOBS = 1
+  ARCH_CONFIGURE = -Ddvbin=enabled
 endif
 
 %:
 	dh $@
 
 override_dh_auto_configure:
-	python3 ./waf configure						\
-			--prefix=/usr					\
-			--libdir=/usr/lib/$(DEB_HOST_MULTIARCH)		\
-			--confdir=/etc/mpv				\
-			--zshdir=/usr/share/zsh/vendor-completions	\
-			--enable-cdda					\
-			--enable-dvdnav					\
-			--enable-libmpv-shared				\
-			--enable-sdl2					\
-			--disable-build-date				\
-			$(ARCH_CONFIGURE)
+	dh_auto_configure -- \
+		-Dlibmpv=true \
+		-Dbuild-date=false \
+		-Dcdda=enabled \
+		-Ddvdnav=enabled \
+		-Dsdl2=enabled \
+		-Dsndio=disabled
 
-override_dh_auto_build:
-	python3 ./waf -v build --jobs=$(NUMJOBS)
-
-override_dh_auto_install:
-	python3 ./waf -v install --destdir=debian/tmp
-	
 override_dh_shlibdeps:
 	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
 
+execute_after_dh_auto_install:
+	mv debian/tmp/usr/share/zsh/site-functions debian/tmp/usr/share/zsh/vendor-completions
+
 override_dh_installchangelogs:
 	dh_installchangelogs RELEASE_NOTES
-
-override_dh_auto_clean:
-	test -s ./waf && python3 ./waf -v distclean || true
-	find . -name "*.pyc" -delete

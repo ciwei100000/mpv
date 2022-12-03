@@ -1,3 +1,43 @@
+mpv (0.35.0-3) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 27 Nov 2022 18:44:12 +0100
+
+mpv (0.35.0-2) experimental; urgency=medium
+
+  * Team upload
+  * debian/control: Add missing dependencies to libmpv-dev
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 13 Nov 2022 21:45:43 +0100
+
+mpv (0.35.0-1) experimental; urgency=medium
+
+  * Team upload
+
+  [ Debian Janitor ]
+  * Set upstream metadata fields: Bug-Submit.
+
+  [ Sebastian Ramacher ]
+  * New upstream version 0.35.0 (Closes: #102329)
+  * SONAME bump: libmpv1 -> libmpv2
+  * debian/: Use meson build system
+  * debian/patches:
+    - Refresh patches
+    - Remove waf patch
+  * debian/control:
+    - Add libpipewire-0.3-dev to Build-Depends
+    - Add libxpresent-dev to Build-Depends
+    - Bump Standards-Version
+    - Remove youtube-dl recommends
+    - Bump required libplacebo-dev version
+  * debian/rules:
+    - Disable sndio support
+    - Fix location of zsh completion
+  * debian/copyright: Update copyright holders and years
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sat, 12 Nov 2022 22:05:00 +0100
+
 mpv (0.34.1-1-nonfree) unstable; urgency=medium
 
   * Merge branch 'debian/0.34.1-1' into ciwei100000
