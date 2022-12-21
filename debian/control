@@ -146,6 +146,7 @@ Depends:
  libxss-dev,
  libxv-dev,
  libzimg-dev,
+ wayland-protocols,
  ${misc:Depends}
 Multi-Arch: same
 Description: video player based on MPlayer/mplayer2 (client library dev files)
