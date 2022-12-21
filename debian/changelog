@@ -1,3 +1,11 @@
+mpv (0.35.0-4) unstable; urgency=medium
+
+  * Team upload
+  * debian/control: Add wayland-protocols to libmpv-dev's dependencies
+    (Closes: #1026624)
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Wed, 21 Dec 2022 22:27:12 +0100
+
 mpv (0.35.0-3) unstable; urgency=medium
 
   * Upload to unstable
