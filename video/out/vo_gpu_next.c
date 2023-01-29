@@ -189,12 +189,17 @@ static void free_dr_buf(void *opaque, uint8_t *data)
 }
 
 static struct mp_image *get_image(struct vo *vo, int imgfmt, int w, int h,
-                                  int stride_align)
+                                  int stride_align, int flags)
 {
     struct priv *p = vo->priv;
     pl_gpu gpu = p->gpu;
     if (!gpu->limits.thread_safe || !gpu->limits.max_mapped_size)
         return NULL;
+
+#if PL_API_VER >= 234
+    if ((flags & VO_DR_FLAG_HOST_CACHED) && !gpu->limits.host_cached)
+        return NULL;
+#endif
 
     int size = mp_image_get_alloc_size(imgfmt, w, h, stride_align);
     if (size < 0)
@@ -344,7 +349,9 @@ static int plane_data_from_imgfmt(struct pl_plane_data out_data[4],
     if ((desc.flags & MP_IMGFLAG_TYPE_FLOAT) && (desc.flags & MP_IMGFLAG_YUV))
         return 0; // Floating-point YUV (currently) unsupported
 
+    bool has_bits = false;
     bool any_padded = false;
+
     for (int p = 0; p < desc.num_planes; p++) {
         struct pl_plane_data *data = &out_data[p];
         struct mp_imgfmt_comp_desc sorted[MP_NUM_COMPONENTS];
@@ -390,8 +397,9 @@ static int plane_data_from_imgfmt(struct pl_plane_data out_data[4],
                 .bit_shift = MPMAX(sorted[c].pad, 0),
             };
 
-            if (p == 0 && c == 0) {
+            if (!has_bits) {
                 *out_bits = bits;
+                has_bits = true;
             } else {
                 if (!pl_bit_encoding_equal(out_bits, &bits)) {
                     // Bit encoding differs between components/planes,
