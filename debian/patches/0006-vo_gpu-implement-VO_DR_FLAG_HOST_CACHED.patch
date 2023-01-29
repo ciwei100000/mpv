@@ -1,0 +1,128 @@
+From: sfan5 <sfan5@live.de>
+Date: Sat, 21 Jan 2023 15:46:06 +0100
+Subject: vo_gpu: implement VO_DR_FLAG_HOST_CACHED
+
+For OpenGL, this is based on simply comparing GL_VENDOR strings against
+a list of allowed vendors.
+
+Co-authored-by: Nicolas F. <ovdev@fratti.ch>
+Co-authored-by: Niklas Haas <git@haasn.dev>
+---
+ video/out/gpu/ra.h        |  1 +
+ video/out/gpu/video.c     |  7 +++++++
+ video/out/opengl/common.c | 16 ++++++++++++++++
+ video/out/opengl/common.h |  1 +
+ video/out/opengl/ra_gl.c  |  1 +
+ video/out/placebo/ra_pl.c |  4 ++++
+ 6 files changed, 30 insertions(+)
+
+diff --git a/video/out/gpu/ra.h b/video/out/gpu/ra.h
+index 85e293d..b38eba7 100644
+--- a/video/out/gpu/ra.h
++++ b/video/out/gpu/ra.h
+@@ -80,6 +80,7 @@ enum {
+     RA_CAP_FRAGCOORD      = 1 << 10, // supports reading from gl_FragCoord
+     RA_CAP_PARALLEL_COMPUTE  = 1 << 11, // supports parallel compute shaders
+     RA_CAP_NUM_GROUPS     = 1 << 12, // supports gl_NumWorkGroups
++    RA_CAP_SLOW_DR        = 1 << 13, // direct rendering is assumed to be slow
+ };
+ 
+ enum ra_ctype {
+diff --git a/video/out/gpu/video.c b/video/out/gpu/video.c
+index 3e557a2..3b9e079 100644
+--- a/video/out/gpu/video.c
++++ b/video/out/gpu/video.c
+@@ -4291,6 +4291,13 @@ static void gl_video_dr_free_buffer(void *opaque, uint8_t *data)
+ struct mp_image *gl_video_get_image(struct gl_video *p, int imgfmt, int w, int h,
+                                     int stride_align, int flags)
+ {
++    if (flags & VO_DR_FLAG_HOST_CACHED) {
++        if (p->ra->caps & RA_CAP_SLOW_DR) {
++            MP_VERBOSE(p, "DR path suspected slow/uncached, disabling..");
++            return NULL;
++        }
++    }
++
+     if (!gl_video_check_format(p, imgfmt))
+         return NULL;
+ 
+diff --git a/video/out/opengl/common.c b/video/out/opengl/common.c
+index 8e8638d..f47ba0e 100644
+--- a/video/out/opengl/common.c
++++ b/video/out/opengl/common.c
+@@ -25,6 +25,7 @@
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <string.h>
++#include <strings.h>
+ #include <stdbool.h>
+ #include <math.h>
+ #include <assert.h>
+@@ -47,6 +48,18 @@ static bool is_software_gl(GL *gl)
+            strcmp(renderer, "Apple Software Renderer") == 0;
+ }
+ 
++// This guesses whether our DR path is fast or slow
++static bool is_fast_dr(GL *gl)
++{
++    const char *vendor = gl->GetString(GL_VENDOR);
++    if (!vendor)
++        return false;
++
++    return strcasecmp(vendor, "AMD") == 0 ||
++           strcasecmp(vendor, "NVIDIA Corporation") == 0 ||
++           strcasecmp(vendor, "ATI Technologies Inc.") == 0;    // AMD on Windows
++}
++
+ static void GLAPIENTRY dummy_glBindFramebuffer(GLenum target, GLuint framebuffer)
+ {
+     assert(framebuffer == 0);
+@@ -650,6 +663,9 @@ void mpgl_load_functions2(GL *gl, void *(*get_fn)(void *ctx, const char *n),
+         mp_verbose(log, "Detected suspected software renderer.\n");
+     }
+ 
++    if (!is_fast_dr(gl))
++        gl->mpgl_caps |= MPGL_CAP_SLOW_DR;
++
+     // GL_ARB_compute_shader & GL_ARB_shader_image_load_store
+     if (gl->DispatchCompute && gl->BindImageTexture)
+         gl->mpgl_caps |= MPGL_CAP_COMPUTE_SHADER;
+diff --git a/video/out/opengl/common.h b/video/out/opengl/common.h
+index a9e67d9..3553532 100644
+--- a/video/out/opengl/common.h
++++ b/video/out/opengl/common.h
+@@ -59,6 +59,7 @@ enum {
+     MPGL_CAP_COMPUTE_SHADER     = (1 << 23),    // GL_ARB_compute_shader & GL_ARB_shader_image_load_store
+     MPGL_CAP_NESTED_ARRAY       = (1 << 24),    // GL_ARB_arrays_of_arrays
+ 
++    MPGL_CAP_SLOW_DR            = (1 << 29),    // direct rendering is assumed to be slow
+     MPGL_CAP_SW                 = (1 << 30),    // indirect or sw renderer
+ };
+ 
+diff --git a/video/out/opengl/ra_gl.c b/video/out/opengl/ra_gl.c
+index 8eddb5f..366ce66 100644
+--- a/video/out/opengl/ra_gl.c
++++ b/video/out/opengl/ra_gl.c
+@@ -103,6 +103,7 @@ static int ra_init_gl(struct ra *ra, GL *gl)
+         {RA_CAP_COMPUTE,            MPGL_CAP_COMPUTE_SHADER},
+         {RA_CAP_NUM_GROUPS,         MPGL_CAP_COMPUTE_SHADER},
+         {RA_CAP_NESTED_ARRAY,       MPGL_CAP_NESTED_ARRAY},
++        {RA_CAP_SLOW_DR,            MPGL_CAP_SLOW_DR},
+     };
+ 
+     for (int i = 0; i < MP_ARRAY_SIZE(caps_map); i++) {
+diff --git a/video/out/placebo/ra_pl.c b/video/out/placebo/ra_pl.c
+index d2590d3..af433c3 100644
+--- a/video/out/placebo/ra_pl.c
++++ b/video/out/placebo/ra_pl.c
+@@ -52,6 +52,10 @@ struct ra *ra_create_pl(pl_gpu gpu, struct mp_log *log)
+     if (gpu->limits.max_variables)
+         ra->caps |= RA_CAP_GLOBAL_UNIFORM;
+ #endif
++#if PL_API_VER >= 234
++    if (!gpu->limits.host_cached)
++        ra->caps |= RA_CAP_SLOW_DR;
++#endif
+ 
+     if (gpu->limits.max_tex_1d_dim)
+         ra->caps |= RA_CAP_TEX_1D;

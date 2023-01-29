@@ -1,2 +1,6 @@
 0001-Add-keywords-to-desktop-file.patch
 0002-io-stdin-used.patch
+0003-vo-add-int-flags-to-the-get_image-signature.patch
+0004-vd_lavc-add-auto-choice-for-vd-lavc-dr.patch
+0005-vo_gpu_next-implement-VO_DR_FLAG_HOST_CACHED.patch
+0006-vo_gpu-implement-VO_DR_FLAG_HOST_CACHED.patch

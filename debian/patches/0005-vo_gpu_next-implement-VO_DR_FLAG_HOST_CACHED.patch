@@ -1,0 +1,25 @@
+From: Niklas Haas <git@haasn.dev>
+Date: Sat, 21 Jan 2023 15:48:57 +0100
+Subject: vo_gpu_next: implement VO_DR_FLAG_HOST_CACHED
+
+For sufficiently new versions of libplacebo.
+---
+ video/out/vo_gpu_next.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index d9641a7..66e51a5 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -196,6 +196,11 @@ static struct mp_image *get_image(struct vo *vo, int imgfmt, int w, int h,
+     if (!gpu->limits.thread_safe || !gpu->limits.max_mapped_size)
+         return NULL;
+ 
++#if PL_API_VER >= 234
++    if ((flags & VO_DR_FLAG_HOST_CACHED) && !gpu->limits.host_cached)
++        return NULL;
++#endif
++
+     int size = mp_image_get_alloc_size(imgfmt, w, h, stride_align);
+     if (size < 0)
+         return NULL;
