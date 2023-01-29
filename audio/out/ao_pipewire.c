@@ -183,6 +183,8 @@ static void on_process(void *userdata)
     }
 
     pw_stream_queue_buffer(p->stream, b);
+
+    MP_TRACE(ao, "queued %d of %d samples\n", samples, nframes);
 }
 
 static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *param)
@@ -422,9 +424,20 @@ static void on_error(void *data, uint32_t id, int seq, int res, const char *mess
     MP_WARN(ao, "Error during playback: %s, %s\n", spa_strerror(res), message);
 }
 
+static void on_core_info(void *data, const struct pw_core_info *info)
+{
+    struct ao *ao = data;
+
+    MP_VERBOSE(ao, "Core user: %s\n", info->user_name);
+    MP_VERBOSE(ao, "Core host: %s\n", info->host_name);
+    MP_VERBOSE(ao, "Core version: %s\n", info->version);
+    MP_VERBOSE(ao, "Core name: %s\n", info->name);
+}
+
 static const struct pw_core_events core_events = {
     .version = PW_VERSION_CORE_EVENTS,
     .error = on_error,
+    .info = on_core_info,
 };
 
 static int pipewire_init_boilerplate(struct ao *ao)
@@ -434,6 +447,8 @@ static int pipewire_init_boilerplate(struct ao *ao)
 
     pw_init(NULL, NULL);
 
+    MP_VERBOSE(ao, "Headers version: %s\n", pw_get_headers_version());
+    MP_VERBOSE(ao, "Library version: %s\n", pw_get_library_version());
 
     p->loop = pw_thread_loop_new("ao-pipewire", NULL);
     if (p->loop == NULL)
@@ -455,6 +470,7 @@ static int pipewire_init_boilerplate(struct ao *ao)
     if (!p->core) {
         MP_WARN(ao, "Could not connect to context '%s': %s\n",
                 p->options.remote, strerror(errno));
+        pw_context_destroy(context);
         goto error;
     }
 
@@ -496,7 +512,7 @@ static int init(struct ao *ao)
     );
 
     if (pipewire_init_boilerplate(ao) < 0)
-        goto error;
+        goto error_props;
 
     ao->device_buffer = p->options.buffer_msec * ao->samplerate / 1000;
 
@@ -520,7 +536,7 @@ static int init(struct ao *ao)
 
     params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &audio_info);
     if (!params[0])
-        goto error;
+        goto error_props;
 
     if (af_fmt_is_planar(ao->format)) {
         ao->num_planes = ao->channels.num;
@@ -560,6 +576,8 @@ static int init(struct ao *ao)
 
     return 0;
 
+error_props:
+    pw_properties_free(props);
 error:
     uninit(ao);
     return -1;
@@ -736,7 +754,7 @@ static int hotplug_init(struct ao *ao)
 
     int res = pipewire_init_boilerplate(ao);
     if (res)
-        return res;
+        goto error_no_unlock;
 
     pw_thread_loop_lock(priv->loop);
 
@@ -759,6 +777,7 @@ static int hotplug_init(struct ao *ao)
 
 error:
     pw_thread_loop_unlock(priv->loop);
+error_no_unlock:
     uninit(ao);
     return -1;
 }

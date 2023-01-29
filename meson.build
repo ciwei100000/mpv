@@ -327,7 +327,7 @@ endif
 features += {'ta-leak-report': get_option('ta-leak-report')}
 
 libdl_dep = cc.find_library('dl', required: false)
-features += {'libdl': libdl_dep.found() and cc.has_function('dlopen', dependencies: libdl_dep, prefix: '#include <dlfcn.h>')}
+features += {'libdl': cc.has_function('dlopen', dependencies: libdl_dep, prefix: '#include <dlfcn.h>')}
 if features['libdl']
     dependencies += libdl_dep
 endif
@@ -716,10 +716,11 @@ if features['sdl2-gamepad']
     sources += files('input/sdl_gamepad.c')
 endif
 
-stdatomic = cc.find_library('atomic', required: get_option('stdatomic'))
-features += {'stdatomic': stdatomic.found()}
+stdatomic_dep = cc.find_library('atomic', required: false)
+features += {'stdatomic': cc.has_header_symbol('stdatomic.h', 'atomic_int', dependencies: stdatomic_dep,
+                                               required: get_option('stdatomic'))}
 if features['stdatomic']
-    dependencies += stdatomic
+    dependencies += stdatomic_dep
 endif
 
 uchardet_opt = get_option('uchardet').require(
@@ -1555,7 +1556,7 @@ if features['manpage-build']
     )
 endif
 
-rst2html = find_program('rst2html', required: get_option('html-build'))
+rst2html = find_program('rst2html', 'rst2html.py', required: get_option('html-build'))
 features += {'html-build': rst2html.found()}
 if features['html-build']
     datadir = get_option('datadir')
@@ -1624,7 +1625,7 @@ sys.stdout.write(features)
 '''
 feature_str = run_command(python, '-c', feature_sort, feature_keys, check: true).stdout()
 conf_data.set_quoted('FULLCONFIG', feature_str)
-conf_data.set_quoted('MPV_CONFDIR', join_paths(get_option('sysconfdir'), 'mpv'))
+conf_data.set_quoted('MPV_CONFDIR', join_paths(get_option('prefix'), get_option('sysconfdir'), 'mpv'))
 configure_file(output : 'config.h', configuration : conf_data)
 message('List of enabled features: ' + feature_str)
 
