@@ -1,9 +1,11 @@
 mpv (0.35.0-5) unstable; urgency=medium
 
-  * debian/patches: Apply upstream changes to add auto option to vd-lavc-dr (Closes: #1027455)
+  * debian/patches: Apply upstream changes to add auto option to vd-lavc-dr
+    (Closes: #1027455)
   * debian/control:
     - Add myself to Uploaders
     - Bump Standards-Version
+    - Change (Build-)Depends from lib(e)gl1-mesa-dev to lib(e)gl-dev.
 
  -- Sebastian Ramacher <sramacher@debian.org>  Sun, 29 Jan 2023 11:57:26 +0100
 
