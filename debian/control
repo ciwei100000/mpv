@@ -4,7 +4,8 @@ Priority: optional
 Maintainer: Debian Multimedia Maintainers <debian-multimedia@lists.debian.org>
 Uploaders: Alessandro Ghedini <ghedo@debian.org>,
  Reinhard Tartler <siretart@tauware.de>,
- James Cowgill <jcowgill@debian.org>
+ James Cowgill <jcowgill@debian.org>,
+ Sebastian Ramacher <sramacher@debian.org>
 Build-Depends:
  debhelper-compat (= 13),
  libarchive-dev (>= 3.4),
