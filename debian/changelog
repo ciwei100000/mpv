@@ -1,3 +1,12 @@
+mpv (0.35.0-5) unstable; urgency=medium
+
+  * debian/patches: Apply upstream changes to add auto option to vd-lavc-dr (Closes: #1027455)
+  * debian/control:
+    - Add myself to Uploaders
+    - Bump Standards-Version
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 29 Jan 2023 11:57:26 +0100
+
 mpv (0.35.0-4) unstable; urgency=medium
 
   * Team upload
@@ -8,6 +17,7 @@ mpv (0.35.0-4) unstable; urgency=medium
 
 mpv (0.35.0-3) unstable; urgency=medium
 
+  * Team upload
   * Upload to unstable
 
  -- Sebastian Ramacher <sramacher@debian.org>  Sun, 27 Nov 2022 18:44:12 +0100
