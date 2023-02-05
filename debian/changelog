@@ -1,3 +1,29 @@
+mpv (0.35.1-1) unstable; urgency=medium
+
+  * New upstream version 0.35.1
+  * debian/patches: Drop patches included upstream
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 29 Jan 2023 20:55:34 +0100
+
+mpv (0.35.0-5) unstable; urgency=medium
+
+  * debian/patches: Apply upstream changes to add auto option to vd-lavc-dr
+    (Closes: #1027455)
+  * debian/control:
+    - Add myself to Uploaders
+    - Bump Standards-Version
+    - Change (Build-)Depends from lib(e)gl1-mesa-dev to lib(e)gl-dev.
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 29 Jan 2023 11:57:26 +0100
+
+mpv (0.35.0-4) unstable; urgency=medium
+
+  * Team upload
+  * debian/control: Add wayland-protocols to libmpv-dev's dependencies
+    (Closes: #1026624)
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Wed, 21 Dec 2022 22:27:12 +0100
+
 mpv (0.35.0-3-nonfree) unstable; urgency=medium
 
   * Merge branch 'debian/0.35.0-3' into ciwei100000
@@ -6,6 +32,7 @@ mpv (0.35.0-3-nonfree) unstable; urgency=medium
 
 mpv (0.35.0-3) unstable; urgency=medium
 
+  * Team upload
   * Upload to unstable
 
  -- Sebastian Ramacher <sramacher@debian.org>  Sun, 27 Nov 2022 18:44:12 +0100
