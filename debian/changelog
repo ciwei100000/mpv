@@ -1,3 +1,9 @@
+mpv (0.35.1-1-nonfree) unstable; urgency=medium
+
+  * Merge branch 'debian/0.35.1-1' into ciwei100000
+
+ -- Xuqing Liu <ciwei100000@gmail.com>  Sat, 4 Feb 2023 19:00:03 -0800
+
 mpv (0.35.1-1) unstable; urgency=medium
 
   * New upstream version 0.35.1
