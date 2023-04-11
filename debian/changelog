@@ -1,3 +1,9 @@
+mpv (0.35.1-3-nonfree) unstable; urgency=medium
+
+  * Merge branch 'debian/0.35.1-3' into ciwei100000
+
+ -- Xuqing Liu <ciwei100000@gmail.com>  Tue, 11 Apr 2023 02:20:49 -0700
+
 mpv (0.35.1-3) unstable; urgency=medium
 
   * debian/patches: Remove duplicate patches
