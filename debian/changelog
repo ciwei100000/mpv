@@ -1,3 +1,12 @@
+mpv (0.35.1-4) unstable; urgency=medium
+
+  * Team upload.
+  * rules: Restore ARCH_CONFIGURE to configuration options so that the logic
+    that conditionally enables support for DVB (only on Linux) will function
+    as intended (Closes: #1026060).
+
+ -- Nicholas D Steeves <sten@debian.org>  Tue, 18 Apr 2023 22:28:15 -0400
+
 mpv (0.35.1-3-nonfree) unstable; urgency=medium
 
   * Merge branch 'debian/0.35.1-3' into ciwei100000

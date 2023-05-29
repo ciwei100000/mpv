@@ -21,7 +21,8 @@ override_dh_auto_configure:
 		-Dcdda=enabled \
 		-Ddvdnav=enabled \
 		-Dsdl2=enabled \
-		-Dsndio=disabled
+		-Dsndio=disabled \
+		$(ARCH_CONFIGURE)
 
 override_dh_shlibdeps:
 	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
