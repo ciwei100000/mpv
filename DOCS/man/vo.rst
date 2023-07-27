@@ -291,9 +291,12 @@ Available video output drivers are:
     or VA API hardware decoding. The driver is designed to avoid any GPU to CPU copies,
     and to perform scaling and color space conversion using fixed-function hardware,
     if available, rather than GPU shaders. This frees up GPU resources for other tasks.
-    Currently this driver is experimental and only works with the ``--hwdec=vaapi``
-    or ``hwdec=drm`` drivers;
-    OSD is also not supported. Supported compositors : Weston and Sway.
+    It is highly recommended to use this VO with the appropriate ``--hwdec`` option such
+    as ``auto-safe``. It can still work in some circumstances without ``--hwdec`` due to
+    mpv's internal conversion filters, but this is not recommended as it's a needless
+    extra step. Correct output depends on support from your GPU, drivers, and compositor.
+    Weston and wlroots-based compositors like Sway and Intel GPUs are known to generally
+    work.
 
 ``vaapi``
     Intel VA API video output driver with support for hardware decoding. Note
@@ -383,13 +386,54 @@ Available video output drivers are:
     ``--vo-tct-256=<yes|no>`` (default: no)
         Use 256 colors - for terminals which don't support true color.
 
+``kitty``
+    Graphical output for the terminal, using the kitty graphics protocol.
+    Tested with kitty and Konsole.
+
+    You may need to use ``--profile=sw-fast`` to get decent performance.
+
+    Kitty size and alignment options:
+
+    ``--vo-kitty-cols=<columns>``, ``--vo-kitty-rows=<rows>`` (default: 0)
+        Specify the terminal size in character cells, otherwise (0) read it
+        from the terminal, or fall back to 80x25.
+
+    ``--vo-kitty-width=<width>``, ``--vo-kitty-height=<height>`` (default: 0)
+        Specify the available size in pixels, otherwise (0) read it from the
+        terminal, or fall back to 320x240.
+
+    ``--vo-kitty-left=<col>``, ``--vo-kitty-top=<row>`` (default: 0)
+        Specify the position in character cells where the image starts (1 is
+        the first column or row). If 0 (default) then try to automatically
+        determine it according to the other values and the image aspect ratio
+        and zoom.
+
+    ``--vo-kitty-config-clear=<yes|no>`` (default: yes)
+        Whether or not to clear the terminal whenever the output is
+        reconfigured (e.g. when video size changes).
+
+    ``--vo-kitty-alt-screen=<yes|no>`` (default: yes)
+        Whether or not to use the alternate screen buffer and return the
+        terminal to its previous state on exit. When set to no, the last
+        kitty image stays on screen after quit, with the cursor following it.
+
+    ``--vo-kitty-use-shm=<yes|no>`` (default: no)
+        Use shared memory objects to transfer image data to the terminal.
+        This is much faster than sending the data as escape codes, but is not
+        supported by as many terminals. It also only works on the local machine
+        and not via e.g. SSH connections.
+
+        This option is not implemented on Windows.
+
 ``sixel``
     Graphical output for the terminal, using sixels. Tested with ``mlterm`` and
     ``xterm``.
 
-    Note: the Sixel image output is not synchronized with other terminal output
-    from mpv, which can lead to broken images. The option ``--really-quiet``
-    can help with that, and is recommended.
+    Note: the Sixel image output is not synchronized with other terminal
+    output from mpv, which can lead to broken images.
+    The option ``--really-quiet`` can help with that, and is recommended.
+    On some platforms, using the ``--vo-sixel-buffered`` option may work as
+    well.
 
     You may need to use ``--profile=sw-fast`` to get decent performance.
 
@@ -433,9 +477,24 @@ Available video output drivers are:
         to take into account padding at the report - this only works correctly
         when the overall padding per axis is smaller than the number of cells.
 
-    ``--vo-sixel-exit-clear=<yes|no>`` (default: yes)
-        Whether or not to clear the terminal on quit. When set to no - the last
+    ``--vo-sixel-config-clear=<yes|no>`` (default: yes)
+        Whether or not to clear the terminal whenever the output is
+        reconfigured (e.g. when video size changes).
+
+    ``--vo-sixel-alt-screen=<yes|no>`` (default: yes)
+        Whether or not to use the alternate screen buffer and return the
+        terminal to its previous state on exit. When set to no, the last
         sixel image stays on screen after quit, with the cursor following it.
+
+        ``--vo-sixel-exit-clear`` is a deprecated alias for this option and
+        may be removed in the future.
+
+    ``--vo-sixel-buffered=<yes|no>`` (default: no)
+        Buffers the full output sequence before writing it to the terminal.
+        On POSIX platforms, this can help prevent interruption (including from
+        other applications) and thus broken images, but may come at a
+        performance cost with some terminals and is subject to implementation
+        details.
 
     Sixel image quality options:
 
@@ -597,16 +656,6 @@ Available video output drivers are:
         Use ``--drm-mode=help`` to get a list of available modes for all active
         connectors.
 
-    ``--drm-atomic=<no|auto>``
-        Toggle use of atomic modesetting. Mostly useful for debugging.
-
-        :no:    Use legacy modesetting.
-        :auto:  Use atomic modesetting, falling back to legacy modesetting if
-                not available. (default)
-
-        Note: Only affects ``gpu-context=drm``. ``vo=drm`` supports legacy
-        modesetting only.
-
     ``--drm-draw-plane=<primary|overlay|N>``
         Select the DRM plane to which video and OSD is drawn to, under normal
         circumstances. The plane can be specified as ``primary``, which will
@@ -653,7 +702,6 @@ Available video output drivers are:
         just cause the video to get rendered at a different resolution and then
         scaled to screen size.
 
-        Note: this option is only available with DRM atomic support.
         (default: display resolution)
 
     ``--drm-vrr-enabled=<no|yes|auto>``

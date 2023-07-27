@@ -182,11 +182,15 @@ static int resize(struct vo *vo)
 {
     struct priv *p = vo->priv;
     struct vo_wayland_state *wl = vo->wl;
-    const int32_t width = wl->scaling * mp_rect_w(wl->geometry);
-    const int32_t height = wl->scaling * mp_rect_h(wl->geometry);
+    const int32_t width = mp_rect_w(wl->geometry);
+    const int32_t height = mp_rect_h(wl->geometry);
+
+    if (width == 0 || height == 0)
+        return 1;
+
     struct buffer *buf;
 
-    vo_wayland_set_opaque_region(wl, 0);
+    vo_wayland_set_opaque_region(wl, false);
     vo->want_redraw = true;
     vo->dwidth = width;
     vo->dheight = height;
@@ -204,11 +208,20 @@ static int resize(struct vo *vo)
         p->free_buffers = buf->next;
         talloc_free(buf);
     }
+
+    vo_wayland_handle_fractional_scale(wl);
+
     return mp_sws_reinit(p->sws);
 }
 
 static int control(struct vo *vo, uint32_t request, void *data)
 {
+    switch (request) {
+    case VOCTRL_SET_PANSCAN:
+        resize(vo);
+        return VO_TRUE;
+    }
+
     int events = 0;
     int ret = vo_wayland_control(vo, &events, request, data);
 

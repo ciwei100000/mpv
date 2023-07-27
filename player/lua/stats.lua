@@ -43,7 +43,7 @@ local o = {
     plot_color = "FFFFFF",
 
     -- Text style
-    font = "sans",
+    font = "sans-serif",
     font_mono = "monospace",   -- monospaced digits are sufficient
     font_size = 8,
     font_color = "FFFFFF",
@@ -431,7 +431,7 @@ local function keyname_cells(k)
 end
 
 local function get_kbinfo_lines(width)
-    -- active keys: only highest priotity of each key, and not our (stats) keys
+    -- active keys: only highest priority of each key, and not our (stats) keys
     local bindings = mp.get_property_native("input-bindings", {})
     local active = {}  -- map: key-name -> bind-info
     for _, bind in pairs(bindings) do
@@ -737,7 +737,7 @@ local function add_video(s)
     local hdrpeak = r["sig-peak"] or 0
     local hdrinfo = ""
     if hdrpeak > 1 then
-        hdrinfo = " (HDR peak: " .. format("%.2f", hdrpeak) .. ")"
+        hdrinfo = " (HDR peak: " .. format("%.2f", hdrpeak * 203) .. " nits)"
     end
 
     append(s, r["gamma"], {prefix="Gamma:", suffix=hdrinfo})

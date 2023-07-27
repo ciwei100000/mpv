@@ -23,7 +23,6 @@
 
 #include "client.h"
 #include "command.h"
-#include "config.h"
 #include "core.h"
 #include "mpv_talloc.h"
 #include "screenshot.h"
@@ -291,7 +290,7 @@ static void mp_seek(MPContext *mpctx, struct seek_params seek)
         if (len >= 0)
             seek_pts = seek.amount * len;
         break;
-    default: abort();
+    default: MP_ASSERT_UNREACHABLE();
     }
 
     double demux_pts = seek_pts;
@@ -458,7 +457,7 @@ void queue_seek(struct MPContext *mpctx, enum seek_type type, double amount,
         *seek = (struct seek_params){ 0 };
         return;
     }
-    abort();
+    MP_ASSERT_UNREACHABLE();
 }
 
 void execute_queued_seek(struct MPContext *mpctx)
@@ -1036,6 +1035,8 @@ int handle_force_window(struct MPContext *mpctx, bool force)
         };
         if (vo_reconfig(vo, &p) < 0)
             goto err;
+        struct track *track = mpctx->current_track[0][STREAM_VIDEO];
+        update_content_type(mpctx, track);
         update_screensaver_state(mpctx);
         vo_set_paused(vo, true);
         vo_redraw(vo);

@@ -25,8 +25,8 @@ struct vulkan_opts {
     char *device; // force a specific GPU
     int swap_mode;
     int queue_count;
-    int async_transfer;
-    int async_compute;
+    bool async_transfer;
+    bool async_compute;
 };
 
 static int vk_validate_dev(struct mp_log *log, const struct m_option *opt,
@@ -96,8 +96,8 @@ const struct m_sub_options vulkan_conf = {
             {"mailbox",      VK_PRESENT_MODE_MAILBOX_KHR},
             {"immediate",    VK_PRESENT_MODE_IMMEDIATE_KHR})},
         {"vulkan-queue-count", OPT_INT(queue_count), M_RANGE(1, 8)},
-        {"vulkan-async-transfer", OPT_FLAG(async_transfer)},
-        {"vulkan-async-compute", OPT_FLAG(async_compute)},
+        {"vulkan-async-transfer", OPT_BOOL(async_transfer)},
+        {"vulkan-async-compute", OPT_BOOL(async_compute)},
         {"vulkan-disable-events", OPT_REMOVED("Unused")},
         {0}
     },
@@ -121,7 +121,7 @@ static const struct ra_swapchain_fns vulkan_swapchain;
 
 struct mpvk_ctx *ra_vk_ctx_get(struct ra_ctx *ctx)
 {
-    if (ctx->swapchain->fns != &vulkan_swapchain)
+    if (!ctx->swapchain || ctx->swapchain->fns != &vulkan_swapchain)
         return NULL;
 
     struct priv *p = ctx->swapchain->priv;
@@ -161,6 +161,43 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
     p->params = params;
     p->opts = mp_get_config_group(p, ctx->global, &vulkan_conf);
 
+    VkPhysicalDeviceFeatures2 features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+    };
+
+#if HAVE_VULKAN_INTEROP
+    /*
+     * Request the additional extensions and features required to make full use
+     * of the ffmpeg Vulkan hwcontext and video decoding capability.
+     */
+    const char *opt_extensions[] = {
+        VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
+        VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
+        VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
+        VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,
+        VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME,
+        VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
+        // This is a literal string as it's not in the official headers yet.
+        "VK_MESA_video_decode_av1",
+    };
+
+    VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_feature = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
+        .pNext = NULL,
+        .descriptorBuffer = true,
+        .descriptorBufferPushDescriptors = true,
+    };
+
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomic_float_feature = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+        .pNext = &descriptor_buffer_feature,
+        .shaderBufferFloat32Atomics = true,
+        .shaderBufferFloat32AtomicAdd = true,
+    };
+
+    features.pNext = &atomic_float_feature;
+#endif
+
     assert(vk->pllog);
     assert(vk->vkinst);
     vk->vulkan = pl_vulkan_create(vk->pllog, &(struct pl_vulkan_params) {
@@ -171,6 +208,12 @@ bool ra_vk_ctx_init(struct ra_ctx *ctx, struct mpvk_ctx *vk,
         .async_compute = p->opts->async_compute,
         .queue_count = p->opts->queue_count,
         .device_name = p->opts->device,
+#if HAVE_VULKAN_INTEROP
+        .extra_queues = VK_QUEUE_VIDEO_DECODE_BIT_KHR,
+        .opt_extensions = opt_extensions,
+        .num_opt_extensions = MP_ARRAY_SIZE(opt_extensions),
+#endif
+        .features = &features,
     });
     if (!vk->vulkan)
         goto error;
