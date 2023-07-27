@@ -24,8 +24,6 @@
 #include <libavutil/intreadwrite.h>
 #include <libavutil/opt.h>
 
-#include "config.h"
-
 #include "mpv_talloc.h"
 #include "common/msg.h"
 #include "common/av_common.h"
@@ -59,6 +57,7 @@ struct seekpoint {
 
 struct sd_lavc_priv {
     AVCodecContext *avctx;
+    AVPacket *avpkt;
     AVRational pkt_timebase;
     struct sub subs[MAX_QUEUE]; // most recent event first
     struct sub_bitmap *outbitmaps;
@@ -97,7 +96,11 @@ static int init(struct sd *sd)
     ctx = avcodec_alloc_context3(sub_codec);
     if (!ctx)
         goto error;
-    mp_lavc_set_extradata(ctx, sd->codec->extradata, sd->codec->extradata_size);
+    priv->avpkt = av_packet_alloc();
+    if (!priv->avpkt)
+        goto error;
+    if (mp_set_avctx_codec_headers(ctx, sd->codec) < 0)
+        goto error;
     priv->pkt_timebase = mp_get_codec_timebase(sd->codec);
     ctx->pkt_timebase = priv->pkt_timebase;
     if (avcodec_open2(ctx, sub_codec, NULL) < 0)
@@ -112,6 +115,7 @@ static int init(struct sd *sd)
  error:
     MP_FATAL(sd, "Could not open libavcodec subtitle decoder\n");
     avcodec_free_context(&ctx);
+    mp_free_av_packet(&priv->avpkt);
     talloc_free(priv);
     return -1;
 }
@@ -191,7 +195,8 @@ static void read_sub_bitmaps(struct sd *sd, struct sub *sub)
             MP_ERR(sd, "unsupported subtitle type from libavcodec\n");
             continue;
         }
-        if (!(r->flags & AV_SUBTITLE_FLAG_FORCED) && opts->forced_subs_only_current)
+        if (!(r->flags & AV_SUBTITLE_FLAG_FORCED) && (opts->forced_subs_only == 1 ||
+            (opts->forced_subs_only && sd->forced_only_def)))
             continue;
         if (r->w <= 0 || r->h <= 0)
             continue;
@@ -298,7 +303,6 @@ static void decode(struct sd *sd, struct demux_packet *packet)
     double endpts = MP_NOPTS_VALUE;
     double duration = packet->duration;
     AVSubtitle sub;
-    AVPacket pkt;
 
     // libavformat sets duration==0, even if the duration is unknown. Some files
     // also have actually subtitle packets with duration explicitly set to 0
@@ -311,7 +315,7 @@ static void decode(struct sd *sd, struct demux_packet *packet)
     if (pts == MP_NOPTS_VALUE)
         MP_WARN(sd, "Subtitle with unknown start time.\n");
 
-    mp_set_av_packet(&pkt, packet, &priv->pkt_timebase);
+    mp_set_av_packet(priv->avpkt, packet, &priv->pkt_timebase);
 
     if (ctx->codec_id == AV_CODEC_ID_DVB_TELETEXT) {
         char page[4];
@@ -320,7 +324,7 @@ static void decode(struct sd *sd, struct demux_packet *packet)
     }
 
     int got_sub;
-    int res = avcodec_decode_subtitle2(ctx, &sub, &got_sub, &pkt);
+    int res = avcodec_decode_subtitle2(ctx, &sub, &got_sub, priv->avpkt);
     if (res < 0 || !got_sub)
         return;
 
@@ -588,6 +592,7 @@ static void uninit(struct sd *sd)
     for (int n = 0; n < MAX_QUEUE; n++)
         clear_sub(&priv->subs[n]);
     avcodec_free_context(&priv->avctx);
+    mp_free_av_packet(&priv->avpkt);
     talloc_free(priv);
 }
 

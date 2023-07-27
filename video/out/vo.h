@@ -95,6 +95,8 @@ enum mp_voctrl {
 
     VOCTRL_SET_CURSOR_VISIBILITY,       // bool*
 
+    VOCTRL_CONTENT_TYPE,                // enum mp_content_type*
+
     VOCTRL_KILL_SCREENSAVER,
     VOCTRL_RESTORE_SCREENSAVER,
 
@@ -124,9 +126,17 @@ enum mp_voctrl {
     VOCTRL_GET_DISPLAY_FPS,             // double*
     VOCTRL_GET_HIDPI_SCALE,             // double*
     VOCTRL_GET_DISPLAY_RES,             // int[2]
+    VOCTRL_GET_WINDOW_ID,               // int64_t*
 
     /* private to vo_gpu and vo_gpu_next */
     VOCTRL_EXTERNAL_RESIZE,
+};
+
+// Helper to expose what kind of content is currently playing to the VO.
+enum mp_content_type {
+    MP_CONTENT_NONE, // used for force-window
+    MP_CONTENT_IMAGE,
+    MP_CONTENT_VIDEO,
 };
 
 #define VO_TRUE         true
@@ -154,14 +164,12 @@ struct mp_pass_perf {
 };
 
 #define VO_PASS_PERF_MAX 64
+#define VO_PASS_DESC_MAX_LEN 128
 
 struct mp_frame_perf {
     int count;
     struct mp_pass_perf perf[VO_PASS_PERF_MAX];
-    // The owner of this struct does not have ownership over the names, and
-    // they may change at any time - so this struct should not be stored
-    // anywhere or the results reused
-    char *desc[VO_PASS_PERF_MAX];
+    char desc[VO_PASS_PERF_MAX][VO_PASS_DESC_MAX_LEN];
 };
 
 struct voctrl_performance_data {
@@ -169,7 +177,7 @@ struct voctrl_performance_data {
 };
 
 struct voctrl_screenshot {
-    bool scaled, subs, osd, high_bit_depth;
+    bool scaled, subs, osd, high_bit_depth, native_csp;
     struct mp_image *res;
 };
 
@@ -455,6 +463,7 @@ struct vo {
     struct vo_cocoa_state *cocoa;
     struct vo_wayland_state *wl;
     struct vo_android_state *android;
+    struct vo_drm_state *drm;
     struct mp_hwdec_devices *hwdec_devs;
     struct input_ctx *input_ctx;
     struct osd_state *osd;

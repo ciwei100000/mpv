@@ -32,22 +32,8 @@
 #include "options/m_option.h"
 #include "ao.h"
 #include "audio/format.h"
-#include "config.h"
-#include "generated/version.h"
 #include "internal.h"
 #include "osdep/timer.h"
-
-// Added in Pipewire 0.3.33
-// remove the fallback when we require a newer version
-#ifndef PW_KEY_NODE_RATE
-#define PW_KEY_NODE_RATE "node.rate"
-#endif
-
-// Added in Pipewire 0.3.44
-// remove the fallback when we require a newer version
-#ifndef PW_KEY_TARGET_OBJECT
-#define PW_KEY_TARGET_OBJECT "target.object"
-#endif
 
 #if !PW_CHECK_VERSION(0, 3, 50)
 static inline int pw_stream_get_time_n(struct pw_stream *stream, struct pw_time *time, size_t size) {
@@ -55,19 +41,37 @@ static inline int pw_stream_get_time_n(struct pw_stream *stream, struct pw_time 
 }
 #endif
 
+#if !PW_CHECK_VERSION(0, 3, 57)
+// Earlier versions segfault on zeroed hooks
+#define spa_hook_remove(hook) if ((hook)->link.prev) spa_hook_remove(hook)
+#endif
+
+enum init_state {
+    INIT_STATE_NONE,
+    INIT_STATE_SUCCESS,
+    INIT_STATE_ERROR,
+};
+
+enum {
+    VOLUME_MODE_CHANNEL,
+    VOLUME_MODE_GLOBAL,
+};
+
 struct priv {
     struct pw_thread_loop *loop;
     struct pw_stream *stream;
     struct pw_core *core;
     struct spa_hook stream_listener;
     struct spa_hook core_listener;
+    enum init_state init_state;
 
     bool muted;
-    float volume[2];
+    float volume;
 
     struct {
         int buffer_msec;
         char *remote;
+        int volume_mode;
     } options;
 
     struct {
@@ -136,7 +140,6 @@ static enum spa_audio_channel mp_speaker_id_to_spa(struct ao *ao, enum mp_speake
     };
 }
 
-
 static void on_process(void *userdata)
 {
     struct ao *ao = userdata;
@@ -195,6 +198,14 @@ static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *
     uint8_t buffer[1024];
     struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
 
+    /* We want to know when our node is linked.
+     * As there is no proper callback for this we use the Latency param for this
+     */
+    if (id == SPA_PARAM_Latency) {
+        p->init_state = INIT_STATE_SUCCESS;
+        pw_thread_loop_signal(p->loop, false);
+    }
+
     if (param == NULL || id != SPA_PARAM_Format)
         return;
 
@@ -203,7 +214,8 @@ static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *
     params[0] = spa_pod_builder_add_object(&b,
                     SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
                     SPA_PARAM_BUFFERS_blocks,     SPA_POD_Int(ao->num_planes),
-                    SPA_PARAM_BUFFERS_size,       SPA_POD_Int(buffer_size),
+                    SPA_PARAM_BUFFERS_size,       SPA_POD_CHOICE_RANGE_Int(
+                                                    buffer_size, 0, INT32_MAX),
                     SPA_PARAM_BUFFERS_stride,     SPA_POD_Int(ao->sstride));
     if (!params[0]) {
         MP_ERR(ao, "Could not build parameter pod\n");
@@ -219,10 +231,14 @@ static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *
 static void on_state_changed(void *userdata, enum pw_stream_state old, enum pw_stream_state state, const char *error)
 {
     struct ao *ao = userdata;
-    MP_DBG(ao, "Stream state changed: old_state=%d state=%d error=%s\n", old, state, error);
+    struct priv *p = ao->priv;
+    MP_DBG(ao, "Stream state changed: old_state=%s state=%s error=%s\n",
+           pw_stream_state_as_string(old), pw_stream_state_as_string(state), error);
 
     if (state == PW_STREAM_STATE_ERROR) {
         MP_WARN(ao, "Stream in error state, trying to reload...\n");
+        p->init_state = INIT_STATE_ERROR;
+        pw_thread_loop_signal(p->loop, false);
         ao_request_reload(ao);
     }
 
@@ -262,14 +278,16 @@ static void on_control_info(void *userdata, uint32_t id,
                 p->muted = control->values[0] >= 0.5;
             break;
         case SPA_PROP_channelVolumes:
-            if (control->n_values == 2) {
-                p->volume[0] = control->values[0];
-                p->volume[1] = control->values[1];
-            } else if (control->n_values > 0) {
-                float volume = volume_avg(control->values, control->n_values);
-                p->volume[0] = volume;
-                p->volume[1] = volume;
-            }
+            if (p->options.volume_mode != VOLUME_MODE_CHANNEL)
+                break;
+            if (control->n_values > 0)
+                p->volume = volume_avg(control->values, control->n_values);
+            break;
+        case SPA_PROP_volume:
+            if (p->options.volume_mode != VOLUME_MODE_GLOBAL)
+                break;
+            if (control->n_values > 0)
+                p->volume = control->values[0];
             break;
     }
 }
@@ -292,9 +310,8 @@ static void uninit(struct ao *ao)
     if (p->stream)
         pw_stream_destroy(p->stream);
     p->stream = NULL;
-    if (p->core) {
+    if (p->core)
         pw_context_destroy(pw_core_get_context(p->core));
-    }
     p->core = NULL;
     if (p->loop)
         pw_thread_loop_destroy(p->loop);
@@ -337,6 +354,11 @@ static void for_each_sink_registry_event_global(void *data, uint32_t id,
 }
 
 
+struct for_each_done_ctx {
+    struct pw_thread_loop *loop;
+    bool done;
+};
+
 static const struct pw_registry_events for_each_sink_registry_events = {
     .version = PW_VERSION_REGISTRY_EVENTS,
     .global = for_each_sink_registry_event_global,
@@ -344,8 +366,9 @@ static const struct pw_registry_events for_each_sink_registry_events = {
 
 static void for_each_sink_done(void *data, uint32_t it, int seq)
 {
-    struct pw_thread_loop *loop = data;
-    pw_thread_loop_signal(loop, false);
+    struct for_each_done_ctx *ctx = data;
+    ctx->done = true;
+    pw_thread_loop_signal(ctx->loop, false);
 }
 
 static const struct pw_core_events for_each_sink_core_events = {
@@ -359,12 +382,16 @@ static int for_each_sink(struct ao *ao, void (cb) (struct ao *ao, uint32_t id,
     struct priv *priv = ao->priv;
     struct pw_registry *registry;
     struct spa_hook core_listener;
+    struct for_each_done_ctx done_ctx = {
+        .loop = priv->loop,
+        .done = false,
+    };
     int ret = -1;
 
     pw_thread_loop_lock(priv->loop);
 
     spa_zero(core_listener);
-    if (pw_core_add_listener(priv->core, &core_listener, &for_each_sink_core_events, priv->loop) < 0)
+    if (pw_core_add_listener(priv->core, &core_listener, &for_each_sink_core_events, &done_ctx) < 0)
         goto unlock_loop;
 
     registry = pw_core_get_registry(priv->core, PW_VERSION_REGISTRY, 0);
@@ -383,7 +410,8 @@ static int for_each_sink(struct ao *ao, void (cb) (struct ao *ao, uint32_t id,
     if (pw_registry_add_listener(registry, &registry_listener, &for_each_sink_registry_events, &revents_ctx) < 0)
         goto destroy_registry;
 
-    pw_thread_loop_wait(priv->loop);
+    while (!done_ctx.done)
+        pw_thread_loop_wait(priv->loop);
 
     spa_hook_remove(&registry_listener);
 
@@ -450,7 +478,7 @@ static int pipewire_init_boilerplate(struct ao *ao)
     MP_VERBOSE(ao, "Headers version: %s\n", pw_get_headers_version());
     MP_VERBOSE(ao, "Library version: %s\n", pw_get_library_version());
 
-    p->loop = pw_thread_loop_new("ao-pipewire", NULL);
+    p->loop = pw_thread_loop_new("mpv/ao/pipewire", NULL);
     if (p->loop == NULL)
         return -1;
 
@@ -459,7 +487,10 @@ static int pipewire_init_boilerplate(struct ao *ao)
     if (pw_thread_loop_start(p->loop) < 0)
         goto error;
 
-    context = pw_context_new(pw_thread_loop_get_loop(p->loop), NULL, 0);
+    context = pw_context_new(
+            pw_thread_loop_get_loop(p->loop),
+            pw_properties_new(PW_KEY_CONFIG_NAME, "client-rt.conf", NULL),
+            0);
     if (!context)
         goto error;
 
@@ -468,8 +499,9 @@ static int pipewire_init_boilerplate(struct ao *ao)
             pw_properties_new(PW_KEY_REMOTE_NAME, p->options.remote, NULL),
             0);
     if (!p->core) {
-        MP_WARN(ao, "Could not connect to context '%s': %s\n",
-                p->options.remote, strerror(errno));
+        MP_MSG(ao, ao->probing ? MSGL_V : MSGL_ERR,
+               "Could not connect to context '%s': %s\n",
+               p->options.remote, strerror(errno));
         pw_context_destroy(context);
         goto error;
     }
@@ -491,6 +523,26 @@ error:
     return -1;
 }
 
+static void wait_for_init_done(struct ao *ao)
+{
+    struct priv *p = ao->priv;
+    struct timespec abstime;
+    int r;
+
+    r = pw_thread_loop_get_time(p->loop, &abstime, 50 * SPA_NSEC_PER_MSEC);
+    if (r < 0) {
+        MP_WARN(ao, "Could not get timeout for initialization: %s\n", spa_strerror(r));
+        return;
+    }
+
+    while (p->init_state == INIT_STATE_NONE) {
+        r = pw_thread_loop_timed_wait_full(p->loop, &abstime);
+        if (r < 0) {
+            MP_WARN(ao, "Could not wait for initialization: %s\n", spa_strerror(r));
+            return;
+        }
+    }
+}
 
 static int init(struct ao *ao)
 {
@@ -514,9 +566,12 @@ static int init(struct ao *ao)
     if (pipewire_init_boilerplate(ao) < 0)
         goto error_props;
 
-    ao->device_buffer = p->options.buffer_msec * ao->samplerate / 1000;
+    if (p->options.buffer_msec) {
+        ao->device_buffer = p->options.buffer_msec * ao->samplerate / 1000;
 
-    pw_properties_setf(props, PW_KEY_NODE_LATENCY, "%d/%d", ao->device_buffer, ao->samplerate);
+        pw_properties_setf(props, PW_KEY_NODE_LATENCY, "%d/%d", ao->device_buffer, ao->samplerate);
+    }
+
     pw_properties_setf(props, PW_KEY_NODE_RATE, "1/%d", ao->samplerate);
 
     enum spa_audio_format spa_format = af_fmt_to_pw(ao, ao->format);
@@ -548,31 +603,34 @@ static int init(struct ao *ao)
 
     pw_thread_loop_lock(p->loop);
 
-    p->stream = pw_stream_new(
-                    p->core,
-                    "audio-src",
-                    props);
+    p->stream = pw_stream_new(p->core, "audio-src", props);
     if (p->stream == NULL) {
         pw_thread_loop_unlock(p->loop);
         goto error;
     }
 
-    pw_stream_add_listener(p->stream,
-                    &p->stream_listener,
-                    &stream_events, ao);
+    pw_stream_add_listener(p->stream, &p->stream_listener, &stream_events, ao);
+
+    enum pw_stream_flags flags = PW_STREAM_FLAG_AUTOCONNECT |
+                                 PW_STREAM_FLAG_INACTIVE |
+                                 PW_STREAM_FLAG_MAP_BUFFERS |
+                                 PW_STREAM_FLAG_RT_PROCESS;
+
+    if (ao->init_flags & AO_INIT_EXCLUSIVE)
+        flags |= PW_STREAM_FLAG_EXCLUSIVE;
 
     if (pw_stream_connect(p->stream,
-                    PW_DIRECTION_OUTPUT, PW_ID_ANY,
-                    PW_STREAM_FLAG_AUTOCONNECT |
-                    PW_STREAM_FLAG_INACTIVE |
-                    PW_STREAM_FLAG_MAP_BUFFERS |
-                    PW_STREAM_FLAG_RT_PROCESS,
-                    params, 1) < 0) {
+                    PW_DIRECTION_OUTPUT, PW_ID_ANY, flags, params, 1) < 0) {
         pw_thread_loop_unlock(p->loop);
         goto error;
     }
 
+    wait_for_init_done(ao);
+
     pw_thread_loop_unlock(p->loop);
+
+    if (p->init_state == INIT_STATE_ERROR)
+        goto error;
 
     return 0;
 
@@ -608,9 +666,8 @@ static int control(struct ao *ao, enum aocontrol cmd, void *arg)
 
     switch (cmd) {
         case AOCONTROL_GET_VOLUME: {
-            struct ao_control_vol *vol = arg;
-            vol->left = spa_volume_to_mp_volume(p->volume[0]);
-            vol->right = spa_volume_to_mp_volume(p->volume[1]);
+            float *vol = arg;
+            *vol = spa_volume_to_mp_volume(p->volume);
             return CONTROL_OK;
         }
         case AOCONTROL_GET_MUTE: {
@@ -627,19 +684,21 @@ static int control(struct ao *ao, enum aocontrol cmd, void *arg)
             pw_thread_loop_lock(p->loop);
             switch (cmd) {
                 case AOCONTROL_SET_VOLUME: {
-                    struct ao_control_vol *vol = arg;
+                    float *vol = arg;
                     uint8_t n = ao->channels.num;
-                    float values[MP_NUM_CHANNELS] = {0};
-                    if (n == 2) {
-                        values[0] = mp_volume_to_spa_volume(vol->left);
-                        values[1] = mp_volume_to_spa_volume(vol->right);
-                    } else {
+                    if (p->options.volume_mode == VOLUME_MODE_CHANNEL) {
+                        float values[MP_NUM_CHANNELS] = {0};
                         for (int i = 0; i < n; i++)
-                            values[i] = mp_volume_to_spa_volume(vol->left);
+                            values[i] = mp_volume_to_spa_volume(*vol);
+                        ret = CONTROL_RET(pw_stream_set_control(
+                                    p->stream, SPA_PROP_channelVolumes, n, values, 0));
+                    } else {
+                        float value = mp_volume_to_spa_volume(*vol);
+                        ret = CONTROL_RET(pw_stream_set_control(
+                                    p->stream, SPA_PROP_volume, 1, &value, 0));
                     }
-                    ret = CONTROL_RET(pw_stream_set_control(p->stream, SPA_PROP_channelVolumes, n, values, 0));
                     break;
-               }
+                }
                 case AOCONTROL_SET_MUTE: {
                     bool *muted = arg;
                     float value = *muted ? 1.f : 0.f;
@@ -708,7 +767,7 @@ static void hotplug_registry_global_cb(void *data, uint32_t id,
         return;
 
     pw_thread_loop_lock(priv->loop);
-    struct id_list *item = talloc_size(ao, sizeof(*item));
+    struct id_list *item = talloc(ao, struct id_list);
     item->id = id;
     spa_list_init(&item->node);
     spa_list_append(&priv->hotplug.sinks, &item->node);
@@ -731,10 +790,10 @@ static void hotplug_registry_global_remove_cb(void *data, uint32_t id)
             removed_sink = true;
             spa_list_remove(&e->node);
             talloc_free(e);
-            goto done;
+            break;
         }
     }
-done:
+
     pw_thread_loop_unlock(priv->loop);
 
     if (removed_sink)
@@ -747,7 +806,6 @@ static const struct pw_registry_events hotplug_registry_events = {
     .global_remove = hotplug_registry_global_remove_cb,
 };
 
-
 static int hotplug_init(struct ao *ao)
 {
     struct priv *priv = ao->priv;
@@ -758,13 +816,12 @@ static int hotplug_init(struct ao *ao)
 
     pw_thread_loop_lock(priv->loop);
 
-    spa_memzero(&priv->hotplug, sizeof(priv->hotplug));
+    spa_zero(priv->hotplug);
     spa_list_init(&priv->hotplug.sinks);
 
     priv->hotplug.registry = pw_core_get_registry(priv->core, PW_VERSION_REGISTRY, 0);
-    if (!priv->hotplug.registry) {
+    if (!priv->hotplug.registry)
         goto error;
-    }
 
     if (pw_registry_add_listener(priv->hotplug.registry, &priv->hotplug.registry_listener, &hotplug_registry_events, ao) < 0) {
         pw_proxy_destroy((struct pw_proxy *)priv->hotplug.registry);
@@ -825,12 +882,17 @@ const struct ao_driver audio_out_pipewire = {
     {
         .loop = NULL,
         .stream = NULL,
-        .options.buffer_msec = 20,
+        .init_state = INIT_STATE_NONE,
+        .options.buffer_msec = 0,
+        .options.volume_mode = VOLUME_MODE_CHANNEL,
     },
     .options_prefix = "pipewire",
     .options = (const struct m_option[]) {
-        {"buffer", OPT_INT(options.buffer_msec), M_RANGE(1, 2000)},
+        {"buffer", OPT_CHOICE(options.buffer_msec, {"native", 0}),
+            M_RANGE(1, 2000)},
         {"remote", OPT_STRING(options.remote) },
+        {"volume-mode", OPT_CHOICE(options.volume_mode,
+            {"channel", VOLUME_MODE_CHANNEL}, {"global", VOLUME_MODE_GLOBAL})},
         {0}
     },
 };

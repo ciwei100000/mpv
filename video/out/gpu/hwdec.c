@@ -38,6 +38,7 @@ extern const struct ra_hwdec_driver ra_hwdec_rpi_overlay;
 extern const struct ra_hwdec_driver ra_hwdec_drmprime;
 extern const struct ra_hwdec_driver ra_hwdec_drmprime_overlay;
 extern const struct ra_hwdec_driver ra_hwdec_aimagereader;
+extern const struct ra_hwdec_driver ra_hwdec_vulkan;
 
 const struct ra_hwdec_driver *const ra_hwdec_drivers[] = {
 #if HAVE_VAAPI_EGL || HAVE_VAAPI_LIBPLACEBO
@@ -73,17 +74,21 @@ const struct ra_hwdec_driver *const ra_hwdec_drivers[] = {
     &ra_hwdec_rpi_overlay,
 #endif
 #if HAVE_DRM
-    &ra_hwdec_drmprime_overlay,
     &ra_hwdec_drmprime,
+    &ra_hwdec_drmprime_overlay,
 #endif
 #if HAVE_ANDROID_MEDIA_NDK
     &ra_hwdec_aimagereader,
+#endif
+#if HAVE_VULKAN_INTEROP
+    &ra_hwdec_vulkan,
 #endif
 
     NULL
 };
 
-struct ra_hwdec *ra_hwdec_load_driver(struct ra *ra, struct mp_log *log,
+struct ra_hwdec *ra_hwdec_load_driver(struct ra_ctx *ra_ctx,
+                                      struct mp_log *log,
                                       struct mpv_global *global,
                                       struct mp_hwdec_devices *devs,
                                       const struct ra_hwdec_driver *drv,
@@ -94,7 +99,7 @@ struct ra_hwdec *ra_hwdec_load_driver(struct ra *ra, struct mp_log *log,
         .driver = drv,
         .log = mp_log_new(hwdec, log, drv->name),
         .global = global,
-        .ra = ra,
+        .ra_ctx = ra_ctx,
         .devs = devs,
         .probing = is_auto,
         .priv = talloc_zero_size(hwdec, drv->priv_size),
@@ -134,7 +139,7 @@ struct ra_hwdec_mapper *ra_hwdec_mapper_create(struct ra_hwdec *hwdec,
         .owner = hwdec,
         .driver = hwdec->driver->mapper,
         .log = hwdec->log,
-        .ra = hwdec->ra,
+        .ra = hwdec->ra_ctx->ra,
         .priv = talloc_zero_size(mapper, hwdec->driver->mapper->priv_size),
         .src_params = *params,
         .dst_params = *params,
@@ -189,8 +194,6 @@ static int ra_hwdec_validate_opt_full(struct mp_log *log, bool include_modes,
             mp_info(log, "    %s\n", drv->name);
         } else if (bstr_equals0(param, drv->name)) {
             return 1;
-        } else if (bstr_equals0(param, drv->legacy_name)) {
-            return 1;
         }
     }
     if (help) {
@@ -234,7 +237,7 @@ static void load_add_hwdec(struct ra_hwdec_ctx *ctx, struct mp_hwdec_devices *de
     }
 
     struct ra_hwdec *hwdec =
-        ra_hwdec_load_driver(ctx->ra, ctx->log, ctx->global, devs, drv, is_auto);
+        ra_hwdec_load_driver(ctx->ra_ctx, ctx->log, ctx->global, devs, drv, is_auto);
     if (hwdec)
         MP_TARRAY_APPEND(NULL, ctx->hwdecs, ctx->num_hwdecs, hwdec);
 }
@@ -251,7 +254,7 @@ static void load_hwdecs_all(struct ra_hwdec_ctx *ctx, struct mp_hwdec_devices *d
 void ra_hwdec_ctx_init(struct ra_hwdec_ctx *ctx, struct mp_hwdec_devices *devs,
                        const char *type, bool load_all_by_default)
 {
-    assert(ctx->ra);
+    assert(ctx->ra_ctx);
 
     /*
      * By default, or if the option value is "auto", we will not pre-emptively
@@ -279,12 +282,6 @@ void ra_hwdec_ctx_init(struct ra_hwdec_ctx *ctx, struct mp_hwdec_devices *devs,
         for (int n = 0; ra_hwdec_drivers[n]; n++) {
             const struct ra_hwdec_driver *drv = ra_hwdec_drivers[n];
             if (strcmp(type, drv->name) == 0) {
-                load_add_hwdec(ctx, devs, drv, false);
-                break;
-            } else if (drv->legacy_name && strcmp(type, drv->legacy_name) == 0) {
-                MP_WARN(ctx, "gpu-hwdec-interop was selected with the legacy name '%s'. "
-                             "Please change it to '%s' in your config file or command line.\n",
-                             drv->legacy_name, drv->name);
                 load_add_hwdec(ctx, devs, drv, false);
                 break;
             }

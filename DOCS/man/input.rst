@@ -186,7 +186,7 @@ character at the value.
 
 Custom quotes also take the content literally, but are more flexible than single
 quotes. They start with ````` (back-quote) followed by any ASCII character,
-and end at the first occurance of the same pair in reverse order, e.g.
+and end at the first occurrence of the same pair in reverse order, e.g.
 ```-foo-``` or ````bar````. The final pair sequence is not allowed at the
 value - in these examples ``-``` and `````` respectively. In the second
 example the last character of the value also can't be a back-quote.
@@ -334,6 +334,9 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
 ``set <name> <value>``
     Set the given property or option to the given value.
 
+``del <name>``
+    Delete the given property. Most properties cannot be deleted.
+
 ``add <name> [<value>]``
     Add the given value to the property or option. On overflow or underflow,
     clamp the property to the maximum. If ``<value>`` is omitted, assume ``1``.
@@ -366,8 +369,7 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
         behavior depends on the selected video output.
     <window>
         Save the contents of the mpv window. Typically scaled, with OSD and
-        subtitles. The exact behavior depends on the selected video output, and
-        if no support is available, this will act like ``video``.
+        subtitles. The exact behavior depends on the selected video output.
     <each-frame>
         Take a screenshot each frame. Issue this command again to stop taking
         screenshots. Note that you should disable frame-dropping when using
@@ -383,6 +385,9 @@ Remember to quote string arguments in input.conf (see `Flat command syntax`_).
     ``async`` flag to make encoding/writing the image file asynchronous. For
     normal standalone commands, this is always asynchronous, and the flag has
     no effect. (This behavior changed with mpv 0.29.0.)
+    
+    On success, returns a ``mpv_node`` with a ``filename`` field set to the
+    saved screenshot location.
 
 ``screenshot-to-file <filename> <flags>``
     Take a screenshot and save it to a given file. The format of the file will
@@ -1091,7 +1096,7 @@ Input Commands that are Possibly Subject to Change
         Before mpv 0.18.1, you had to do manual "double buffering" when updating
         an overlay by replacing it with a different memory buffer. Since mpv
         0.18.1, the memory is simply copied and doesn't reference any of the
-        memory indicated by the command's arguments after the commend returns.
+        memory indicated by the command's arguments after the command returns.
         If you want to use this command before mpv 0.18.1, reads the old docs
         to see how to handle this correctly.
 
@@ -1383,7 +1388,7 @@ Input Commands that are Possibly Subject to Change
 
         This was mostly created for network streams. For local files, there may
         be much better methods to create excerpts and such. There are tons of
-        much more user-friendly Lua scripts, that will reencode parts of a file
+        much more user-friendly Lua scripts, that will re-encode parts of a file
         by spawning a separate instance of ``ffmpeg``. With network streams,
         this is not that easily possible, as the stream would have to be
         downloaded again. Even if ``--stream-record`` is used to record the
@@ -1423,8 +1428,8 @@ IPC sees. Note that the C API has separate C-level declarations with
 ``mpv_event``, which may be slightly different.
 
 Note that events are asynchronous: the player core continues running while
-events are delivered to scripts and other clients. In some cases, you can hooks
-to enforce synchronous execution.
+events are delivered to scripts and other clients. In some cases, you can use
+hooks to enforce synchronous execution.
 
 All events can have the following fields:
 
@@ -2559,7 +2564,7 @@ Property list
     is unavailable if no video is active.
 
     When setting this property in the fullscreen or maximized state, the behavior
-    is the same as window-scale. In all ther cases, setting the value of this
+    is the same as window-scale. In all other cases, setting the value of this
     property will always resize the window. This does not affect the value of
     ``window-scale``.
 
@@ -2652,6 +2657,10 @@ Property list
     Any of these properties may be unavailable or set to dummy values if the
     VO window is not created or visible.
 
+``window-id``
+    Read-only - mpv's window id. May not always be available, i.e due to window
+    not being opened yet or not being supported by the VO.
+
 ``mouse-pos``
     Read-only - last known mouse position, normalizd to OSD dimensions.
 
@@ -2671,8 +2680,6 @@ Property list
     stripped. If the subtitle is not text-based (i.e. DVD/BD subtitles), an
     empty string is returned.
 
-    This property is experimental and might be removed in the future.
-
 ``sub-text-ass``
     Like ``sub-text``, but return the text in ASS format. Text subtitles in
     other formats are converted. For native ASS subtitles, events that do
@@ -2683,8 +2690,6 @@ Property list
     This property is not enough to render ASS subtitles correctly, because ASS
     header and per-event metadata are not returned. You likely need to do
     further filtering on the returned string to make it useful.
-
-    This property is experimental and might be removed in the future.
 
 ``secondary-sub-text``
     Same as ``sub-text``, but for the secondary subtitles.
@@ -2705,6 +2710,9 @@ Property list
 
 ``secondary-sub-end``
     Same as ``sub-end``, but for the secondary subtitles.
+
+``sub-forced-only-cur``
+    Read-only - whether the current subtitle track is being shown in forced-only mode.
 
 ``playlist-pos`` (RW)
     Current position on playlist. The first entry is on position 0. Writing to
@@ -2786,9 +2794,10 @@ Property list
         entry, ``no``/false or unavailable otherwise.
 
     ``playlist/N/title``
-        Name of the Nth entry. Only available if the playlist file contains
-        such fields, and only if mpv's parser supports it for the given
-        playlist format.
+        Name of the Nth entry. Available if the playlist file contains
+        such fields and mpv's parser supports it for the given
+        playlist format, or if the playlist entry has been opened before and a
+        media-title other then then filename has been acquired.
 
     ``playlist/N/id``
         Unique ID for this entry. This is an automatically assigned integer ID
@@ -2856,6 +2865,10 @@ Property list
 
     ``track-list/N/forced``
         ``yes``/true if the track has the forced flag set in the file,
+        ``no``/false or unavailable otherwise.
+
+    ``track-list/N/auto-forced-only``
+        ``yes``/true if the track was autoselected in forced-only mode,
         ``no``/false or unavailable otherwise.
 
     ``track-list/N/codec``
@@ -3249,6 +3262,24 @@ Property list
     (There is no way to ensure synchronization if two scripts try to update the
     same key at the same time.)
 
+``user-data`` (RW)
+    This is a recursive key/value map of arbitrary nodes shared between clients for
+    general use (i.e. scripts, IPC clients, host applications, etc).
+    The player itself does not use any data in it (although some builtin scripts may).
+    The property is not preserved across player restarts.
+
+    This is a more powerful replacement for ``shared-script-properties``.
+
+    Sub-paths can be accessed directly; e.g. ``user-data/my-script/state/a`` can be
+    read, written, or observed.
+
+    The top-level object itself cannot be written directly; write to sub-paths instead.
+
+    Converting this property or its sub-properties to strings will give a JSON
+    representation. If converting a leaf-level object (i.e. not a map or array)
+    and not using raw mode, the underlying content will be given (e.g. strings will be
+    printed directly, rather than quoted and JSON-escaped).
+
 ``working-directory``
     The working directory of the mpv process. Can be useful for JSON IPC users,
     because the command line player usually works with relative paths.
@@ -3304,8 +3335,9 @@ Property list
     might contain either a release version, or just a git hash.
 
 ``mpv-configuration``
-    The configuration arguments which were passed to the build system
-    (typically the way ``./waf configure ...`` was invoked).
+    The configuration arguments that were passed to the build system. If the
+    meson version used to compile mpv is older than 1.1.0, then a hardcoded
+    string of a few, arbitrary options is displayed instead.
 
 ``ffmpeg-version``
     The contents of the ``av_version_info()`` API call. This is a string which
@@ -3318,6 +3350,12 @@ Property list
     The value of ``ass_library_version()``. This is an integer, encoded in a
     somewhat weird form (apparently "hex BCD"), indicating the release version
     of the libass library linked to mpv.
+
+``platform``
+    Returns a string describing what target platform mpv was built for. The value
+    of this is dependent on what the underlying build system detects. Some of the
+    most common values are: ``windows``, ``darwin`` (macos or ios), ``linux``,
+    ``android``, and ``freebsd``. Note that this is not a complete listing.
 
 ``options/<name>`` (RW)
     The value of option ``--<name>``. Most options can be changed at runtime by

@@ -43,24 +43,48 @@ static const char *const audio_exts[] = {"mp3", "aac", "mka", "dts", "flac",
                                          NULL};
 
 static const char *const image_exts[] = {"jpg", "jpeg", "png", "gif", "bmp",
-                                         "webp", "jxl", "tiff", "tif",
+                                         "webp", "jxl", "tiff", "tif", "avif",
                                          NULL};
 
 // Stolen from: vlc/-/blob/master/modules/meta_engine/folder.c#L40
 // sorted by priority (descending)
 static const char *const cover_files[] = {
     "AlbumArt.jpg",
+    "AlbumArt.webp",
+    "AlbumArt.jxl",
+    "AlbumArt.avif",
     "Album.jpg",
+    "Album.webp",
+    "Album.jxl",
+    "Album.avif",
     "cover.jpg",
     "cover.png",
+    "cover.webp",
+    "cover.jxl",
+    "cover.avif",
     "front.jpg",
     "front.png",
+    "front.webp",
+    "front.jxl",
+    "front.avif",
 
     "AlbumArtSmall.jpg",
+    "AlbumArtSmall.webp",
+    "AlbumArtSmall.jxl",
+    "AlbumArtSmall.avif",
     "Folder.jpg",
     "Folder.png",
+    "Folder.webp",
+    "Folder.jxl",
+    "Folder.avif",
     ".folder.png",
+    ".folder.webp",
+    ".folder.jxl",
+    ".folder.avif",
     "thumb.jpg",
+    "thumb.webp",
+    "thumb.jxl",
+    "thumb.avif",
 
     "front.bmp",
     "front.gif",
@@ -224,24 +248,23 @@ static void append_dir_subtitles(struct mpv_global *global, struct MPOpts *opts,
             prio |= 32; // exact movie name match
 
         bstr lang = {0};
+        int start = 0;
+        lang = guess_lang_from_filename(tmp_fname_trim, &start);
         if (bstr_startswith(tmp_fname_trim, f_fname_trim)) {
-            int start = 0;
-            lang = guess_lang_from_filename(tmp_fname_trim, &start);
-
             if (lang.len && start == f_fname_trim.len)
                 prio |= 16; // exact movie name + followed by lang
-        }
 
-        for (int n = 0; langs && langs[n]; n++) {
-            if (lang.len && bstr_case_startswith(lang, bstr0(langs[n]))) {
-                if (fuzz >= 1)
-                    prio |= 8; // known language -> boost priority
-                break;
+            if (lang.len && fuzz >= 1)
+                prio |= 4; // matches the movie name + a language was matched
+
+            for (int n = 0; langs && langs[n]; n++) {
+                if (lang.len && bstr_case_startswith(lang, bstr0(langs[n]))) {
+                    if (fuzz >= 1)
+                        prio |= 8; // known language -> boost priority
+                    break;
+                }
             }
         }
-
-        if (lang.len && fuzz >= 1)
-            prio |= 4; // matches the movie name + a language was matched
 
         if (bstr_find(tmp_fname_trim, f_fname_trim) >= 0 && fuzz >= 1)
             prio |= 2; // contains the movie name

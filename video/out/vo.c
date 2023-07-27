@@ -67,8 +67,9 @@ extern const struct vo_driver video_out_wlshm;
 extern const struct vo_driver video_out_rpi;
 extern const struct vo_driver video_out_tct;
 extern const struct vo_driver video_out_sixel;
+extern const struct vo_driver video_out_kitty;
 
-const struct vo_driver *const video_out_drivers[] =
+static const struct vo_driver *const video_out_drivers[] =
 {
     &video_out_libmpv,
 #if HAVE_ANDROID
@@ -118,8 +119,8 @@ const struct vo_driver *const video_out_drivers[] =
 #if HAVE_SIXEL
     &video_out_sixel,
 #endif
+    &video_out_kitty,
     &video_out_lavc,
-    NULL
 };
 
 struct vo_internal {
@@ -187,7 +188,7 @@ static void *vo_thread(void *ptr);
 
 static bool get_desc(struct m_obj_desc *dst, int index)
 {
-    if (index >= MP_ARRAY_SIZE(video_out_drivers) - 1)
+    if (index >= MP_ARRAY_SIZE(video_out_drivers))
         return false;
     const struct vo_driver *vo = video_out_drivers[index];
     *dst = (struct m_obj_desc) {
@@ -369,7 +370,7 @@ struct vo *init_best_video_out(struct mpv_global *global, struct vo_extra *ex)
     }
 autoprobe:
     // now try the rest...
-    for (int i = 0; video_out_drivers[i]; i++) {
+    for (int i = 0; i < MP_ARRAY_SIZE(video_out_drivers); i++) {
         const struct vo_driver *driver = video_out_drivers[i];
         if (driver == &video_out_null)
             break;
@@ -943,6 +944,9 @@ static bool render_frame(struct vo *vo)
         in->prev_vsync = now;
     in->expecting_vsync = use_vsync;
 
+    // Store the initial value before we unlock.
+    bool request_redraw = in->request_redraw;
+
     if (in->dropped_frame) {
         in->drop_count += 1;
         wakeup_core(vo);
@@ -1003,7 +1007,14 @@ static bool render_frame(struct vo *vo)
     if (in->dropped_frame) {
         MP_STATS(vo, "drop-vo");
     } else {
-        in->request_redraw = false;
+        // If the initial redraw request was true, then we can
+        // clear it here since we just performed a redraw and are
+        // merely clearing that request. However if there initially is
+        // no redraw request, then something can change this (i.e. the OSD)
+        // while the vo was unlocked. Don't touch in->request_redraw
+        // in that case.
+        if (request_redraw)
+            in->request_redraw = false;
     }
 
     if (in->current_frame && in->current_frame->num_vsyncs &&
@@ -1427,11 +1438,8 @@ struct vo_frame *vo_frame_ref(struct vo_frame *frame)
     struct vo_frame *new = talloc_ptrtype(NULL, new);
     talloc_set_destructor(new, destroy_frame);
     *new = *frame;
-    for (int n = 0; n < frame->num_frames; n++) {
+    for (int n = 0; n < frame->num_frames; n++)
         new->frames[n] = mp_image_new_ref(frame->frames[n]);
-        if (!new->frames[n])
-            abort(); // OOM on tiny allocs
-    }
     new->current = new->num_frames ? new->frames[0] : NULL;
     return new;
 }
