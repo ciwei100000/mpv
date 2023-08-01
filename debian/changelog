@@ -2,8 +2,9 @@ mpv (0.36.0-1) unstable; urgency=medium
 
   * New upstream version 0.36.0
   * debian/patches: Refresh patches
+  * debian/libmpv2.symbols: Add new symbol
 
- -- Sebastian Ramacher <sramacher@debian.org>  Tue, 01 Aug 2023 22:36:56 +0200
+ -- Sebastian Ramacher <sramacher@debian.org>  Tue, 01 Aug 2023 22:43:12 +0200
 
 mpv (0.35.1-4) unstable; urgency=medium
 
