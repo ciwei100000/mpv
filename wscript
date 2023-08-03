@@ -6,12 +6,15 @@ sys.path.insert(0, os.getcwd())
 from shlex import split
 from waflib.Configure import conf
 from waflib.Tools import c_preproc
+from waflib.Tools.compiler_c import c_compiler
 from waflib import Utils
 from waftools.checks.generic import *
 from waftools.checks.custom import *
 
 c_preproc.go_absolute=True # enable system folders
 c_preproc.standard_includes.append('/usr/local/include')
+
+c_compiler['win32'].remove('msvc')
 
 APPNAME = 'mpv'
 
@@ -74,11 +77,6 @@ build_options = [
         'name': '--debug-build',
         'desc': 'whether to compile-in debugging information',
         'default': 'enable',
-        'func': check_true
-    }, {
-        'name': '--tests',
-        'desc': 'unit tests (development only)',
-        'default': 'disable',
         'func': check_true
     }, {
         # Reminder: normally always built, but enabled by MPV_LEAK_REPORT.
@@ -158,6 +156,11 @@ main_dependencies = [
         'desc': 'POSIX environment',
         'func': check_statement(['unistd.h'], 'long x = _POSIX_VERSION'),
     }, {
+        'name': 'darwin',
+        'desc': 'Darwin environment',
+        'deps': 'os-darwin',
+        'func': check_true,
+    }, {
         'name': '--android',
         'desc': 'Android environment',
         'func': check_statement('android/api-level.h', '(void)__ANDROID__'),  # arbitrary android-specific header
@@ -203,7 +206,14 @@ main_dependencies = [
         'name': 'win32-desktop',
         'desc': 'win32 desktop APIs',
         'deps': '(os-win32 || os-cygwin) && !uwp',
-        'func': check_cc(lib=['winmm', 'gdi32', 'ole32', 'uuid', 'avrt', 'dwmapi', 'version']),
+        'func': check_cc(lib=['avrt',
+                              'dwmapi',
+                              'gdi32',
+                              'ole32',
+                              'uuid',
+                              'uxtheme',
+                              'version',
+                              'winmm']),
     }, {
         'name': '--win32-internal-pthreads',
         'desc': 'internal pthread wrapper for win32 (Vista+)',
@@ -402,9 +412,17 @@ iconv support use --disable-iconv.",
         'desc': 'JPEG XL support via libavcodec',
         'func': check_pkg_config('libavcodec >= 59.27.100'),
     }, {
+        'name': 'avif_muxer',
+        'desc': 'avif support via libavcodec',
+        'func': check_pkg_config('libavformat >= 59.24.100'),
+    }, {
         'name': 'rubberband-3',
         'desc': 'new engine support for librubberband',
         'func': check_pkg_config('rubberband >= 3.0.0'),
+    }, {
+        'name': 'zimg-st428',
+        'desc': 'ZIMG support for ZIMG_TRANSFER_ST428',
+        'func': check_pkg_config('zimg', '>= 3.0.5'),
     }
 ]
 
@@ -412,12 +430,12 @@ libav_dependencies = [
     {
         'name': 'ffmpeg',
         'desc': 'FFmpeg library',
-        'func': check_pkg_config('libavutil',     '>= 56.12.100',
-                                 'libavcodec',    '>= 58.16.100',
-                                 'libavformat',   '>= 58.9.100',
-                                 'libswscale',    '>= 5.0.101',
-                                 'libavfilter',   '>= 7.14.100',
-                                 'libswresample', '>= 3.0.100'),
+        'func': check_pkg_config('libavutil',     '>= 56.70.100',
+                                 'libavcodec',    '>= 58.134.100',
+                                 'libavformat',   '>= 58.76.100',
+                                 'libswscale',    '>= 5.9.100',
+                                 'libavfilter',   '>= 7.110.100',
+                                 'libswresample', '>= 3.9.100'),
         'req': True,
         'fmsg': "Unable to find development files for some of the required \
 FFmpeg libraries. Git master is recommended."
@@ -428,7 +446,7 @@ FFmpeg libraries. Git master is recommended."
     }, {
         'name': '--libavdevice',
         'desc': 'libavdevice',
-        'func': check_pkg_config('libavdevice', '>= 57.0.0'),
+        'func': check_pkg_config('libavdevice', '>= 58.13.100'),
     }
 ]
 
@@ -527,20 +545,35 @@ video_output_features = [
         'name': '--wayland',
         'desc': 'Wayland',
         'deps': 'wayland-protocols && wayland-scanner && linux-input-event-codes',
-        'func': check_pkg_config('wayland-client', '>= 1.15.0',
-                                 'wayland-cursor', '>= 1.15.0',
+        'func': check_pkg_config('wayland-client', '>= 1.20.0',
+                                 'wayland-cursor', '>= 1.20.0',
                                  'xkbcommon',      '>= 0.3.0'),
     } , {
-        'name': 'wayland-protocols-1-24',
-        'desc': 'wayland-protocols version 1.24+',
+        'name': 'wayland-protocols-1-27',
+        'desc': 'wayland-protocols version 1.27+',
         'deps': 'wayland',
-        'func': check_pkg_config('wayland-protocols >= 1.24'),
+        'func': check_pkg_config('wayland-protocols >= 1.27'),
+    } , {
+        'name': 'wayland-protocols-1-31',
+        'desc': 'wayland-protocols version 1.31+',
+        'deps': 'wayland',
+        'func': check_pkg_config('wayland-protocols >= 1.31'),
+    } , {
+        'name': 'wayland-protocols-1-32',
+        'desc': 'wayland-protocols version 1.32+',
+        'deps': 'wayland',
+        'func': check_pkg_config('wayland-protocols >= 1.32'),
     } , {
         'name': 'memfd_create',
         'desc': "Linux's memfd_create()",
         'deps': 'wayland',
         'func': check_statement('sys/mman.h',
                                 'memfd_create("mpv", MFD_CLOEXEC | MFD_ALLOW_SEALING)')
+    }, {
+        'name': '--dmabuf-wayland',
+        'desc': 'dmabuf-wayland video output',
+        'deps': 'wayland && memfd_create && drm',
+        'func': check_true,
     } , {
         'name': '--x11',
         'desc': 'X11',
@@ -625,8 +658,9 @@ video_output_features = [
         'desc': 'OpenGL ANGLE headers',
         'deps': 'os-win32 || os-cygwin',
         'groups': [ 'gl' ],
-        'func': check_statement(['EGL/egl.h', 'EGL/eglext.h'],
-                                'int x = EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE')
+        'func': check_statement(['EGL/egl.h', 'EGL/eglext.h', 'EGL/eglext_angle.h'],
+                                'int x = EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE; '
+                                'PFNEGLCREATEDEVICEANGLEPROC y = NULL')
     } , {
         'name': '--egl-angle-lib',
         'desc': 'OpenGL Win32 ANGLE Library',
@@ -634,8 +668,6 @@ video_output_features = [
         'groups': [ 'gl' ],
         'func': check_statement(['EGL/egl.h'],
                                 'eglCreateWindowSurface(0, 0, 0, 0)',
-                                cflags=['-DGL_APICALL=', '-DEGLAPI=',
-                                        '-DANGLE_NO_ALIASES', '-DANGLE_EXPORT='],
                                 lib=['EGL', 'GLESv2', 'dxguid', 'd3d9',
                                      'gdi32', 'stdc++'])
     }, {
@@ -669,11 +701,6 @@ video_output_features = [
         'desc': 'VAAPI (Wayland support)',
         'deps': 'vaapi && gl-wayland',
         'func': check_pkg_config('libva-wayland', '>= 1.1.0'),
-    }, {
-        'name': 'dmabuf-wayland',
-        'desc': 'Wayland dmabuf support',
-        'deps': 'wayland && memfd_create && (vaapi-wayland || drm)',
-        'func': check_true,
     }, {
         'name': '--vaapi-drm',
         'desc': 'VAAPI (DRM/EGL support)',
@@ -769,16 +796,38 @@ video_output_features = [
         'desc': 'libplacebo support',
         'func': check_pkg_config('libplacebo >= 4.157.0'),
     }, {
-        'name': 'libplacebo-next',
-        'desc': 'libplacebo v4.202+, needed for vo_gpu_next',
+        'name': '--libplacebo-next',
+        'desc': 'libplacebo v5.266.0+, needed for vo_gpu_next',
         'deps': 'libplacebo',
-        'func': check_preprocessor('libplacebo/config.h', 'PL_API_VER >= 202',
+        'func': check_preprocessor('libplacebo/config.h', 'PL_API_VER >= 266',
+                                   use='libplacebo'),
+    }, {
+        'name': 'libplacebo-decode',
+        'desc': 'libplacebo v6.278.0+, needed for Vulkan video decode',
+        'deps': 'libplacebo',
+        'func': check_preprocessor('libplacebo/config.h', 'PL_API_VER >= 278',
                                    use='libplacebo'),
     }, {
         'name': '--vulkan',
         'desc':  'Vulkan context support',
         'deps': 'libplacebo',
         'func': check_pkg_config('vulkan'),
+    }, {
+        'name': 'vk-khr-display',
+        'desc': "VK_KHR_display extension",
+        'deps': 'vulkan',
+        'func': check_statement('vulkan/vulkan_core.h', 'vkCreateDisplayPlaneSurfaceKHR(0, 0, 0, 0)',
+                                use='vulkan')
+    }, {
+        'name': 'vulkan-decode-headers',
+        'desc': 'Vulkan headers with decode support',
+        'deps': 'vulkan',
+        'func': check_pkg_config('vulkan', '>= 1.3.238'),
+    }, {
+        'name': '--vulkan-interop',
+        'desc': 'Vulkan graphics interop',
+        'deps': 'vulkan-decode-headers && libplacebo-decode',
+        'func': check_pkg_config('libavutil', '>= 58.11.100'),
     }, {
         'name': 'vaapi-libplacebo',
         'desc': 'VAAPI libplacebo',
@@ -809,6 +858,11 @@ video_output_features = [
         'desc': 'drmIsKMS() function',
         'deps': 'drm',
         'func': check_pkg_config('libdrm', '>= 2.4.105'),
+    }, {
+        'name': 'posix-shm',
+        'desc': "POSIX shared memory API",
+        'deps': 'posix',
+        'func': check_statement('sys/mman.h', 'shm_open("",0,0)')
     }
 ]
 
@@ -842,7 +896,7 @@ hwaccel_features = [
     }, {
         'name': 'ffnvcodec',
         'desc': 'CUDA Headers and dynamic loader',
-        'func': check_pkg_config('ffnvcodec >= 8.2.15.7'),
+        'func': check_pkg_config('ffnvcodec >= 11.1.5.1'),
     }, {
         'name': '--cuda-hwaccel',
         'desc': 'CUDA acceleration',
@@ -1000,7 +1054,7 @@ def configure(ctx):
 
     ctx.add_os_flags('LIBRARY_PATH')
 
-    ctx.load('compiler_c')
+    ctx.load('compiler_c python')
     ctx.load('waf_customizations')
     ctx.load('dependencies')
     ctx.load('detections.compiler_swift')
@@ -1032,6 +1086,8 @@ def configure(ctx):
     ctx.parse_dependencies(video_output_features)
     ctx.parse_dependencies(hwaccel_features)
 
+    ctx.define('PLATFORM', check_platform(ctx))
+
     if ctx.options.SWIFT_FLAGS:
         ctx.env.SWIFT_FLAGS.extend(split(ctx.options.SWIFT_FLAGS))
 
@@ -1053,18 +1109,15 @@ def configure(ctx):
         ctx.env.LINKFLAGS += ['-rdynamic']
 
     ctx.store_dependencies_lists()
+    from waflib import Logs
+    Logs.error("WARNING: Building mpv with waf is deprecated and will be removed the future! It is recommended to switch to meson as soon as possible.")
 
 def __write_version__(ctx):
-    ctx.env.VERSIONH_ST = '--versionh="%s"'
-    ctx.env.CWD_ST = '--cwd="%s"'
-    ctx.env.VERSIONSH_CWD = [ctx.srcnode.abspath()]
-
     ctx(
-        source = 'version.sh',
+        source = 'version.py',
         target = 'generated/version.h',
-        rule   = 'sh ${SRC} ${CWD_ST:VERSIONSH_CWD} ${VERSIONH_ST:TGT}',
-        always = True,
-        update_outputs = True)
+        rule   = '${PYTHON} ${SRC} ${TGT}',
+        always = True)
 
 def build(ctx):
     if ctx.options.variant not in ctx.all_envs:

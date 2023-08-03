@@ -118,9 +118,8 @@ struct vo_x11_state {
     bool size_changed_during_fs;
     bool pos_changed_during_fs;
 
-    /* The geometry/autofit option was changed while the window was maximized.
-     * Wait until the state changes to resize. */
-    bool pending_geometry_change;
+    /* One of the autofit/geometry options changed at runtime. */
+    bool geometry_change;
 
     XComposeStatus compose_status;
 
@@ -142,7 +141,7 @@ struct vo_x11_state {
     Atom icc_profile_property;
 };
 
-int vo_x11_init(struct vo *vo);
+bool vo_x11_init(struct vo *vo);
 void vo_x11_uninit(struct vo *vo);
 void vo_x11_check_events(struct vo *vo);
 bool vo_x11_screen_is_composited(struct vo *vo);

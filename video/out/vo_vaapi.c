@@ -28,7 +28,6 @@
 #include <X11/Xutil.h>
 #include <va/va_x11.h>
 
-#include "config.h"
 #include "common/msg.h"
 #include "video/out/vo.h"
 #include "video/mp_image_pool.h"
@@ -82,7 +81,7 @@ struct priv {
     int                      output_surface;
     int                      visible_surface;
     int                      scaling;
-    int                      force_scaled_osd;
+    bool                     force_scaled_osd;
 
     VAImageFormat            osd_format; // corresponds to OSD_VA_FORMAT
     struct vaapi_osd_part    osd_part;
@@ -685,6 +684,10 @@ static void draw_osd(struct vo *vo)
         int rw = mp_rect_w(*rc);
         int rh = mp_rect_h(*rc);
 
+        // reduce width of last slice to prevent overflow
+        if (n == num_mod_rc - 1)
+            rw = w - rc->x0;
+
         void *src = mp_image_pixel_ptr(osd, 0, rc->x0, rc->y0);
         void *dst = vaimg.planes[0] + rc->y0 * vaimg.stride[0] + rc->x0 * 4;
 
@@ -789,6 +792,7 @@ static int preinit(struct vo *vo)
     if (!p->image_formats)
         goto fail;
 
+    p->mpvaapi->hwctx.hw_imgfmt = IMGFMT_VAAPI;
     p->pool = mp_image_pool_new(p);
     va_pool_set_allocator(p->pool, p->mpvaapi, VA_RT_FORMAT_YUV420);
 
@@ -874,7 +878,7 @@ const struct vo_driver video_out_vaapi = {
             {"fast", VA_FILTER_SCALING_FAST},
             {"hq", VA_FILTER_SCALING_HQ},
             {"nla", VA_FILTER_SCALING_NL_ANAMORPHIC})},
-        {"scaled-osd", OPT_FLAG(force_scaled_osd)},
+        {"scaled-osd", OPT_BOOL(force_scaled_osd)},
         {0}
     },
     .options_prefix = "vo-vaapi",

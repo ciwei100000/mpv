@@ -13,6 +13,7 @@ libmpv.so.2 libmpv2 #MINVER#
  mpv_create@Base 0.4.0
  mpv_create_client@Base 0.8.0
  mpv_create_weak_client@Base 0.29
+ mpv_del_property@Base 0.36
  mpv_destroy@Base 0.29
  mpv_error_string@Base 0.4.0
  mpv_event_name@Base 0.4.0

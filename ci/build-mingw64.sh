@@ -35,6 +35,7 @@ ar = '${AR}'
 strip = '${TARGET}-strip'
 pkgconfig = 'pkg-config'
 windres = '${TARGET}-windres'
+dlltool = '${TARGET}-dlltool'
 [host_machine]
 system = 'windows'
 cpu_family = '${fam}'
@@ -77,7 +78,7 @@ fi
 
 ## zlib
 if [ ! -e "$prefix_dir/lib/libz.dll.a" ]; then
-    ver=1.2.12
+    ver=1.2.13
     gettar "https://zlib.net/fossils/zlib-${ver}.tar.gz"
     pushd zlib-${ver}
     make -fwin32/Makefile.gcc clean
@@ -134,8 +135,8 @@ fi
 
 ## freetype2
 if [ ! -e "$prefix_dir/lib/libfreetype.dll.a" ]; then
-    ver=2.12.1
-    gettar "https://download.savannah.gnu.org/releases/freetype/freetype-${ver}.tar.xz"
+    ver=2.13.0
+    gettar "https://mirror.netcologne.de/savannah/freetype/freetype-${ver}.tar.xz"
     builddir freetype-${ver}
     meson .. --cross-file "$prefix_dir/crossfile"
     makeplusinstall
@@ -144,7 +145,7 @@ fi
 
 ## fribidi
 if [ ! -e "$prefix_dir/lib/libfribidi.dll.a" ]; then
-    ver=1.0.12
+    ver=1.0.13
     gettar "https://github.com/fribidi/fribidi/releases/download/v${ver}/fribidi-${ver}.tar.xz"
     builddir fribidi-${ver}
     meson .. --cross-file "$prefix_dir/crossfile" \
@@ -155,7 +156,7 @@ fi
 
 ## harfbuzz
 if [ ! -e "$prefix_dir/lib/libharfbuzz.dll.a" ]; then
-    ver=5.3.0
+    ver=7.3.0
     gettar "https://github.com/harfbuzz/harfbuzz/releases/download/${ver}/harfbuzz-${ver}.tar.xz"
     builddir harfbuzz-${ver}
     meson .. --cross-file "$prefix_dir/crossfile" \
@@ -200,22 +201,23 @@ rm -rf build
 if [ "$1" = "meson" ]; then
     meson setup build --cross-file "$prefix_dir/crossfile" \
         --buildtype debugoptimized \
-        -D{libmpv,tests}=true -Dlua=luajit \
-        -D{shaderc,spirv-cross,d3d11,libplacebo}=enabled
+        -Dlibmpv=true -Dlua=luajit \
+        -D{shaderc,spirv-cross,d3d11,libplacebo,libplacebo-next}=enabled
 
-    ninja -C build --verbose
+    meson compile -C build
 elif [ "$1" = "waf" ]; then
     PKG_CONFIG=pkg-config ./waf configure \
+        --out=build_waf \
         --enable-libmpv-shared --lua=luajit \
-        --enable-{shaderc,spirv-cross,d3d11,libplacebo,tests}
+        --enable-{shaderc,spirv-cross,d3d11,libplacebo,libplacebo-next}
 
-    ./waf build --verbose
+    ./waf build
 fi
 
 if [ "$2" = pack ]; then
     mkdir -p artifact
     echo "Copying:"
-    cp -pv build/mpv.{com,exe} "$prefix_dir/bin/"*.dll artifact/
+    cp -pv build/generated/mpv.com build/mpv.exe "$prefix_dir/bin/"*.dll artifact/
     # ship everything and the kitchen sink
     shopt -s nullglob
     for file in /usr/lib/gcc/$TARGET/*-posix/*.dll /usr/$TARGET/lib/*.dll; do

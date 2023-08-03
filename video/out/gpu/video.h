@@ -98,6 +98,8 @@ enum tone_mapping {
     TONE_MAPPING_SPLINE,
     TONE_MAPPING_BT_2390,
     TONE_MAPPING_BT_2446A,
+    TONE_MAPPING_ST2094_40,
+    TONE_MAPPING_ST2094_10,
 };
 
 enum tone_mapping_mode {
@@ -111,23 +113,30 @@ enum tone_mapping_mode {
 enum gamut_mode {
     GAMUT_AUTO,
     GAMUT_CLIP,
-    GAMUT_WARN,
+    GAMUT_PERCEPTUAL,
+    GAMUT_RELATIVE,
+    GAMUT_SATURATION,
+    GAMUT_ABSOLUTE,
     GAMUT_DESATURATE,
     GAMUT_DARKEN,
+    GAMUT_WARN,
+    GAMUT_LINEAR,
 };
 
 struct gl_tone_map_opts {
     int curve;
     float curve_param;
     float max_boost;
-    int inverse;
-    float crosstalk;
+    bool inverse;
     int mode;
     int compute_peak;
     float decay_rate;
     float scene_threshold_low;
     float scene_threshold_high;
+    float contrast_recovery;
+    float contrast_smoothness;
     int gamut_mode;
+    bool visualize;
 };
 
 struct gl_video_opts {
@@ -135,39 +144,41 @@ struct gl_video_opts {
     struct scaler_config scaler[4];
     int scaler_lut_size;
     float gamma;
-    int gamma_auto;
+    bool gamma_auto;
     int target_prim;
     int target_trc;
     int target_peak;
+    int target_contrast;
     struct gl_tone_map_opts tone_map;
-    int correct_downscaling;
-    int linear_downscaling;
-    int linear_upscaling;
-    int sigmoid_upscaling;
+    bool correct_downscaling;
+    bool linear_downscaling;
+    bool linear_upscaling;
+    bool sigmoid_upscaling;
     float sigmoid_center;
     float sigmoid_slope;
-    int scaler_resizes_only;
-    int pbo;
+    bool scaler_resizes_only;
+    bool pbo;
     int dither_depth;
     int dither_algo;
     int dither_size;
-    int temporal_dither;
+    bool temporal_dither;
     int temporal_dither_period;
     char *error_diffusion;
     char *fbo_format;
     int alpha_mode;
-    int use_rectangle;
+    bool use_rectangle;
     struct m_color background;
-    int interpolation;
+    bool interpolation;
     float interpolation_threshold;
     int blend_subs;
     char **user_shaders;
     char **user_shader_opts;
-    int deband;
+    bool deband;
     struct deband_opts *deband_opts;
     float unsharp;
     int tex_pad_x, tex_pad_y;
     struct mp_icc_opts *icc_opts;
+    bool shader_cache;
     int early_flush;
     char *shader_cache_dir;
     char *hwdec_interop;
@@ -219,7 +230,8 @@ void gl_video_reset(struct gl_video *p);
 bool gl_video_showing_interpolated_frame(struct gl_video *p);
 
 struct mp_hwdec_devices;
-void gl_video_init_hwdecs(struct gl_video *p, struct mp_hwdec_devices *devs,
+void gl_video_init_hwdecs(struct gl_video *p, struct ra_ctx *ra_ctx,
+                          struct mp_hwdec_devices *devs,
                           bool load_all_by_default);
 struct hwdec_imgfmt_request;
 void gl_video_load_hwdecs_for_img_fmt(struct gl_video *p, struct mp_hwdec_devices *devs,

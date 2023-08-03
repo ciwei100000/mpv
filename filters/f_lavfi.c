@@ -260,8 +260,7 @@ static void precreate_graph(struct lavfi *c, bool first_init)
     c->failed = false;
 
     c->graph = avfilter_graph_alloc();
-    if (!c->graph)
-        abort();
+    MP_HANDLE_OOM(c->graph);
 
     if (mp_set_avopts(c->log, c->graph, c->graph_opts) < 0)
         goto error;
@@ -852,8 +851,7 @@ static struct lavfi *lavfi_alloc(struct mp_filter *parent)
     c->log = f->log;
     c->public.f = f;
     c->tmp_frame = av_frame_alloc();
-    if (!c->tmp_frame)
-        abort();
+    MP_HANDLE_OOM(c->tmp_frame);
 
     return c;
 }
@@ -948,7 +946,7 @@ struct lavfi_user_opts {
     char *filter_name;
     char **filter_opts;
 
-    int fix_pts;
+    bool fix_pts;
 
     char *hwdec_interop;
 };
@@ -1121,7 +1119,7 @@ const struct mp_user_filter_entry af_lavfi = {
         .priv_size = sizeof(OPT_BASE_STRUCT),
         .options = (const m_option_t[]){
             {"graph", OPT_STRING(graph)},
-            {"fix-pts", OPT_FLAG(fix_pts)},
+            {"fix-pts", OPT_BOOL(fix_pts)},
             {"o", OPT_KEYVALUELIST(avopts)},
             {"hwdec_interop",
              OPT_STRING_VALIDATE(hwdec_interop,

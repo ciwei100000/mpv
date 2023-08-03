@@ -461,6 +461,10 @@ Name             Meaning
 ``~~desktop/``   the path to the desktop (win32, macOS)
 ``~~exe_dir/``   win32 only: the path to the directory containing the exe (for
                  config file purposes; ``$MPV_HOME`` overrides it)
+``~~cache/``     the path to application cache data (``~/.cache/mpv/``)
+                 On some platforms, this will be the same as ``~~home/``.
+``~~state/``     the path to application state data (``~/.local/state/mpv/``)
+                 On some platforms, this will be the same as ``~~home/``.
 ``~~old_home/``  do not use
 ================ ===============================================================
 
@@ -793,9 +797,10 @@ Conditional auto profiles
 
 Profiles which have the ``profile-cond`` option set are applied automatically
 if the associated condition matches (unless auto profiles are disabled). The
-option takes a string, which is interpreted as Lua condition. If evaluating the
-expression returns true, the profile is applied, if it returns false, it is
-ignored. This Lua code execution is not sandboxed.
+option takes a string, which is interpreted as Lua expression. If the
+expression evaluates as truthy, the profile is applied. If the expression
+errors or evaluates as falsy, the profile is not applied. This Lua code
+execution is not sandboxed.
 
 Any variables in condition expressions can reference properties. If an
 identifier is not already defined by Lua or mpv, it is interpreted as property.
@@ -816,13 +821,13 @@ cause errors if used in expressions. These are logged in verbose mode, and the
 expression is considered to be false.
 
 Whenever a property referenced by a profile condition changes, the condition
-is re-evaluated. If the return value of the condition changes from false or
-error to true, the profile is applied.
+is re-evaluated. If the return value of the condition changes from falsy or
+error to truthy, the profile is applied.
 
-This mechanism tries to "unapply" profiles once the condition changes from true
-to false. If you want to use this, you need to set ``profile-restore`` for the
-profile. Another possibility it to create another profile with an inverse
-condition to undo the other profile.
+This mechanism tries to "unapply" profiles once the condition changes from
+truthy to falsy or error. If you want to use this, you need to set
+``profile-restore`` for the profile. Another possibility it to create another
+profile with an inverse condition to undo the other profile.
 
 Recursive profiles can be used. But it is discouraged to reference other
 conditional profiles in a conditional profile, since this can lead to tricky
@@ -838,6 +843,14 @@ and unintuitive behavior.
         profile-desc=HD video sucks
         profile-cond=width >= 1280
         hue=-50
+
+    Make only videos containing "youtube" or "youtu.be" in their path brighter:
+
+    ::
+
+        [youtube]
+        profile-cond=path:find('youtu%.?be')
+        gamma=20
 
     If you want the profile to be reverted if the condition goes to false again,
     you can set ``profile-restore``:
@@ -1526,12 +1539,25 @@ input command can take an exit code: in this case, that exit code is returned.
 FILES
 =====
 
+Note that this section assumes Linux/BSD. On other platforms the paths may be different.
 For Windows-specifics, see `FILES ON WINDOWS`_ section.
 
 ``/usr/local/etc/mpv/mpv.conf``
     mpv system-wide settings (depends on ``--prefix`` passed to configure - mpv
     in default configuration will use ``/usr/local/etc/mpv/`` as config
     directory, while most Linux distributions will set it to ``/etc/mpv/``).
+
+``~/.cache/mpv``
+    The standard cache directory. Certain options within mpv may cause it to write
+    cache files to disk. This can be overridden by environment variables, in
+    ascending order:
+
+    :1: If ``$XDG_CACHE_HOME`` is set, then the derived cache directory
+        will be ``$XDG_CACHE_HOME/mpv``.
+    :2: If ``$MPV_HOME`` is set, then the derived cache directory will be
+       ``$MPV_HOME``.
+
+    If the directory does not exist, mpv will try to create it automatically.
 
 ``~/.config/mpv``
     The standard configuration directory. This can be overridden by environment
@@ -1547,7 +1573,9 @@ For Windows-specifics, see `FILES ON WINDOWS`_ section.
 
 ``~/.mpv/``
     The original (pre 0.5.0) configuration directory. It will continue to be
-    read if present.
+    read if present. If this directory is present and the standard configuration
+    directory is not present, then cache files and watch later config files will
+    also be written to this directory.
 
     If both this directory and the standard configuration directory are
     present, configuration will be read from both with the standard
@@ -1572,11 +1600,8 @@ For Windows-specifics, see `FILES ON WINDOWS`_ section.
     fallback subtitle font
 
 ``~/.config/mpv/fonts/``
-    Font files in this directory are used by mpv/libass for subtitles. Useful
-    if you do not want to install fonts to your system. Note that files in this
-    directory are loaded into memory before being used by mpv. If you have a
-    lot of fonts, consider using fonts.conf (see above) to include additional
-    fonts, which is more memory-efficient.
+    Default location for ``--sub-fonts-dir`` (see `Subtitles`_) and
+    ``--osd-fonts-dir`` (see `OSD`_).
 
 ``~/.config/mpv/scripts/``
     All files in this directory are loaded as if they were passed to the
@@ -1586,10 +1611,17 @@ For Windows-specifics, see `FILES ON WINDOWS`_ section.
 
     See `Script location`_ for details.
 
-``~/.config/mpv/watch_later/``
+``~/.local/state/mpv/watch_later/``
     Contains temporary config files needed for resuming playback of files with
     the watch later feature. See for example the ``Q`` key binding, or the
     ``quit-watch-later`` input command.
+
+    This can be overridden by environment variables, in ascending order:
+
+    :1: If ``$XDG_STATE_HOME`` is set, then the derived watch later directory
+        will be ``$XDG_STATE_HOME/mpv/watch_later``.
+    :2: If ``$MPV_HOME`` is set, then the derived watch later directory will be
+       ``$MPV_HOME/watch_later``.
 
     Each file is a small config file which is loaded if the corresponding media
     file is loaded. It contains the playback position and some (not necessarily
@@ -1621,16 +1653,18 @@ You can find the exact path by running ``echo %APPDATA%\mpv\mpv.conf`` in cmd.ex
 Other config files (such as ``input.conf``) are in the same directory. See the
 `FILES`_ section above.
 
+The cache directory is located at ``%LOCALAPPDATA%/mpv``.
+
 The environment variable ``$MPV_HOME`` completely overrides these, like on
 UNIX.
 
 If a directory named ``portable_config`` next to the mpv.exe exists, all
-config will be loaded from this directory only. Watch later config files are
-written to this directory as well. (This exists on Windows only and is redundant
-with ``$MPV_HOME``. However, since Windows is very scripting unfriendly, a
-wrapper script just setting ``$MPV_HOME``, like you could do it on other
-systems, won't work. ``portable_config`` is provided for convenience to get
-around this restriction.)
+config will be loaded from this directory only. Watch later config files and
+cache files are written to this directory as well. (This exists on Windows
+only and is redundant with ``$MPV_HOME``. However, since Windows is very
+scripting unfriendly, a wrapper script just setting ``$MPV_HOME``, like you
+could do it on other systems, won't work. ``portable_config`` is provided for
+convenience to get around this restriction.)
 
 Config files located in the same directory as ``mpv.exe`` are loaded with
 lower priority. Some config files are loaded only once, which means that
@@ -1644,3 +1678,11 @@ future.
 
 Note that mpv likes to mix ``/`` and ``\`` path separators for simplicity.
 kernel32.dll accepts this, but cmd.exe does not.
+
+FILES ON MACOS
+==============
+
+On macOS the watch later directory is located at ``~/.config/mpv/watch_later/``
+and the cache directory is set to ``~/Library/Caches/io.mpv/``. These directories
+can't be overwritten by enviroment variables.
+Everything else is the same as `FILES`_.

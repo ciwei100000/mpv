@@ -6,7 +6,7 @@ import os
 
 __all__ = ["check_pthreads", "check_iconv", "check_lua",
            "check_cocoa", "check_wl_protocols", "check_swift",
-           "check_egl_provider"]
+           "check_egl_provider", "check_platform"]
 
 pthreads_program = load_fragment('pthreads.c')
 
@@ -102,7 +102,7 @@ def check_lua(ctx, dependency_identifier):
 
 def check_wl_protocols(ctx, dependency_identifier):
     def fn(ctx, dependency_identifier):
-        ret = check_pkg_config_datadir("wayland-protocols", ">= 1.15")
+        ret = check_pkg_config_datadir("wayland-protocols", ">= 1.25")
         ret = ret(ctx, dependency_identifier)
         if ret != None:
             ctx.env.WL_PROTO_DIR = ret.split()[0]
@@ -168,3 +168,13 @@ def check_egl_provider(minVersion=None, name='egl', check=None):
             else:
                 return False
     return fn
+
+# Strictly for matching the platform names to what
+# the meson build calls them.
+def check_platform(ctx):
+    if ctx.env.DEST_OS == "win32":
+        return "windows"
+    elif ctx.dependency_satisfied("android"):
+        return "android"
+    else:
+        return ctx.env.DEST_OS
