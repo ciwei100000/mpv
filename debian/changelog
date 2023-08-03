@@ -1,3 +1,9 @@
+mpv (0.36.0-1-nonfree) unstable; urgency=medium
+
+  * Merge branch '0.36.0-1' into ciwei100000
+
+ -- Xuqing Liu <ciwei100000@gmail.com>  Thu, 3 Aug 2023 06:54:41 -0700
+
 mpv (0.36.0-1) unstable; urgency=medium
 
   * New upstream version 0.36.0
